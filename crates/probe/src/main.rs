@@ -24,7 +24,8 @@ usage: razer-probe <command>
   dump <file>                   info + actuation of every key in every profile
   mode <0|3>                    device mode: 0 hardware, 3 driver (not persisted)
   actuate <profile> <key> <low> <high>  WRITE thresholds of one key (normal layer)
-  stream [secs]                 raw input reports from MI_01 vendor collections";
+  stream [secs]                 raw input reports from MI_01 vendor collections
+  set <cls> <id> <size> [hex..] WRITE raw command";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -60,6 +61,7 @@ fn run(args: &[String]) -> Result<()> {
         "dump" => return dump(&dev, rest),
         "mode" => set_mode(&dev, rest)?,
         "actuate" => actuate(&dev, rest)?,
+        "set" => raw_set(&dev, rest)?,
         _ => return Err(USAGE.into()),
     };
     print!("{out}");
@@ -306,4 +308,15 @@ fn stream(api: &HidApi, a: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn raw_set(dev: &HidDevice, a: &[String]) -> Result<String> {
+    if a.len() < 3 {
+        return Err(USAGE.into());
+    }
+    let cmd = Command::new(parse_hex(&a[0])?, parse_hex(&a[1])?);
+    let size = parse_hex(&a[2])?;
+    let args = a[3..].iter().map(|s| parse_hex(s)).collect::<Result<Vec<_>>>()?;
+    let r = exchange(dev, cmd, size, &args)?;
+    Ok(format!("{cmd} ok, data: {}\n", hex(r.data())))
 }
