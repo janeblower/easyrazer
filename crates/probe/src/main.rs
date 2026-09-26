@@ -21,7 +21,10 @@ usage: razer-probe <command>
   info                          firmware, serial, device mode
   get <cls> <id> <size> [hex..] raw getter (id must have bit 7 set)
   actuation <profile> [keys..]  per-key assignment and actuation thresholds
-  dump <file>                   info + actuation of every key in every profile";
+  dump <file>                   info + actuation of every key in every profile
+  mode <0|3>                    device mode: 0 hardware, 3 driver (not persisted)
+  actuate <profile> <key> <low> <high>  WRITE thresholds of one key (normal layer)
+  stream [secs]                 raw input reports from MI_01 vendor collections";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -42,6 +45,9 @@ fn run(args: &[String]) -> Result<()> {
     };
     let rest = &args[1..];
     let api = HidApi::new().map_err(|e| e.to_string())?;
+    if cmd == "stream" {
+        return stream(&api, rest);
+    }
     if cmd == "list" {
         return list(&api);
     }
@@ -52,6 +58,8 @@ fn run(args: &[String]) -> Result<()> {
         "get" => raw_get(&dev, rest)?,
         "actuation" => actuation(&dev, profile_arg(rest)?, &keys_arg(&rest[1..])?)?,
         "dump" => return dump(&dev, rest),
+        "mode" => set_mode(&dev, rest)?,
+        "actuate" => actuate(&dev, rest)?,
         _ => return Err(USAGE.into()),
     };
     print!("{out}");
@@ -220,5 +228,82 @@ fn dump(dev: &HidDevice, a: &[String]) -> Result<()> {
     }
     std::fs::write(file, &out).map_err(|e| format!("{file}: {e}"))?;
     println!("wrote {file}");
+    Ok(())
+}
+
+fn set_mode(dev: &HidDevice, a: &[String]) -> Result<String> {
+    let m: u8 = match a.first().map(String::as_str) {
+        Some("0") => 0x00,
+        Some("3") => 0x03,
+        _ => return Err(USAGE.into()),
+    };
+    exchange(dev, Command::new(0x00, 0x04), 2, &[m, 0])?;
+    let r = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
+    Ok(format!("mode {}\n", hex(&r.args[..2])))
+}
+
+/// Read-modify-write of one key's thresholds in the normal layer; the mapping is kept as is.
+fn actuate(dev: &HidDevice, a: &[String]) -> Result<String> {
+    let [profile, key, low, high] = a else {
+        return Err(USAGE.into());
+    };
+    let profile: u8 = profile.parse().map_err(|_| "profile must be a number")?;
+    let key = keys_arg(std::slice::from_ref(key))?[0];
+    let low: u8 = low.parse().map_err(|_| "low must be 0..=255")?;
+    let high: u8 = high.parse().map_err(|_| "high must be 0..=255")?;
+
+    let read = |dev: &HidDevice| -> Result<analog::KeyAssignment> {
+        let r = exchange(
+            dev,
+            analog::GET_KEY_ASSIGNMENT,
+            analog::KEY_ASSIGNMENT_SIZE,
+            &analog::get_args(profile, key, Mode::Normal),
+        )?;
+        analog::parse(r.data()).ok_or_else(|| format!("short reply {}", hex(r.data())))
+    };
+    let before = read(dev)?;
+    let after = analog::KeyAssignment { threshold_low: low, threshold_high: high, ..before.clone() };
+    exchange(dev, analog::SET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &analog::set_args(&after))?;
+    let now = read(dev)?;
+    Ok(format!(
+        "before {}\nafter  {}\n",
+        hex(&analog::set_args(&before)),
+        hex(&analog::set_args(&now))
+    ))
+}
+
+/// Prints raw input reports from the vendor collections of MI_01 for a few seconds.
+fn stream(api: &HidApi, a: &[String]) -> Result<()> {
+    let secs: u64 = a.first().map_or(Ok(10), |s| s.parse()).map_err(|_| "seconds must be a number")?;
+    let devs: Vec<(String, HidDevice)> = api
+        .device_list()
+        .filter(|d| d.vendor_id() == VID && d.product_id() == PID && d.interface_number() == 1 && d.usage() == 0)
+        .filter_map(|d| {
+            let name = d.path().to_string_lossy();
+            let col = name.split('&').find(|p| p.starts_with("Col")).unwrap_or("?").to_string();
+            match d.open_device(api) {
+                Ok(h) => Some((col, h)),
+                Err(e) => {
+                    eprintln!("{col}: {e}");
+                    None
+                }
+            }
+        })
+        .collect();
+    if devs.is_empty() {
+        return Err("no MI_01 vendor collections opened".into());
+    }
+    let end = std::time::Instant::now() + Duration::from_secs(secs);
+    let start = std::time::Instant::now();
+    let mut buf = [0u8; 64];
+    while std::time::Instant::now() < end {
+        for (col, d) in &devs {
+            if let Ok(n) = d.read_timeout(&mut buf, 1) {
+                if n > 0 {
+                    println!("{:6} {col} {}", start.elapsed().as_millis(), hex(&buf[..n]));
+                }
+            }
+        }
+    }
     Ok(())
 }
