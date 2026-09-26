@@ -1,0 +1,8 @@
+[package]
+name = "razer-probe"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+razer-core = { path = "../core" }
+hidapi = "2"
