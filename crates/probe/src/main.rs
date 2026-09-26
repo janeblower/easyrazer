@@ -317,6 +317,10 @@ fn raw_set(dev: &HidDevice, a: &[String]) -> Result<String> {
     let cmd = Command::new(parse_hex(&a[0])?, parse_hex(&a[1])?);
     let size = parse_hex(&a[2])?;
     let args = a[3..].iter().map(|s| parse_hex(s)).collect::<Result<Vec<_>>>()?;
+    // Mode 0x01 drops the device off the bus until replugged (re-enumerates as 1532:110E).
+    if cmd == Command::new(0x00, 0x04) && !matches!(args.first(), Some(0x00 | 0x03)) {
+        return Err("device mode other than 0 or 3 is refused; use `mode`".into());
+    }
     let r = exchange(dev, cmd, size, &args)?;
     Ok(format!("{cmd} ok, data: {}\n", hex(r.data())))
 }
