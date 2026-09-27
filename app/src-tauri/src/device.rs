@@ -14,7 +14,7 @@ use razer_core::transport::Error;
 use razer_core::{control, layout};
 use serde::Serialize;
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub const SYNAPSE_RUNNING: &str = "Запущен Synapse — закройте его, включая значок в трее";
 pub const NO_KEYBOARD: &str = "Поддерживаемая клавиатура Razer не найдена";

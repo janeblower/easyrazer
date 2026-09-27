@@ -9,6 +9,7 @@ pub const VID: u16 = 0x1532;
 
 const USAGE_PAGE_DESKTOP: u16 = 0x01;
 const USAGE_KEYBOARD: u16 = 0x06;
+const USAGE_PAGE_LAMP_ARRAY: u16 = 0x59;
 
 pub struct HidTransport {
     dev: HidDevice,
@@ -62,4 +63,15 @@ pub fn unsupported_keyboard(api: &HidApi) -> Option<u16> {
                 && devices::by_pid(d.product_id()).is_none()
         })
         .map(|d| d.product_id())
+}
+
+/// Hands the lamps back to the firmware (`on`) or to the host. Going from host to firmware
+/// restarts the factory spectrum, so callers re-send their effect afterwards.
+pub fn set_autonomous(api: &HidApi, d: &DeviceSpec, on: bool) -> Result<(), Error> {
+    let report = d.lamp_array.as_ref().ok_or_else(|| Error::Io(format!("{}: нет LampArray", d.name)))?.control_report;
+    let info = api
+        .device_list()
+        .find(|i| i.vendor_id() == d.vid && i.product_id() == d.pid && i.usage_page() == USAGE_PAGE_LAMP_ARRAY)
+        .ok_or_else(|| Error::Io("LampArray collection not found".into()))?;
+    info.open_device(api).map_err(io)?.send_feature_report(&[report, on as u8]).map_err(io)
 }

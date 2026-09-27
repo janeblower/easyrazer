@@ -701,6 +701,7 @@ dependencies = [
  "hidapi",
  "razer-core",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]

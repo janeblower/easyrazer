@@ -2,6 +2,8 @@
 
 mod commands;
 mod device;
+mod dynamic_lighting;
+mod settings;
 
 use std::sync::Mutex;
 
