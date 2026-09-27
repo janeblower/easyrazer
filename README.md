@@ -37,7 +37,7 @@ bun tauri dev      # запуск
 bun tauri build    # target/release/easyrazer.exe
 ```
 
-Тесты: `cargo test`. Тест на реальной клавиатуре (Synapse закрыт):
+Тесты: `cargo test`, фронтенд: `bun run lint` (в `app`). Тест на реальной клавиатуре (Synapse закрыт):
 `cargo test -p easyrazer -- --ignored`.
 
 ## Структура
