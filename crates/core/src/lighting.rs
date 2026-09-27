@@ -198,7 +198,10 @@ mod tests {
             (fx("breathing_random"), hex("02 00 00 00")),
             (fx("spectrum"), hex("03 00 00 00")),
             (Effect { dir: Some("right".into()), speed: Some(0x28), ..fx("wave") }, hex("04 02 28 00")),
-            (Effect { speed: Some(2), rgb1: Some(RED), ..fx("reactive") }, hex("05 00 02 01 FF 00 00")),
+            (Effect { rgb1: Some(RED), ..fx("reactive_key_one") }, hex("05 00 02 01 FF 00 00")),
+            (fx("reactive_key_random"), hex("05 00 02 00")),
+            (Effect { rgb1: Some(RED), ..fx("reactive_ripple_one") }, hex("06 00 02 01 FF 00 00")),
+            (fx("reactive_ripple_random"), hex("06 00 02 00")),
             (Effect { speed: Some(2), ..fx("starlight_random") }, hex("07 00 02 00")),
             (Effect { speed: Some(2), rgb1: Some(RED), ..fx("starlight_one") }, hex("07 00 02 01 FF 00 00")),
             (
@@ -234,7 +237,7 @@ mod tests {
     fn rejects_bad_effects_before_touching_the_device() {
         let kb = FakeKeyboard::new(&[]);
         let bad = [
-            Effect { speed: Some(5), rgb1: Some(RED), ..fx("reactive") },
+            Effect { dir: Some("left".into()), speed: Some(0), ..fx("wave") },
             Effect { speed: Some(0), ..fx("starlight_random") },
             Effect { dir: Some("up".into()), speed: Some(1), ..fx("wave") },
             fx("static"),

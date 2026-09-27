@@ -9,7 +9,9 @@
     "led": "05",
     "effects": [
       "off", "static", "breathing_one", "breathing_two", "breathing_random", "spectrum",
-      "wave", "reactive", "starlight_random", "starlight_one", "starlight_two"
+      "wave",
+      "reactive_key_one", "reactive_key_random", "reactive_ripple_one", "reactive_ripple_random",
+      "starlight_random", "starlight_one", "starlight_two"
     ]
   },
   "lamp_array": { "control_report": "06" }

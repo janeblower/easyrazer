@@ -12,7 +12,10 @@
     "breathing_random": { "bytes": "02 00 00 00" },
     "spectrum": { "bytes": "03 00 00 00" },
     "wave": { "bytes": "04 {dir} {speed} 00", "dir": { "left": 1, "right": 2 }, "speed": [1, 255], "fast": "low" },
-    "reactive": { "bytes": "05 00 {speed} 01 {rgb1}", "speed": [1, 4], "fast": "low" },
+    "reactive_key_one": { "bytes": "05 00 02 01 {rgb1}" },
+    "reactive_key_random": { "bytes": "05 00 02 00" },
+    "reactive_ripple_one": { "bytes": "06 00 02 01 {rgb1}" },
+    "reactive_ripple_random": { "bytes": "06 00 02 00" },
     "starlight_random": { "bytes": "07 00 {speed} 00", "speed": [1, 3], "fast": "low" },
     "starlight_one": { "bytes": "07 00 {speed} 01 {rgb1}", "speed": [1, 3], "fast": "low" },
     "starlight_two": { "bytes": "07 00 {speed} 02 {rgb1} {rgb2}", "speed": [1, 3], "fast": "low" }
