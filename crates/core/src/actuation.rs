@@ -156,6 +156,16 @@ mod tests {
     }
 
     #[test]
+    fn unplugging_mid_apply_fails_the_remaining_keys() {
+        let mut kb = FakeKeyboard::new(&[A, S, W]);
+        kb.unplug_after = Some(4);
+        let r = apply(&kb, 1, &[(A, 2.0), (S, 2.0), (W, 2.0)]);
+        assert!(matches!(r[0], (A, Outcome::Ok(_))), "{r:?}");
+        assert!(matches!(r[1], (S, Outcome::Failed(Error::Io(_)))), "{r:?}");
+        assert!(matches!(r[2], (W, Outcome::Failed(Error::Io(_)))), "{r:?}");
+    }
+
+    #[test]
     fn empty_changes_send_nothing() {
         let kb = FakeKeyboard::new(&[A]);
         assert!(apply(&kb, 1, &[]).is_empty());

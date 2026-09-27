@@ -20,6 +20,8 @@ pub struct FakeKeyboard {
     /// `02:12` for these keys answers "ok" but stores nothing.
     pub ignored_writes: BTreeSet<u8>,
     pub unplugged: Cell<bool>,
+    /// Unplugs itself once this many commands have been sent.
+    pub unplug_after: Option<usize>,
     pub sent: RefCell<Vec<Command>>,
     reply: RefCell<Report>,
 }
@@ -50,6 +52,7 @@ impl FakeKeyboard {
             failing_writes: BTreeSet::new(),
             ignored_writes: BTreeSet::new(),
             unplugged: Cell::new(false),
+            unplug_after: None,
             sent: RefCell::new(Vec::new()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
@@ -91,6 +94,9 @@ impl FakeKeyboard {
 
 impl Transport for FakeKeyboard {
     fn send_feature(&self, r: &Report) -> Result<(), Error> {
+        if self.unplug_after.is_some_and(|n| self.sent.borrow().len() >= n) {
+            self.unplugged.set(true);
+        }
         if self.unplugged.get() {
             return Err(Error::Io("unplugged".into()));
         }
