@@ -1,0 +1,16 @@
+{
+  "name": "Razer Huntsman V2 Analog",
+  "vid": "1532",
+  "pid": "0266",
+  "control_interface": 3,
+  "tid": "1F",
+  "lighting": {
+    "protocol": "extended",
+    "led": "05",
+    "effects": [
+      "off", "static", "breathing_one", "breathing_two", "breathing_random", "spectrum",
+      "wave", "reactive", "starlight_random", "starlight_one", "starlight_two"
+    ]
+  },
+  "lamp_array": { "control_report": "06" }
+}

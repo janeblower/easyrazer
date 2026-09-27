@@ -3,6 +3,7 @@
 pub mod actuation;
 pub mod analog;
 pub mod control;
+pub mod devices;
 #[cfg(test)]
 mod fake;
 #[cfg(feature = "hid")]
