@@ -52,7 +52,7 @@ function keyClass(k: KeyView) {
     : k.editable
       ? "bg-key cursor-pointer"
       : "bg-key-off text-muted cursor-default";
-  return [border, look, k.round ? "rounded-full !items-center !justify-center" : "rounded-md", !k.label && "!p-0"];
+  return [border, look, k.round ? "rounded-full !items-center !justify-center" : "rounded-md", props.colors && !k.label && "!p-0"];
 }
 
 // Painted keys keep their label readable on light and dark colors.
