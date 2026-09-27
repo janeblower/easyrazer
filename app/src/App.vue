@@ -213,7 +213,7 @@ onUnmounted(() => {
 <template>
   <main class="p-4 flex flex-col gap-4">
     <nav class="flex gap-1">
-      <button :class="tabClass('actuation')" @click="tab = 'actuation'">Актуация</button>
+      <button :class="tabClass('actuation')" @click="tab = 'actuation'">Срабатывание</button>
       <button :class="tabClass('lighting')" @click="tab = 'lighting'">Подсветка</button>
       <button :class="tabClass('settings')" @click="tab = 'settings'">Настройки</button>
     </nav>
