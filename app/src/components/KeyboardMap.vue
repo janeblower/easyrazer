@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { KeyMap, KeyView } from "../types";
+import type { KeyMap, KeyView, Rgb } from "../types";
 
 interface Band {
   x0: number;
@@ -9,14 +9,19 @@ interface Band {
   y1: number;
 }
 
-const props = defineProps<{
-  layout: KeyView[];
-  baseline: KeyMap<number>;
-  edits: KeyMap<number>;
-  errors: KeyMap<string>;
-  unsaved: Set<number>;
-  selection: Set<number>;
-}>();
+// With `colors` the keys are painted instead of showing press points.
+const props = withDefaults(
+  defineProps<{
+    layout: KeyView[];
+    baseline?: KeyMap<number>;
+    edits?: KeyMap<number>;
+    errors?: KeyMap<string>;
+    unsaved?: Set<number>;
+    colors?: KeyMap<Rgb>;
+    selection: Set<number>;
+  }>(),
+  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined },
+);
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
 
 const U = 50;
@@ -40,8 +45,23 @@ const bandStyle = computed(() => {
 });
 
 function keyClass(k: KeyView) {
-  const border = k.key in props.errors ? "border-error" : props.selection.has(k.key) ? "border-accent" : "border-transparent";
-  return [border, k.editable ? "bg-key cursor-pointer" : "bg-key-off text-muted cursor-default"];
+  const selected = props.selection.has(k.key);
+  const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
+  const look = props.colors
+    ? ["cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
+    : k.editable
+      ? "bg-key cursor-pointer"
+      : "bg-key-off text-muted cursor-default";
+  return [border, look, k.round ? "rounded-full !items-center !justify-center" : "rounded-md", !k.label && "!p-0"];
+}
+
+// Painted keys keep their label readable on light and dark colors.
+function keyStyle(k: KeyView) {
+  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` };
+  if (!props.colors) return box;
+  const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
+  const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
+  return { ...box, background: `rgb(${r} ${g} ${b})`, color: light ? "#111" : "#eee" };
 }
 
 function valueClass(key: number) {
@@ -103,16 +123,16 @@ function up(e: PointerEvent) {
 <template>
   <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
     <div
-      v-for="k in layout"
-      :key="k.key"
+      v-for="(k, i) in layout"
+      :key="i"
       :data-key="k.key"
-      class="px-[5px] py-[3px] border-2 rounded-md border-solid flex flex-col justify-between absolute"
+      class="px-[5px] py-[3px] border-2 border-solid flex flex-col justify-between absolute"
       :class="keyClass(k)"
-      :style="{ left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` }"
+      :style="keyStyle(k)"
       :title="title(k.key)"
     >
       <span class="text-xs">{{ k.label }}</span>
-      <span v-if="k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
+      <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
         value(k.key)!.toFixed(1)
       }}</span>
     </div>

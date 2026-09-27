@@ -33,6 +33,13 @@ pub struct KeyView {
     w: f32,
     h: f32,
     editable: bool,
+    round: bool,
+}
+
+fn key_views(keys: Vec<kb_layout::LayoutKey>) -> Vec<KeyView> {
+    keys.into_iter()
+        .map(|k| KeyView { key: k.key, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, round: k.round })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -85,10 +92,12 @@ pub async fn status(state: State<'_, AppState>) -> Result<Status, String> {
 
 #[tauri::command]
 pub fn layout() -> Vec<KeyView> {
-    kb_layout::keys()
-        .into_iter()
-        .map(|k| KeyView { key: k.key, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable })
-        .collect()
+    key_views(kb_layout::keys())
+}
+
+#[tauri::command]
+pub fn lighting_layout() -> Vec<KeyView> {
+    key_views(kb_layout::lighting_keys())
 }
 
 #[tauri::command]

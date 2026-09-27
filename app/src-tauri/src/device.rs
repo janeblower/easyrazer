@@ -11,7 +11,7 @@ use razer_core::actuation::{self, Outcome};
 use razer_core::analog::{self, KeyAssignment};
 use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
-use razer_core::lighting::{self, EffectInfo, Look, Store};
+use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::transport::Error;
 use razer_core::{control, keymap, layout};
 use serde::Serialize;
@@ -51,6 +51,7 @@ pub struct LightingState {
     pub saved: Option<Look>,
     pub dynamic_lighting: bool,
     pub confirm_write: bool,
+    pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
 pub struct Device {
@@ -216,6 +217,7 @@ impl Device {
             saved,
             dynamic_lighting,
             confirm_write: self.settings.confirm_write,
+            custom: self.settings.custom.clone(),
         })
     }
 
@@ -234,6 +236,9 @@ impl Device {
         }
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
+        }
+        if look.effect.name == lighting::CUSTOM {
+            self.settings.custom = look.effect.colors.clone();
         }
         self.settings.applied = Some(look);
         settings::save(&self.settings)

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use razer_core::lighting::Look;
+use razer_core::lighting::{Look, Rgb};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -28,6 +28,8 @@ pub struct Settings {
     pub applied: Option<Look>,
     /// Press points (fwID -> mm) applied to the live profile but not saved, restored on every connect.
     pub actuation: BTreeMap<u8, f32>,
+    /// Last painted custom layout, kept while another effect is applied.
+    pub custom: Option<BTreeMap<u8, Rgb>>,
     /// Ask before writing the keyboard's flash.
     pub confirm_write: bool,
     #[serde(deserialize_with = "lenient")]
@@ -40,7 +42,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, actuation: BTreeMap::new(), confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false }
+        Self { applied: None, actuation: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false }
     }
 }
 
@@ -90,6 +92,7 @@ mod tests {
         let s = Settings {
             applied: Some(Look { effect: Effect { name: "static".into(), rgb1: Some([1, 2, 3]), ..Default::default() }, brightness: 9 }),
             actuation: [(31, 2.4), (32, 3.6)].into(),
+            custom: Some([(31, [1, 2, 3]), (202, [4, 5, 6])].into()),
             confirm_write: false,
             close_action: CloseAction::Tray,
             watch_synapse: false,

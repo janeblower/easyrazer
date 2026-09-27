@@ -20,6 +20,7 @@ export interface KeyView {
   w: number;
   h: number;
   editable: boolean;
+  round: boolean;
 }
 
 export type ApplyResult = { status: "ok" | "unconfirmed"; key: number; mm: number } | { status: "error"; key: number; message: string };
@@ -40,6 +41,7 @@ export interface Effect {
   rgb2?: Rgb;
   dir?: string;
   speed?: number;
+  colors?: KeyMap<Rgb>;
 }
 
 export interface Look {
@@ -61,6 +63,7 @@ export interface LightingState {
   saved: Look | null;
   dynamic_lighting: boolean;
   confirm_write: boolean;
+  custom: KeyMap<Rgb> | null;
 }
 
 export type CloseAction = "ask" | "tray" | "exit";

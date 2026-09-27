@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { Effect, EffectInfo, LightingState, Look, Rgb, Status } from "../types";
+import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
 import ColorPicker from "./ColorPicker.vue";
+import KeyboardMap from "./KeyboardMap.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
 
 interface Ui {
@@ -13,6 +14,7 @@ interface Ui {
   dir: string | null;
   speed: number | null;
   brightness: number;
+  paint: KeyMap<Rgb>;
 }
 type Variant = "one" | "two" | "random";
 interface Parsed {
@@ -38,6 +40,7 @@ const GROUPS: Record<string, string> = {
   wave: "Волна",
   reactive: "Отклик",
   starlight: "Звёздное небо",
+  custom: "Своя раскладка",
 };
 const TYPES: Record<string, string> = { key: "Клавиша", ripple: "Рябь" };
 const COLOR_VARIANTS = new Set(["one", "two", "random"]);
@@ -46,6 +49,8 @@ const DEFAULT_COLORS: Rgb[] = [
   [0x44, 0xd6, 0x2c],
   [0x00, 0x40, 0xff],
 ];
+const WHITE: Rgb = [0xff, 0xff, 0xff];
+const BLACK: Rgb = [0, 0, 0];
 
 const effects = ref<EffectInfo[]>([]);
 const applied = ref<Look | null>(null);
@@ -57,6 +62,10 @@ const confirmWrite = ref(true);
 const asking = ref(false);
 const busy = ref(false);
 const message = ref("");
+const layout = ref<KeyView[]>([]);
+// Last applied custom layout, offered again when the effect is picked.
+const custom = ref<KeyMap<Rgb> | null>(null);
+const selection = ref(new Set<number>());
 let loading = false;
 
 // Effect names are `group[_type][_one|_two|_random]`.
@@ -94,6 +103,7 @@ const randomOn = computed(() => !!ui.value?.random && hasRandom.value);
 function resolve(s: Ui): Look | null {
   const cs = candidates(s);
   if (cs.length === 0) return null;
+  if (s.group === "custom") return { effect: { name: "custom", colors: s.paint }, brightness: s.brightness };
   const set = s.colors.slice(0, Math.max(0, ...cs.map((e) => e.colors))).filter((c): c is Rgb => !!c);
   let e: Candidate = cs[0];
   const random = cs.find((c) => c.variant === "random");
@@ -113,9 +123,14 @@ function resolve(s: Ui): Look | null {
   return { effect, brightness: s.brightness };
 }
 
+function blank(): KeyMap<Rgb> {
+  return Object.fromEntries(layout.value.map((k) => [k.key, WHITE]));
+}
+
 function stateFrom(stored: Look | null): Ui | null {
   const look = stored && effects.value.some((e) => e.name === stored.effect.name) ? stored : null;
-  const s: Ui = { group: "", type: null, colors: [...DEFAULT_COLORS], random: false, dir: null, speed: null, brightness: 255 };
+  const paint = look?.effect.colors ?? custom.value ?? blank();
+  const s: Ui = { group: "", type: null, colors: [...DEFAULT_COLORS], random: false, dir: null, speed: null, brightness: 255, paint };
   const name = look?.effect.name ?? effects.value[0]?.name;
   if (!name) return null;
   const p = parse(name);
@@ -131,8 +146,9 @@ function stateFrom(stored: Look | null): Ui | null {
 // The backend omits unset effect fields; compare looks by the fields that are set.
 function norm(look?: Look | null): Look | null {
   if (!look) return null;
-  const { name, rgb1, rgb2, dir, speed } = look.effect;
+  const { name, rgb1, rgb2, dir, speed, colors } = look.effect;
   const effect: Effect = { name };
+  if (colors != null) effect.colors = colors;
   if (rgb1 != null) effect.rgb1 = rgb1;
   if (rgb2 != null) effect.rgb2 = rgb2;
   if (dir != null) effect.dir = dir;
@@ -146,10 +162,27 @@ function same(a?: Look | null, b?: Look | null) {
 
 const draft = computed(() => ui.value && resolve(ui.value));
 const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
-const canSave = computed(() => connected.value && !busy.value && !!draft.value && !same(draft.value, saved.value));
+const isCustom = computed(() => ui.value?.group === "custom");
+const canSave = computed(() => connected.value && !busy.value && !!draft.value && !isCustom.value && !same(draft.value, saved.value));
 
 function setUi<K extends keyof Ui>(k: K, v: Ui[K]) {
   ui.value = { ...ui.value!, [k]: v };
+}
+
+// The color all selected keys share, or none when they differ.
+const paintColor = computed(() => {
+  const cs = Array.from(selection.value, (k) => ui.value?.paint[k] ?? BLACK);
+  return cs.length > 0 && cs.every((c) => c.join(",") === cs[0].join(",")) ? cs[0] : null;
+});
+
+function paint(rgb: Rgb | null) {
+  const next = { ...ui.value!.paint };
+  for (const k of selection.value) next[k] = rgb ?? BLACK;
+  setUi("paint", next);
+}
+
+function selectAll() {
+  selection.value = new Set(layout.value.map((k) => k.key));
 }
 
 function pickGroup(g: Group) {
@@ -224,8 +257,10 @@ watch(draft, (now, before) => {
 
 async function load() {
   try {
+    if (layout.value.length === 0) layout.value = await invoke<KeyView[]>("lighting_layout");
     const s = await invoke<LightingState>("lighting_state");
     effects.value = s.effects;
+    custom.value = s.custom;
     applied.value = s.applied;
     saved.value = s.saved;
     dynamicLighting.value = s.dynamic_lighting;
@@ -250,6 +285,7 @@ async function apply() {
     const look = norm(draft.value);
     await invoke("lighting_apply", { look });
     applied.value = look;
+    if (look?.effect.colors) custom.value = look.effect.colors;
     message.value = "Применено";
   } catch (error) {
     message.value = String(error);
@@ -407,6 +443,18 @@ onMounted(load);
           />
           <span class="hint">быстро</span>
         </div>
+        <template v-if="isCustom">
+          <div class="field">
+            <span class="field-label">Цвет</span>
+            <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
+            <span class="hint">{{ selection.size > 0 ? `Выделено: ${selection.size}` : "Выделите клавиши: клик, Ctrl+клик, рамка" }}</span>
+            <button @click="selectAll">Выделить все</button>
+            <button :disabled="selection.size === 0" @click="selection = new Set()">Снять выделение</button>
+          </div>
+          <p class="text-warn m-0">
+            ⚠ Своя раскладка не записывается в память клавиатуры: она работает, пока запущен EasyRazer (в том числе свёрнутый в трей).
+          </p>
+        </template>
         <p v-if="ui.group === 'off'" class="msg">Подсветка выключена.</p>
         <div v-else class="field">
           <span class="field-label">Яркость</span>
@@ -414,6 +462,9 @@ onMounted(load);
           <span>{{ percent }}%</span>
         </div>
       </div>
+    </div>
+    <div v-if="isCustom && ui" class="p-3 card overflow-x-auto" :class="{ 'pointer-events-none opacity-40': blocked }">
+      <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" />
     </div>
     <div class="px-4 py-3 card flex gap-2 items-center">
       <label class="switch">
@@ -445,6 +496,7 @@ onMounted(load);
       </button>
       <button class="primary" :disabled="!dirty || busy || blocked" @click="apply">Применить</button>
       <button
+        v-if="!isCustom"
         class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
         title="Записать в память клавиатуры"
         aria-label="Записать в память клавиатуры"
@@ -496,6 +548,9 @@ onMounted(load);
 .fx:hover::after,
 .fx.on::after {
   opacity: 0.45;
+}
+.g-custom::before {
+  background: linear-gradient(90deg, #f00 0 25%, #0f0 25% 50%, #00f 50% 75%, #ff0 75%);
 }
 .g-static::before {
   background: var(--accent);

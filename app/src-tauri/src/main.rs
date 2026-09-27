@@ -58,6 +58,7 @@ fn main() {
             commands::apply,
             commands::save,
             commands::lighting_state,
+            commands::lighting_layout,
             commands::lighting_preview,
             commands::lighting_apply,
             commands::lighting_write,
