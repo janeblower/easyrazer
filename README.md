@@ -26,13 +26,13 @@ Synapse держит клавиатуру в своём режиме и пере
 
 ## Сборка
 
-Нужны Rust (MSVC), Node.js и MSVC Build Tools.
+Нужны Rust (MSVC), Bun и MSVC Build Tools.
 
 ```
 cd app
-npm install
-npm run tauri dev      # запуск
-npm run tauri build    # target/release/easyrazer.exe
+bun install
+bun tauri dev      # запуск
+bun tauri build    # target/release/easyrazer.exe
 ```
 
 Тесты: `cargo test`. Тест на реальной клавиатуре (Synapse закрыт):
