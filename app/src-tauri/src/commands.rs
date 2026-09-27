@@ -33,12 +33,12 @@ pub struct KeyView {
     w: f32,
     h: f32,
     editable: bool,
-    round: bool,
+    shape: kb_layout::Shape,
 }
 
 fn key_views(keys: Vec<kb_layout::LayoutKey>) -> Vec<KeyView> {
     keys.into_iter()
-        .map(|k| KeyView { key: k.key, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, round: k.round })
+        .map(|k| KeyView { key: k.key, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, shape: k.shape })
         .collect()
 }
 

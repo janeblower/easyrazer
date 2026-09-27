@@ -444,6 +444,9 @@ onMounted(load);
           <span class="hint">быстро</span>
         </div>
         <template v-if="isCustom">
+          <div class="overflow-x-auto">
+            <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" :unit="40" />
+          </div>
           <div class="field">
             <span class="field-label">Цвет</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
@@ -462,9 +465,6 @@ onMounted(load);
           <span>{{ percent }}%</span>
         </div>
       </div>
-    </div>
-    <div v-if="isCustom && ui" class="p-3 card overflow-x-auto" :class="{ 'pointer-events-none opacity-40': blocked }">
-      <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" />
     </div>
     <div class="px-4 py-3 card flex gap-2 items-center">
       <label class="switch">
@@ -548,9 +548,6 @@ onMounted(load);
 .fx:hover::after,
 .fx.on::after {
   opacity: 0.45;
-}
-.g-custom::before {
-  background: linear-gradient(90deg, #f00 0 25%, #0f0 25% 50%, #00f 50% 75%, #ff0 75%);
 }
 .g-static::before {
   background: var(--accent);

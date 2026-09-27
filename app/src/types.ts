@@ -20,7 +20,7 @@ export interface KeyView {
   w: number;
   h: number;
   editable: boolean;
-  round: boolean;
+  shape: "key" | "round" | "ring";
 }
 
 export type ApplyResult = { status: "ok" | "unconfirmed"; key: number; mm: number } | { status: "error"; key: number; message: string };

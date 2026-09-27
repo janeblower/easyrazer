@@ -19,20 +19,23 @@ const props = withDefaults(
     unsaved?: Set<number>;
     colors?: KeyMap<Rgb>;
     selection: Set<number>;
+    unit?: number;
   }>(),
-  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined },
+  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined, unit: 50 },
 );
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
 
-const U = 50;
+// Width of a ring's frame, in key units.
+const RING = 0.3;
+const U = computed(() => props.unit);
 const root = ref<HTMLElement | null>(null);
 const band = ref<Band | null>(null);
 let start: [number, number] | null = null;
 let additive = false;
 
 const size = computed(() => ({
-  width: `${Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U}px`,
-  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U}px`,
+  width: `${Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U.value}px`,
+  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U.value}px`,
 }));
 
 function norm(b: Band): Band {
@@ -44,6 +47,32 @@ const bandStyle = computed(() => {
   return { left: `${b.x0}px`, top: `${b.y0}px`, width: `${b.x1 - b.x0}px`, height: `${b.y1 - b.y0}px` };
 });
 
+const keys = computed(() => props.layout.filter((k) => k.shape !== "ring"));
+const rings = computed(() => props.layout.filter((k) => k.shape === "ring"));
+
+function ringStyle(k: KeyView) {
+  const [r, g, b] = props.colors?.[k.key] ?? [0x3a, 0x3a, 0x3a];
+  const u = U.value;
+  return {
+    left: `${k.x * u}px`,
+    top: `${k.y * u}px`,
+    width: `${k.w * u}px`,
+    height: `${k.h * u}px`,
+    borderWidth: `${RING * u}px`,
+    borderColor: `rgb(${r} ${g} ${b})`,
+  };
+}
+
+// A ring is hit on its frame only; the keys inside stay reachable.
+function onRing(k: KeyView, x0: number, y0: number, x1: number, y1: number) {
+  const u = U.value;
+  const t = RING * u;
+  const [l, t0, r, b] = [k.x * u, k.y * u, (k.x + k.w) * u, (k.y + k.h) * u];
+  const overlaps = l < x1 && r > x0 && t0 < y1 && b > y0;
+  const inside = x0 >= l + t && x1 <= r - t && y0 >= t0 + t && y1 <= b - t;
+  return overlaps && !inside;
+}
+
 function keyClass(k: KeyView) {
   const selected = props.selection.has(k.key);
   const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
@@ -52,12 +81,13 @@ function keyClass(k: KeyView) {
     : k.editable
       ? "bg-key cursor-pointer"
       : "bg-key-off text-muted cursor-default";
-  return [border, look, k.round ? "rounded-full !items-center !justify-center" : "rounded-md", props.colors && !k.label && "!p-0"];
+  return [border, look, k.shape === "round" ? "rounded-full !items-center !justify-center" : "rounded-md"];
 }
 
 // Painted keys keep their label readable on light and dark colors.
 function keyStyle(k: KeyView) {
-  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` };
+  const u = U.value;
+  const box = { left: `${k.x * u}px`, top: `${k.y * u}px`, width: `${k.w * u - 4}px`, height: `${k.h * u - 4}px` };
   if (!props.colors) return box;
   const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
   const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
@@ -101,14 +131,19 @@ function up(e: PointerEvent) {
   const next = additive ? new Set(props.selection) : new Set<number>();
   if (band.value) {
     const b = norm(band.value);
+    const u = U.value;
     for (const k of props.layout) {
-      const hit = k.x * U < b.x1 && (k.x + k.w) * U > b.x0 && k.y * U < b.y1 && (k.y + k.h) * U > b.y0;
+      const hit =
+        k.shape === "ring"
+          ? onRing(k, b.x0, b.y0, b.x1, b.y1)
+          : k.x * u < b.x1 && (k.x + k.w) * u > b.x0 && k.y * u < b.y1 && (k.y + k.h) * u > b.y0;
       if (k.editable && hit) next.add(k.key);
     }
   } else {
     // Pointer capture retargets events to the root, so find the key under the cursor explicitly.
     const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-key]");
-    const k = el && props.layout.find((k) => k.key === Number(el.dataset.key));
+    const [x, y] = point(e);
+    const k = el ? props.layout.find((k) => k.key === Number(el.dataset.key)) : rings.value.find((r) => onRing(r, x, y, x, y));
     if (k?.editable) {
       if (additive && next.has(k.key)) next.delete(k.key);
       else next.add(k.key);
@@ -123,8 +158,15 @@ function up(e: PointerEvent) {
 <template>
   <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
     <div
-      v-for="(k, i) in layout"
-      :key="i"
+      v-for="k in rings"
+      :key="`ring-${k.key}`"
+      class="rounded-lg border-solid pointer-events-none box-border absolute"
+      :class="{ 'outline-2 outline-solid outline-text outline-offset-2': selection.has(k.key) }"
+      :style="ringStyle(k)"
+    ></div>
+    <div
+      v-for="k in keys"
+      :key="k.key"
       :data-key="k.key"
       class="px-[5px] py-[3px] border-2 border-solid flex flex-col justify-between absolute"
       :class="keyClass(k)"

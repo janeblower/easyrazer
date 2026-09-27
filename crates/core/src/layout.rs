@@ -1,5 +1,7 @@
 //! Our own ANSI full-size geometry of the Huntsman V2 Analog, in key units.
 
+use serde::Serialize;
+
 use crate::keymap;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -11,7 +13,16 @@ pub struct LayoutKey {
     pub w: f32,
     pub h: f32,
     pub editable: bool,
-    pub round: bool,
+    pub shape: Shape,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Shape {
+    Key,
+    Round,
+    /// A frame along the edges of its box; only the frame is lit and clickable.
+    Ring,
 }
 
 /// Lit areas that are not keys; ids above every `fwID`.
@@ -153,7 +164,7 @@ pub fn keys() -> Vec<LayoutKey> {
             w,
             h,
             editable: name != FN_KEY,
-            round: false,
+            shape: Shape::Key,
         })
         .collect()
 }
@@ -177,17 +188,14 @@ pub fn cells(id: u8) -> Vec<(u8, u8)> {
 /// Keys and lit zones for painting: the edge rings the keys, the media buttons and dial sit
 /// above the numpad, the wrist rest below.
 pub fn lighting_keys() -> Vec<LayoutKey> {
-    let zone = |key, label, x, y, w, h, round| LayoutKey { key, label, x, y, w, h, editable: true, round };
+    let zone = |key, label, x, y, w, h, shape| LayoutKey { key, label, x, y, w, h, editable: true, shape };
     let mut out: Vec<LayoutKey> =
         keys().into_iter().map(|k| LayoutKey { x: k.x + 0.5, y: k.y + 0.5, editable: true, ..k }).collect();
     out.extend([
-        zone(MEDIA, "● ● ●", 19.0, 0.5, 3.0, 1.0, true),
-        zone(DIAL, "◎", 22.0, 0.5, 1.0, 1.0, true),
-        zone(EDGE, "", 0.1, 0.1, 23.3, 0.3, false),
-        zone(EDGE, "", 0.1, 6.85, 23.3, 0.3, false),
-        zone(EDGE, "", 0.1, 0.1, 0.3, 7.05, false),
-        zone(EDGE, "", 23.1, 0.1, 0.3, 7.05, false),
-        zone(WRIST, "Подставка", 2.0, 7.5, 19.5, 1.0, false),
+        zone(MEDIA, "● ● ●", 19.0, 0.5, 3.0, 1.0, Shape::Round),
+        zone(DIAL, "◎", 22.0, 0.5, 1.0, 1.0, Shape::Round),
+        zone(EDGE, "Огранка", 0.1, 0.1, 23.3, 7.05, Shape::Ring),
+        zone(WRIST, "Подставка", 2.0, 7.5, 19.5, 1.0, Shape::Key),
     ]);
     out
 }
