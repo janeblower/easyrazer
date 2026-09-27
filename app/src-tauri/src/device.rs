@@ -2,7 +2,7 @@
 
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -124,27 +124,39 @@ pub fn synapse_running() -> bool {
         .args(["/FI", "IMAGENAME eq RazerAppEngine.exe", "/NH"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    synapse_in(out.ok().map(|o| o.stdout))
+    synapse_in(out.ok())
 }
 
 /// A failed check counts as "running": writing while Synapse is alive gets overwritten.
-fn synapse_in(tasklist: Option<Vec<u8>>) -> bool {
-    tasklist.is_none_or(|out| String::from_utf8_lossy(&out).contains("RazerAppEngine"))
+/// With no match tasklist still prints a (localized) notice and exits 0, so empty output is a failure too.
+fn synapse_in(tasklist: Option<Output>) -> bool {
+    tasklist.filter(|o| o.status.success() && !o.stdout.is_empty()).is_none_or(|o| {
+        String::from_utf8_lossy(&o.stdout).contains("RazerAppEngine")
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use std::os::windows::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    fn tasklist(code: u32, stdout: &[u8]) -> Option<Output> {
+        Some(Output { status: ExitStatus::from_raw(code), stdout: stdout.to_vec(), stderr: Vec::new() })
+    }
+
     #[test]
     fn tasklist_failure_counts_as_synapse_running() {
         assert!(synapse_in(None));
+        assert!(synapse_in(tasklist(1, b"")));
+        assert!(synapse_in(tasklist(0, b"")));
     }
 
     #[test]
     fn detects_synapse_in_tasklist_output() {
-        assert!(synapse_in(Some(b"RazerAppEngine.exe  1234 Console  1  80 000 K".to_vec())));
-        assert!(!synapse_in(Some(b"INFO: No tasks are running which match the specified criteria.".to_vec())));
+        assert!(synapse_in(tasklist(0, b"RazerAppEngine.exe  1234 Console  1  80 000 K")));
+        assert!(!synapse_in(tasklist(0, b"INFO: No tasks are running which match the specified criteria.")));
     }
 
     #[test]
