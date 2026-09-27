@@ -1,5 +1,6 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
+use std::collections::BTreeMap;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -7,12 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
 use razer_core::actuation::{self, Outcome};
-use razer_core::analog::KeyAssignment;
+use razer_core::analog::{self, KeyAssignment};
 use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Store};
 use razer_core::transport::Error;
-use razer_core::{control, layout};
+use razer_core::{control, keymap, layout};
 use serde::Serialize;
 
 use crate::dynamic_lighting;
@@ -32,6 +33,14 @@ pub struct Status {
     pub model: Option<String>,
     /// PID of a Razer keyboard without a description.
     pub unsupported: Option<u16>,
+    /// Restoring applied settings after a connect failed; reported once.
+    pub error: Option<String>,
+}
+
+/// Press points after a write, and the keys a replug would reset.
+pub struct Written {
+    pub results: Vec<(u8, Outcome)>,
+    pub unsaved: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -54,12 +63,21 @@ pub struct Device {
     settings: Settings,
     /// Description of the last keyboard seen, so the lighting tab can be edited while it is unplugged.
     last_spec: Option<&'static DeviceSpec>,
+    restore_error: Option<String>,
 }
 
 impl Device {
     pub fn new() -> Result<Self, Error> {
         let api = HidApi::new().map_err(|e| Error::Io(e.to_string()))?;
-        Ok(Self { api, control: None, synapse: true, backed_up: false, settings: settings::load(), last_spec: None })
+        Ok(Self {
+            api,
+            control: None,
+            synapse: true,
+            backed_up: false,
+            settings: settings::load(),
+            last_spec: None,
+            restore_error: None,
+        })
     }
 
     /// Reopens the control interface if the keyboard was replugged; `true` when connected.
@@ -69,14 +87,30 @@ impl Device {
             self.control = None;
             let _ = self.api.refresh_devices();
             self.control = hid::open_control(&self.api).ok().flatten();
-            if let Some((t, d)) = &self.control {
+            if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
-                if let (false, Some(look)) = (self.synapse, &self.settings.applied) {
-                    let _ = lighting::set_look(t, d, Store::Temporary, look);
+                if !self.synapse {
+                    self.restore();
                 }
             }
         }
         self.control.is_some()
+    }
+
+    /// Brings back what was applied but not saved: the keyboard forgets it on unplug, Synapse overwrites it.
+    fn restore(&mut self) {
+        let Some((t, d)) = &self.control else { return };
+        let mut errors = Vec::new();
+        if let Some(look) = &self.settings.applied
+            && let Err(e) = lighting::set_look(t, d, Store::Temporary, look)
+        {
+            errors.push(format!("Не удалось вернуть подсветку: {e}"));
+        }
+        let changes: Vec<(u8, f32)> = self.settings.actuation.iter().map(|(&k, &mm)| (k, mm)).collect();
+        errors.extend(restore_error(&actuation::apply(t, actuation::LIVE, &changes)));
+        if !errors.is_empty() {
+            self.restore_error = Some(errors.join("; "));
+        }
     }
 
     pub fn connect(&mut self) -> Option<(&HidTransport, &'static DeviceSpec)> {
@@ -92,38 +126,57 @@ impl Device {
         }
         let synapse = self.synapse;
         self.ensure_connected();
-        if should_restore(was, fresh_synapse)
-            && let (Some((t, d)), Some(look)) = (&self.control, &self.settings.applied)
-        {
-            let _ = lighting::set_look(t, d, Store::Temporary, look);
+        if should_restore(was, fresh_synapse) {
+            self.restore();
         }
+        let error = self.restore_error.take();
         let Some((t, spec)) = &self.control else {
             let unsupported = hid::unsupported_keyboard(&self.api);
-            return Status { device: false, synapse, mode: None, profile: None, model: None, unsupported };
+            return Status { device: false, synapse, mode: None, profile: None, model: None, unsupported, error };
         };
         let mut mode = control::mode(t).ok();
         if should_release_driver_mode(fresh_synapse.is_some(), synapse, mode) && control::set_hardware_mode(t).is_ok() {
             mode = control::mode(t).ok();
         }
         let profile = control::active_profile(t).ok();
-        Status { device: true, synapse, mode, profile, model: Some(spec.name.clone()), unsupported: None }
+        Status { device: true, synapse, mode, profile, model: Some(spec.name.clone()), unsupported: None, error }
     }
 
-    /// Press points of every editable key in the active profile.
-    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<Vec<KeyAssignment>, String> {
+    /// Press points the keyboard types with now, and the keys a replug would reset.
+    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<(Vec<KeyAssignment>, Vec<u8>), String> {
         if self.synapse {
             return Err(SYNAPSE_RUNNING.into());
         }
         let (t, _) = self.connect().ok_or(NO_KEYBOARD)?;
-        let profile = control::active_profile(t).map_err(|e| e.to_string())?;
         let keys = editable_keys();
-        actuation::read_all(t, profile, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())
+        let all = actuation::read_all(t, actuation::LIVE, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())?;
+        Ok((all, self.unsaved()))
     }
 
-    /// Writes press points; checks Synapse afresh and backs up the keyboard before the first write.
-    pub fn apply(&mut self, changes: &[(u8, f32)]) -> Result<Vec<(u8, Outcome)>, String> {
+    /// Applies press points until the next replug; the app restores them on every connect.
+    pub fn apply(&mut self, changes: &[(u8, f32)]) -> Result<Written, String> {
+        if self.check_synapse(synapse_running) {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        let (t, _) = self.connect().ok_or(NO_KEYBOARD)?;
+        let results = actuation::apply(t, actuation::LIVE, changes);
+        let touched: Vec<u8> = results.iter().filter(|(_, o)| !matches!(o, Outcome::Failed(_))).map(|&(k, _)| k).collect();
+        // Unknown whether they match the profile: keep them all, restoring an equal value is harmless.
+        let unsaved = match control::active_profile(t).and_then(|p| actuation::unsaved(t, p, &touched)) {
+            Ok(u) => u.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
+            Err(_) => changes.iter().copied().filter(|(k, _)| touched.contains(k)).collect::<Vec<_>>(),
+        };
+        track(&mut self.settings.actuation, touched, unsaved);
+        settings::save(&self.settings)?;
+        Ok(Written { results, unsaved: self.unsaved() })
+    }
+
+    /// Writes applied press points and `edits` to the flash; checks Synapse afresh and backs up the
+    /// keyboard before the first write.
+    pub fn save(&mut self, edits: &[(u8, f32)]) -> Result<Written, String> {
+        let changes = to_save(&self.settings.actuation, edits);
         if changes.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Written { results: Vec::new(), unsaved: Vec::new() });
         }
         if self.check_synapse(synapse_running) {
             return Err(SYNAPSE_RUNNING.into());
@@ -135,9 +188,16 @@ impl Device {
             let all = actuation::read_all(t, profile, &editable_keys(), |_| {}).map_err(|e| e.to_string())?;
             write_backup(&actuation::format_backup(profile, &all))?;
         }
-        let results = actuation::apply(t, profile, changes);
+        let results = actuation::save(t, profile, &changes);
         self.backed_up = true;
-        Ok(results)
+        let saved = results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k);
+        track(&mut self.settings.actuation, saved, []);
+        settings::save(&self.settings)?;
+        Ok(Written { results, unsaved: self.unsaved() })
+    }
+
+    fn unsaved(&self) -> Vec<u8> {
+        self.settings.actuation.keys().copied().collect()
     }
 
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
@@ -227,6 +287,35 @@ impl Device {
     }
 }
 
+/// Press point in the UI's 0.1 mm steps.
+pub fn mm(threshold: u8) -> f32 {
+    (analog::threshold_to_mm(threshold) * 10.0).round() / 10.0
+}
+
+/// The `touched` keys are now unsaved exactly as `unsaved` says.
+fn track(overrides: &mut BTreeMap<u8, f32>, touched: impl IntoIterator<Item = u8>, unsaved: impl IntoIterator<Item = (u8, f32)>) {
+    for k in touched {
+        overrides.remove(&k);
+    }
+    overrides.extend(unsaved);
+}
+
+/// Saving makes permanent what the keyboard types with now, plus the pending edits.
+fn to_save(overrides: &BTreeMap<u8, f32>, edits: &[(u8, f32)]) -> Vec<(u8, f32)> {
+    let mut all = overrides.clone();
+    all.extend(edits.iter().copied());
+    all.into_iter().collect()
+}
+
+fn restore_error(results: &[(u8, Outcome)]) -> Option<String> {
+    let bad: Vec<&str> = results
+        .iter()
+        .filter(|(_, o)| !matches!(o, Outcome::Ok(_)))
+        .map(|&(k, _)| keymap::name(k).unwrap_or("?"))
+        .collect();
+    (!bad.is_empty()).then(|| format!("Не удалось вернуть точки срабатывания клавиш: {}", bad.join(", ")))
+}
+
 fn editable_keys() -> Vec<u8> {
     layout::keys().into_iter().filter(|k| k.editable).map(|k| k.key).collect()
 }
@@ -304,7 +393,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
@@ -351,23 +440,27 @@ mod tests {
 
     #[test]
     #[ignore = "needs the keyboard connected and Synapse closed"]
-    fn apply_round_trip_on_hardware() {
+    fn temporary_apply_round_trip_on_hardware() {
         assert!(!synapse_running(), "close Synapse first");
         let mut dev = Device::new().unwrap();
-        let (profile, a, original) = {
+        let a = keymap::by_name("A").unwrap();
+        let (profile, saved, live) = {
             let (t, _) = dev.connect().expect("keyboard not connected");
             let profile = control::active_profile(t).unwrap();
-            let a = keymap::by_name("A").unwrap();
-            (profile, a, actuation::read_key(t, profile, a).unwrap())
+            (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
-        let result = dev.apply(&[(a, 2.4)]).unwrap();
+        assert!(!dev.settings.actuation.contains_key(&a), "A is applied in the app; save or revert it first");
+        let w = dev.apply(&[(a, 2.4)]).unwrap();
         let (t, _) = dev.connect().unwrap();
-        actuation::write_key(t, &original).unwrap();
-        assert!(
-            matches!(&result[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)),
-            "{result:?}"
-        );
-        assert_eq!(actuation::read_key(t, profile, a).unwrap(), original);
+        actuation::write_key(t, &live).unwrap();
+        let profile_after = actuation::read_key(t, profile, a).unwrap();
+        dev.update_settings(|s| {
+            s.actuation.remove(&a);
+        })
+        .unwrap();
+        assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)), "{:?}", w.results);
+        assert_eq!(w.unsaved, [a]);
+        assert_eq!(profile_after, saved);
     }
 
 
@@ -389,5 +482,26 @@ mod tests {
         lighting::set_look(t, d, Store::Temporary, &original).unwrap();
         assert_eq!(read, Some(test));
         assert_eq!(lighting::get_look(t, d, Store::Saved).unwrap(), saved_before);
+    }
+
+    #[test]
+    fn tracking_replaces_touched_keys_with_what_is_still_unsaved() {
+        let mut o = BTreeMap::from([(31, 2.0), (32, 2.5), (18, 3.0)]);
+        track(&mut o, [31, 32], [(32, 3.6)]);
+        assert_eq!(o, BTreeMap::from([(32, 3.6), (18, 3.0)]));
+    }
+
+    #[test]
+    fn saving_writes_applied_press_points_with_edits_on_top() {
+        let o = BTreeMap::from([(31, 2.0), (32, 2.5)]);
+        assert_eq!(to_save(&o, &[(32, 3.0), (18, 1.5)]), [(18, 1.5), (31, 2.0), (32, 3.0)]);
+    }
+
+    #[test]
+    fn restore_reports_keys_that_were_not_applied() {
+        let a = |t| KeyAssignment { profile: 0, key: 31, mode: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
+        assert_eq!(restore_error(&[(31, Outcome::Ok(a(0)))]), None);
+        let e = restore_error(&[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
+        assert_eq!(e.as_deref(), Some("Не удалось вернуть точки срабатывания клавиш: S, W"));
     }
 }

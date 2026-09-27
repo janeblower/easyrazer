@@ -5,11 +5,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use razer_core::actuation::Outcome;
 use razer_core::lighting::Look;
-use razer_core::{analog, layout as kb_layout};
+use razer_core::layout as kb_layout;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
-use crate::device::{self, Device, LightingState, Status};
+use crate::device::{self, Device, LightingState, Status, Written, mm};
 use crate::settings::CloseAction;
 use crate::{autostart, tray};
 
@@ -43,8 +43,32 @@ pub enum ApplyResult {
     Error { key: u8, message: String },
 }
 
-fn mm(threshold: u8) -> f32 {
-    (analog::threshold_to_mm(threshold) * 10.0).round() / 10.0
+#[derive(Serialize)]
+pub struct Actuation {
+    values: BTreeMap<u8, f32>,
+    /// Keys whose press point a replug would reset.
+    unsaved: Vec<u8>,
+}
+
+#[derive(Serialize)]
+pub struct WriteResult {
+    results: Vec<ApplyResult>,
+    unsaved: Vec<u8>,
+}
+
+impl From<Written> for WriteResult {
+    fn from(w: Written) -> Self {
+        let results = w
+            .results
+            .into_iter()
+            .map(|(key, o)| match o {
+                Outcome::Ok(a) => ApplyResult::Ok { key, mm: mm(a.threshold_low) },
+                Outcome::Unconfirmed(a) => ApplyResult::Unconfirmed { key, mm: mm(a.threshold_low) },
+                Outcome::Failed(e) => ApplyResult::Error { key, message: e.to_string() },
+            })
+            .collect();
+        Self { results, unsaved: w.unsaved }
+    }
 }
 
 /// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
@@ -68,24 +92,21 @@ pub fn layout() -> Vec<KeyView> {
 }
 
 #[tauri::command]
-pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<BTreeMap<u8, f32>, String> {
-    let all = state.device().read_all(|done, total| {
+pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
+    let (all, unsaved) = state.device().read_all(|done, total| {
         let _ = app.emit("read-progress", (done, total));
     })?;
-    Ok(all.iter().map(|a| (a.key, mm(a.threshold_low))).collect())
+    Ok(Actuation { values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(), unsaved })
 }
 
 #[tauri::command]
-pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<Vec<ApplyResult>, String> {
-    let results = state.device().apply(&changes)?;
-    Ok(results
-        .into_iter()
-        .map(|(key, o)| match o {
-            Outcome::Ok(a) => ApplyResult::Ok { key, mm: mm(a.threshold_low) },
-            Outcome::Unconfirmed(a) => ApplyResult::Unconfirmed { key, mm: mm(a.threshold_low) },
-            Outcome::Failed(e) => ApplyResult::Error { key, message: e.to_string() },
-        })
-        .collect())
+pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<WriteResult, String> {
+    state.device().apply(&changes).map(Into::into)
+}
+
+#[tauri::command]
+pub async fn save(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<WriteResult, String> {
+    state.device().save(&changes).map(Into::into)
 }
 
 #[tauri::command]

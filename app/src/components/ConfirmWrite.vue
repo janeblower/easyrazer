@@ -22,8 +22,8 @@ onUnmounted(() => {
     <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="cw-title">
       <h3 id="cw-title" class="dlg-title">Записать в память клавиатуры?</h3>
       <p>
-        Эффект сохранится в клавиатуре и будет работать без EasyRazer. Ресурс перезаписи её флеш-памяти ограничен — не делайте этого слишком
-        часто.
+        Настройки сохранятся в клавиатуре и будут работать без EasyRazer. Ресурс перезаписи её флеш-памяти ограничен — не делайте этого
+        слишком часто.
       </p>
       <label class="dlg-check"><input v-model="dontAsk" type="checkbox" /> Больше не спрашивать</label>
       <div class="dlg-btns">

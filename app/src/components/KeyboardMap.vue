@@ -14,6 +14,7 @@ const props = defineProps<{
   baseline: KeyMap<number>;
   edits: KeyMap<number>;
   errors: KeyMap<string>;
+  unsaved: Set<number>;
   selection: Set<number>;
 }>();
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
@@ -41,6 +42,15 @@ const bandStyle = computed(() => {
 function keyClass(k: KeyView) {
   const border = k.key in props.errors ? "border-error" : props.selection.has(k.key) ? "border-accent" : "border-transparent";
   return [border, k.editable ? "bg-key cursor-pointer" : "bg-key-off text-muted cursor-default"];
+}
+
+function valueClass(key: number) {
+  if (key in props.edits) return "font-semibold text-edited";
+  return props.unsaved.has(key) ? "text-accent" : "text-muted";
+}
+
+function title(key: number) {
+  return props.errors[key] ?? (props.unsaved.has(key) ? "Применено, но не записано в клавиатуру" : undefined);
 }
 
 function value(key: number): number | undefined {
@@ -99,15 +109,12 @@ function up(e: PointerEvent) {
       class="px-[5px] py-[3px] border-2 rounded-md border-solid flex flex-col justify-between absolute"
       :class="keyClass(k)"
       :style="{ left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` }"
-      :title="errors[k.key]"
+      :title="title(k.key)"
     >
       <span class="text-xs">{{ k.label }}</span>
-      <span
-        v-if="k.editable && value(k.key) != null"
-        class="text-[11px] self-end"
-        :class="k.key in edits ? 'font-semibold text-edited' : 'text-muted'"
-        >{{ value(k.key)!.toFixed(1) }}</span
-      >
+      <span v-if="k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
+        value(k.key)!.toFixed(1)
+      }}</span>
     </div>
     <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
   </div>

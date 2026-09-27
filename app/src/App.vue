@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import type { AppSettings, ApplyResult, CloseAction, Status as DeviceStatus, KeyMap, KeyView } from "./types";
+import type { Actuation, AppSettings, CloseAction, Status as DeviceStatus, KeyMap, KeyView, WriteResult } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
 import ActuationPanel from "./components/ActuationPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
@@ -10,12 +10,14 @@ import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
 import AutostartOffer from "./components/AutostartOffer.vue";
+import ConfirmWrite from "./components/ConfirmWrite.vue";
 
 const status = ref<DeviceStatus | null>(null);
 const layout = ref<KeyView[]>([]);
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
 const edits = ref<KeyMap<number>>({}); // mm, not applied yet
 const errors = ref<KeyMap<string>>({}); // message from the last apply
+const unsaved = ref(new Set<number>()); // applied, lost on replug unless saved
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
@@ -23,6 +25,7 @@ const message = ref("");
 const tab = ref("actuation");
 const closing = ref(false);
 const offering = ref(false);
+const asking = ref(false);
 let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
@@ -37,19 +40,30 @@ const tabClass = (t: string) => [
 ];
 
 const dirty = computed(() => Object.keys(edits.value).length);
-const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0);
+const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
+const canApply = computed(() => writable.value && dirty.value > 0);
+const canSave = computed(() => writable.value && (dirty.value > 0 || unsaved.value.size > 0));
 const selectedValue = computed(() => {
   const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
   return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
 });
+
+// Errors not tied to a tab; shown over whatever tab is open.
+const appError = ref("");
+function showError(e: unknown) {
+  appError.value = String(e);
+  clearTimeout(errorTimer);
+  errorTimer = setTimeout(() => (appError.value = ""), 10_000);
+}
 
 async function load() {
   busy.value = true;
   const unlisten = await listen<[number, number]>("read-progress", (e) => (progress.value = e.payload));
   try {
     const profile = status.value?.profile ?? null;
-    const base = await invoke<KeyMap<number>>("read_all");
+    const { values: base, unsaved: keys } = await invoke<Actuation>("read_all");
     baseline.value = base;
+    unsaved.value = new Set(keys);
     edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[Number(k)] !== mm));
     errors.value = {};
     loadedProfile = profile;
@@ -64,6 +78,7 @@ async function load() {
 }
 
 async function onStatus(s: DeviceStatus) {
+  if (s.error) showError(s.error);
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
   if (busy.value) return;
   status.value = s;
@@ -100,12 +115,13 @@ function revert() {
   errors.value = {};
 }
 
-async function apply() {
+async function write(command: "apply" | "save", done: string) {
   busy.value = true;
   let failed = false;
   try {
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
-    const results = await invoke<ApplyResult[]>("apply", { changes });
+    const { results, unsaved: keys } = await invoke<WriteResult>(command, { changes });
+    unsaved.value = new Set(keys);
     const base = { ...baseline.value };
     const next = { ...edits.value };
     const errs: KeyMap<string> = {};
@@ -122,7 +138,7 @@ async function apply() {
     edits.value = next;
     errors.value = errs;
     const bad = Object.keys(errs).length;
-    message.value = bad ? `Не применено или не подтверждено: ${bad} клав. (наведите на красные)` : "Применено";
+    message.value = bad ? `Не применено или не подтверждено: ${bad} клав. (наведите на красные)` : done;
   } catch (error) {
     message.value = String(error);
     failed = true;
@@ -132,12 +148,24 @@ async function apply() {
   if (failed) await refresh();
 }
 
-// Errors not tied to a tab; shown over whatever tab is open.
-const appError = ref("");
-function showError(e: unknown) {
-  appError.value = String(e);
-  clearTimeout(errorTimer);
-  errorTimer = setTimeout(() => (appError.value = ""), 10_000);
+async function save() {
+  try {
+    const settings = await invoke<AppSettings>("app_settings");
+    if (settings.confirm_write) {
+      asking.value = true;
+      return;
+    }
+  } catch (error) {
+    message.value = String(error);
+    return;
+  }
+  await write("save", "Записано в клавиатуру");
+}
+
+async function onConfirm(dontAsk: boolean) {
+  asking.value = false;
+  if (dontAsk) await invoke("set_confirm_write", { on: false }).catch(showError);
+  await write("save", "Записано в клавиатуру");
 }
 
 async function onClose(action: CloseAction, remember: boolean) {
@@ -191,15 +219,17 @@ onUnmounted(() => {
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
-      <KeyboardMap v-model:selection="selection" :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" />
+      <KeyboardMap v-model:selection="selection" :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" :unsaved="unsaved" />
       <ActuationPanel
         :count="selection.size"
         :value="selectedValue"
         :dirty="dirty"
         :can-apply="canApply"
+        :can-save="canSave"
         :busy="busy"
         @set="setValue"
-        @apply="apply"
+        @apply="write('apply', 'Применено до отключения клавиатуры')"
+        @save="save"
         @revert="revert"
         @select-all="selectAll"
         @clear="selection = new Set()"
@@ -207,6 +237,7 @@ onUnmounted(() => {
     </template>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />
+    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
     <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
     <footer class="text-xs text-muted">EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>

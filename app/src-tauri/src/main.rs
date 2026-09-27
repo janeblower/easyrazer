@@ -56,6 +56,7 @@ fn main() {
             commands::layout,
             commands::read_all,
             commands::apply,
+            commands::save,
             commands::lighting_state,
             commands::lighting_preview,
             commands::lighting_apply,

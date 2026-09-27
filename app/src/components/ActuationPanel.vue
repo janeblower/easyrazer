@@ -1,6 +1,6 @@
 <script setup lang="ts">
-defineProps<{ count: number; value: number | null; dirty: number; canApply: boolean; busy: boolean }>();
-const emit = defineEmits<{ set: [mm: number]; apply: []; revert: []; selectAll: []; clear: [] }>();
+defineProps<{ count: number; value: number | null; dirty: number; canApply: boolean; canSave: boolean; busy: boolean }>();
+const emit = defineEmits<{ set: [mm: number]; apply: []; save: []; revert: []; selectAll: []; clear: [] }>();
 
 function onInput(e: Event) {
   emit("set", Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10);
@@ -17,5 +17,6 @@ function onInput(e: Event) {
     <span class="flex-1"></span>
     <button :disabled="!dirty || busy" @click="emit('revert')">Отменить</button>
     <button class="primary" :disabled="!canApply" @click="emit('apply')">Применить{{ dirty ? ` (${dirty})` : "" }}</button>
+    <button :disabled="!canSave" title="Записать в память клавиатуры, чтобы работало без EasyRazer" @click="emit('save')">Записать</button>
   </div>
 </template>

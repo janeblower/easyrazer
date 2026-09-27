@@ -9,6 +9,7 @@ export interface Status {
   profile: number | null;
   model: string | null;
   unsupported: number | null;
+  error: string | null;
 }
 
 export interface KeyView {
@@ -22,6 +23,16 @@ export interface KeyView {
 }
 
 export type ApplyResult = { status: "ok" | "unconfirmed"; key: number; mm: number } | { status: "error"; key: number; message: string };
+
+export interface WriteResult {
+  results: ApplyResult[];
+  unsaved: number[];
+}
+
+export interface Actuation {
+  values: KeyMap<number>;
+  unsaved: number[];
+}
 
 export interface Effect {
   name: string;
