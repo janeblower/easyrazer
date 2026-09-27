@@ -1,9 +1,24 @@
-//! EasyRazer's own settings: `%APPDATA%\EasyRazer\lighting.json`.
+//! EasyRazer's own settings: `%APPDATA%\EasyRazer\settings.json`.
 
 use std::path::PathBuf;
 
 use razer_core::lighting::Look;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseAction {
+    #[default]
+    Ask,
+    Tray,
+    Exit,
+}
+
+/// An unknown value must not reset the whole file.
+fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<CloseAction, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -12,16 +27,22 @@ pub struct Settings {
     pub applied: Option<Look>,
     /// Ask before writing the keyboard's flash.
     pub confirm_write: bool,
+    #[serde(deserialize_with = "lenient")]
+    pub close_action: CloseAction,
+    /// Off: Synapse is taken as absent and `tasklist` is never run.
+    pub watch_synapse: bool,
+    /// The first-run autostart question has been answered.
+    pub autostart_offered: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, confirm_write: true }
+        Self { applied: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false }
     }
 }
 
 fn path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer").join("lighting.json"))
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer").join("settings.json"))
 }
 
 pub fn load() -> Settings {
@@ -66,7 +87,28 @@ mod tests {
         let s = Settings {
             applied: Some(Look { effect: Effect { name: "static".into(), rgb1: Some([1, 2, 3]), ..Default::default() }, brightness: 9 }),
             confirm_write: false,
+            close_action: CloseAction::Tray,
+            watch_synapse: false,
+            autostart_offered: true,
         };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
+    }
+
+    #[test]
+    fn new_fields_have_defaults() {
+        let s = parse("{}");
+        assert_eq!((s.close_action, s.watch_synapse, s.autostart_offered), (CloseAction::Ask, true, false));
+    }
+
+    #[test]
+    fn unknown_close_action_is_ask_and_keeps_the_rest() {
+        let s = parse("{\"close_action\": \"minimize\", \"confirm_write\": false, \"watch_synapse\": false}");
+        assert_eq!((s.close_action, s.confirm_write, s.watch_synapse), (CloseAction::Ask, false, false));
+    }
+
+    #[test]
+    fn reads_close_action() {
+        assert_eq!(parse("{\"close_action\": \"tray\"}").close_action, CloseAction::Tray);
+        assert_eq!(parse("{\"close_action\": \"exit\"}").close_action, CloseAction::Exit);
     }
 }
