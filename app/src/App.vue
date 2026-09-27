@@ -25,6 +25,8 @@ const offering = ref(false)
 let loadedProfile = null // profile the baseline was read from
 let unlistenStatus
 let unlistenClose
+let unlistenError
+let errorTimer
 
 const dirty = computed(() => Object.keys(edits.value).length)
 const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0)
@@ -122,14 +124,19 @@ async function apply() {
   if (failed) await refresh()
 }
 
+// Errors not tied to a tab; shown over whatever tab is open.
+const appError = ref('')
+function showError(e) {
+  appError.value = String(e)
+  clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => (appError.value = ''), 10000)
+}
+
 async function onClose(action, remember) {
   closing.value = false
-  try {
-    if (remember) await invoke('set_close_action', { action })
-    await invoke(action === 'tray' ? 'hide_window' : 'quit')
-  } catch (e) {
-    message.value = String(e)
-  }
+  // The choice still applies this session even if it could not be saved.
+  if (remember) await invoke('set_close_action', { action }).catch(showError)
+  await invoke(action === 'tray' ? 'hide_window' : 'quit').catch(showError)
 }
 
 async function onOffer(on) {
@@ -137,12 +144,13 @@ async function onOffer(on) {
   try {
     await invoke('autostart_answered', { on })
   } catch (e) {
-    message.value = String(e)
+    showError(e)
   }
 }
 
 onMounted(async () => {
   unlistenClose = await listen('close-requested', () => (closing.value = true))
+  unlistenError = await listen('app-error', e => showError(e.payload))
   try {
     offering.value = !(await invoke('app_settings')).autostart_offered
   } catch (e) {
@@ -156,6 +164,8 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenStatus?.()
   unlistenClose?.()
+  unlistenError?.()
+  clearTimeout(errorTimer)
 })
 </script>
 
@@ -166,7 +176,7 @@ onUnmounted(() => {
       <button :class="{ on: tab === 'lighting' }" @click="tab = 'lighting'">Подсветка</button>
       <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">Настройки</button>
     </nav>
-    <Status :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" />
+    <Status :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
       <Keyboard :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" v-model:selection="selection" />
       <Panel

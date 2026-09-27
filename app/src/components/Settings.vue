@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event'
 const s = ref(null)
 const message = ref('')
 let unlisten
+let unmounted = false
 
 async function load() {
   try {
@@ -27,9 +28,14 @@ async function set(cmd, args) {
 
 onMounted(async () => {
   unlisten = await listen('settings-changed', load)
+  // Switched away before listen() resolved: onUnmounted has already run.
+  if (unmounted) return unlisten()
   await load()
 })
-onUnmounted(() => unlisten?.())
+onUnmounted(() => {
+  unmounted = true
+  unlisten?.()
+})
 </script>
 
 <template>

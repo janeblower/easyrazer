@@ -1,10 +1,11 @@
 <script setup>
 import { computed } from 'vue'
 
-const props = defineProps({ status: Object, progress: Array, message: String })
+const props = defineProps({ status: Object, progress: Array, message: String, error: String })
 
 const view = computed(() => {
   const s = props.status
+  if (props.error) return { kind: 'warn', text: props.error }
   if (!s) return { kind: 'info', text: 'Поиск клавиатуры…' }
   if (s.synapse) return { kind: 'warn', text: 'Запущен Synapse (RazerAppEngine). Закройте его, включая значок в трее, — иначе он перезапишет настройки.' }
   if (!s.device && s.unsupported != null) {

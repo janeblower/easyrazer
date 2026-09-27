@@ -43,7 +43,9 @@ pub fn build(app: &App) -> tauri::Result<()> {
             "autostart" => {
                 // The item has already flipped itself; the registry decides what it finally shows.
                 let on = app.state::<AutostartItem>().0.is_checked().unwrap_or(false);
-                let _ = autostart::set(on);
+                if let Err(e) = autostart::set(on) {
+                    let _ = app.emit("app-error", format!("Автозапуск: {e}"));
+                }
                 sync_autostart(app);
             }
             "quit" => app.exit(0),
