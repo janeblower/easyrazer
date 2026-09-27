@@ -2,18 +2,14 @@
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
-use std::thread::sleep;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
 use razer_core::analog::{self, Mode};
+use razer_core::hid::{self, HidTransport, PID, VID};
 use razer_core::keymap;
-use razer_core::packet::{self, Command, Response, Status};
-
-const VID: u16 = 0x1532;
-const PID: u16 = 0x0266;
-const CONTROL_INTERFACE: i32 = 3;
-const TID: u8 = 0x1F;
+use razer_core::packet::{self, Command, Response};
+use razer_core::transport;
 
 const USAGE: &str = "\
 usage: razer-probe <command>
@@ -81,12 +77,8 @@ fn list(api: &HidApi) -> Result<()> {
     Ok(())
 }
 
-fn open(api: &HidApi) -> Result<HidDevice> {
-    let info = api
-        .device_list()
-        .find(|d| d.vendor_id() == VID && d.product_id() == PID && d.interface_number() == CONTROL_INTERFACE)
-        .ok_or("control interface MI_03 not found")?;
-    info.open_device(api).map_err(|e| e.to_string())
+fn open(api: &HidApi) -> Result<HidTransport> {
+    hid::open_control(api).map_err(|e| e.to_string())?.ok_or_else(|| "control interface MI_03 not found".into())
 }
 
 fn warn_if_synapse_running() {
@@ -100,38 +92,15 @@ fn warn_if_synapse_running() {
     }
 }
 
-fn exchange(dev: &HidDevice, cmd: Command, size: u8, args: &[u8]) -> Result<Response> {
-    let mut buf = [0u8; packet::LEN + 1];
-    buf[1..].copy_from_slice(&packet::request(TID, cmd, size, args));
-    dev.send_feature_report(&buf).map_err(|e| format!("{cmd} set: {e}"))?;
-    for _ in 0..10 {
-        sleep(Duration::from_millis(15));
-        let mut rx = [0u8; packet::LEN + 1];
-        let n = dev.get_feature_report(&mut rx).map_err(|e| format!("{cmd} get: {e}"))?;
-        if n < rx.len() {
-            return Err(format!("{cmd}: short report ({n} bytes)"));
-        }
-        let r = Response::parse(rx[1..].try_into().unwrap());
-        match r.status {
-            Status::Busy => continue,
-            Status::Ok if r.cmd == cmd && r.tid == TID => {
-                if !r.crc_ok {
-                    eprintln!("warning: {cmd}: response crc mismatch");
-                }
-                return Ok(r);
-            }
-            Status::Ok => return Err(format!("{cmd}: reply is for {} tid {:02X}", r.cmd, r.tid)),
-            s => return Err(format!("{cmd}: status {s:?}")),
-        }
-    }
-    Err(format!("{cmd}: device stayed busy"))
+fn exchange(dev: &HidTransport, cmd: Command, size: u8, args: &[u8]) -> Result<Response> {
+    transport::exchange(dev, cmd, size, args).map_err(|e| e.to_string())
 }
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02X}")).collect::<Vec<_>>().join(" ")
 }
 
-fn info(dev: &HidDevice) -> Result<String> {
+fn info(dev: &HidTransport) -> Result<String> {
     let fw = exchange(dev, Command::new(0x00, 0x81), 2, &[])?;
     let serial = exchange(dev, Command::new(0x00, 0x82), 0x16, &[])?;
     let mode = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
@@ -148,7 +117,7 @@ fn info(dev: &HidDevice) -> Result<String> {
 }
 
 /// Profile ids stored on the device (`05:81`: count, then ids).
-fn profiles(dev: &HidDevice) -> Result<Vec<u8>> {
+fn profiles(dev: &HidTransport) -> Result<Vec<u8>> {
     let r = exchange(dev, Command::new(0x05, 0x81), 80, &[])?;
     let n = (r.args[0] as usize).min(packet::ARGS_LEN - 1);
     Ok(r.args[1..=n].to_vec())
@@ -158,7 +127,7 @@ fn parse_hex(s: &str) -> Result<u8> {
     u8::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|_| format!("bad hex byte: {s}"))
 }
 
-fn raw_get(dev: &HidDevice, a: &[String]) -> Result<String> {
+fn raw_get(dev: &HidTransport, a: &[String]) -> Result<String> {
     if a.len() < 3 {
         return Err(USAGE.into());
     }
@@ -190,7 +159,7 @@ fn key_label(id: u8) -> String {
 }
 
 
-fn actuation(dev: &HidDevice, profile: u8, keys: &[u8]) -> Result<String> {
+fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
     let mut out = String::new();
     for mode in [Mode::Normal, Mode::Hypershift] {
         for &key in keys {
@@ -218,7 +187,7 @@ fn actuation(dev: &HidDevice, profile: u8, keys: &[u8]) -> Result<String> {
     Ok(out)
 }
 
-fn dump(dev: &HidDevice, a: &[String]) -> Result<()> {
+fn dump(dev: &HidTransport, a: &[String]) -> Result<()> {
     let file = a.first().ok_or(USAGE)?;
     let keys = keys_arg(&[])?;
     let mut out = info(dev)?;
@@ -233,7 +202,7 @@ fn dump(dev: &HidDevice, a: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn set_mode(dev: &HidDevice, a: &[String]) -> Result<String> {
+fn set_mode(dev: &HidTransport, a: &[String]) -> Result<String> {
     let m: u8 = match a.first().map(String::as_str) {
         Some("0") => 0x00,
         Some("3") => 0x03,
@@ -245,7 +214,7 @@ fn set_mode(dev: &HidDevice, a: &[String]) -> Result<String> {
 }
 
 /// Read-modify-write of one key's thresholds in the normal layer; the mapping is kept as is.
-fn actuate(dev: &HidDevice, a: &[String]) -> Result<String> {
+fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
     let [profile, key, low, high] = a else {
         return Err(USAGE.into());
     };
@@ -254,7 +223,7 @@ fn actuate(dev: &HidDevice, a: &[String]) -> Result<String> {
     let low: u8 = low.parse().map_err(|_| "low must be 0..=255")?;
     let high: u8 = high.parse().map_err(|_| "high must be 0..=255")?;
 
-    let read = |dev: &HidDevice| -> Result<analog::KeyAssignment> {
+    let read = |dev: &HidTransport| -> Result<analog::KeyAssignment> {
         let r = exchange(
             dev,
             analog::GET_KEY_ASSIGNMENT,
@@ -310,7 +279,7 @@ fn stream(api: &HidApi, a: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn raw_set(dev: &HidDevice, a: &[String]) -> Result<String> {
+fn raw_set(dev: &HidTransport, a: &[String]) -> Result<String> {
     if a.len() < 3 {
         return Err(USAGE.into());
     }

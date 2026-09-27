@@ -4,5 +4,5 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-razer-core = { path = "../core" }
+razer-core = { path = "../core", features = ["hid"] }
 hidapi = "2"
