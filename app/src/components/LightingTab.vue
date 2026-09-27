@@ -306,30 +306,43 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="lighting">
-    <div v-if="dynamicLighting" class="warn">
+  <section class="flex flex-col gap-3">
+    <div v-if="dynamicLighting" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
       ⚠ Подсветкой управляет динамическое освещение Windows — эффекты клавиатуры не видны.
       <button :disabled="blocked" @click="toggleDynamic">Отключить</button>
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
     <p v-if="!draft" class="msg">Подключите клавиатуру, чтобы увидеть её эффекты.</p>
-    <div v-else-if="ui" class="body" :class="{ blocked }">
-      <ul class="fx">
-        <li v-for="g in groups" :key="g.group" :class="[`g-${g.group}`, { on: currentGroup === g }]" @click="!blocked && pickGroup(g)">
+    <div v-else-if="ui" class="flex gap-3" :class="{ 'pointer-events-none opacity-40': blocked }">
+      <ul class="m-0 p-2.5 list-none card w-[210px]">
+        <li
+          v-for="g in groups"
+          :key="g.group"
+          :class="[`fx g-${g.group}`, { on: currentGroup === g }]"
+          class="mb-1 px-2.5 py-2 border-2 rounded-md border-solid bg-key cursor-pointer relative overflow-hidden"
+          @click="!blocked && pickGroup(g)"
+        >
           <span>{{ g.label }}</span>
         </li>
       </ul>
-      <div class="params">
-        <div v-if="currentGroup?.types.length" class="row">
-          <span class="lbl">Тип</span>
-          <span class="seg">
-            <button v-for="t in currentGroup.types" :key="t" :class="{ on: ui.type === t }" :disabled="blocked" @click="setUi('type', t)">
+      <div class="px-3.5 py-2.5 card flex-1">
+        <div v-if="currentGroup?.types.length" class="field">
+          <span class="field-label">Тип</span>
+          <span class="inline-flex">
+            <button
+              v-for="t in currentGroup.types"
+              :key="t"
+              class="seg-btn"
+              :class="{ 'seg-on': ui.type === t }"
+              :disabled="blocked"
+              @click="setUi('type', t)"
+            >
               {{ TYPES[t] ?? t }}
             </button>
           </span>
         </div>
-        <div v-if="slots" class="row">
-          <span class="lbl">{{ slots > 1 ? "Цвета" : "Цвет" }}</span>
+        <div v-if="slots" class="field">
+          <span class="field-label">{{ slots > 1 ? "Цвета" : "Цвет" }}</span>
           <ColorPicker
             v-for="i in slots"
             :key="i"
@@ -339,8 +352,8 @@ onMounted(load);
           />
           <button
             v-if="hasRandom"
-            class="icon shuffle"
-            :class="{ on: ui.random }"
+            class="ml-1.5 icon-btn"
+            :class="{ 'border-accent text-accent': ui.random }"
             :aria-pressed="ui.random"
             title="Случайные цвета"
             aria-label="Случайные цвета"
@@ -365,19 +378,27 @@ onMounted(load);
             </svg>
           </button>
         </div>
-        <div v-if="dirInfo" class="row">
-          <span class="lbl">Направление</span>
-          <span class="seg">
-            <button v-for="d in dirInfo.dirs" :key="d" :class="{ on: dirOf === d }" :disabled="blocked" @click="setUi('dir', d)">
+        <div v-if="dirInfo" class="field">
+          <span class="field-label">Направление</span>
+          <span class="inline-flex">
+            <button
+              v-for="d in dirInfo.dirs"
+              :key="d"
+              class="seg-btn"
+              :class="{ 'seg-on': dirOf === d }"
+              :disabled="blocked"
+              @click="setUi('dir', d)"
+            >
               {{ DIRS[d] ?? d }}
             </button>
           </span>
         </div>
-        <div v-if="speedInfo" class="row">
-          <span class="lbl">Скорость</span>
+        <div v-if="speedInfo" class="field">
+          <span class="field-label">Скорость</span>
           <span class="hint">медленно</span>
           <input
             v-model.number="speedSlider"
+            class="w-60"
             type="range"
             :min="speedInfo.speed![0]"
             :max="speedInfo.speed![1]"
@@ -387,21 +408,27 @@ onMounted(load);
           <span class="hint">быстро</span>
         </div>
         <p v-if="ui.group === 'off'" class="msg">Подсветка выключена.</p>
-        <div v-else class="row">
-          <span class="lbl">Яркость</span>
-          <input v-model.number="percent" type="range" min="0" max="100" step="1" :disabled="blocked" />
+        <div v-else class="field">
+          <span class="field-label">Яркость</span>
+          <input v-model.number="percent" class="w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
           <span>{{ percent }}%</span>
         </div>
       </div>
     </div>
-    <div class="foot">
+    <div class="px-4 py-3 card flex gap-2 items-center">
       <label class="switch">
         <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
         Динамическое освещение Windows
       </label>
-      <span class="spacer"></span>
-      <span v-if="dirty" class="dirty">● не применено</span>
-      <button class="icon" title="Отменить изменения" aria-label="Отменить изменения" :disabled="!dirty || busy || blocked" @click="revert">
+      <span class="flex-1"></span>
+      <span v-if="dirty" class="text-xs text-edited">● не применено</span>
+      <button
+        class="icon-btn"
+        title="Отменить изменения"
+        aria-label="Отменить изменения"
+        :disabled="!dirty || busy || blocked"
+        @click="revert"
+      >
         <svg
           viewBox="0 0 24 24"
           width="18"
@@ -418,7 +445,7 @@ onMounted(load);
       </button>
       <button class="primary" :disabled="!dirty || busy || blocked" @click="apply">Применить</button>
       <button
-        class="icon save"
+        class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
         title="Записать в память клавиатуры"
         aria-label="Записать в память клавиатуры"
         :disabled="!canSave"
@@ -445,59 +472,18 @@ onMounted(load);
 </template>
 
 <style scoped>
-.lighting {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.warn {
-  background: #3a2a10;
-  color: #ffcf7a;
-  padding: 8px 12px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.msg {
-  margin: 0;
-  color: var(--muted);
-}
-.body {
-  display: flex;
-  gap: 12px;
-}
-.body.blocked {
-  opacity: 0.4;
-  pointer-events: none;
-}
 .fx {
-  list-style: none;
-  margin: 0;
-  padding: 10px;
-  width: 210px;
-  background: var(--panel);
-  border-radius: 6px;
+  border-color: transparent;
 }
-.fx li {
-  position: relative;
-  overflow: hidden;
-  padding: 8px 10px;
-  margin-bottom: 4px;
-  border-radius: 6px;
-  background: var(--key);
-  border: 2px solid transparent;
-  cursor: pointer;
-}
-.fx li.on {
+.fx.on {
   border-color: var(--accent);
 }
-.fx li > span {
+.fx > span {
   position: relative;
   z-index: 1;
 }
-.fx li::before,
-.fx li::after {
+.fx::before,
+.fx::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -505,10 +491,10 @@ onMounted(load);
   transition: opacity 0.2s;
   pointer-events: none;
 }
-.fx li:hover::before,
-.fx li.on::before,
-.fx li:hover::after,
-.fx li.on::after {
+.fx:hover::before,
+.fx.on::before,
+.fx:hover::after,
+.fx.on::after {
   opacity: 0.45;
 }
 .g-static::before {
@@ -599,59 +585,10 @@ onMounted(load);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fx li::before,
-  .fx li::after {
+  .fx::before,
+  .fx::after {
     animation: none;
   }
-}
-.params {
-  flex: 1;
-  padding: 10px 14px;
-  background: var(--panel);
-  border-radius: 6px;
-}
-.row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 0;
-}
-.lbl {
-  color: var(--muted);
-  min-width: 100px;
-}
-.hint {
-  color: var(--muted);
-  font-size: 12px;
-}
-.seg {
-  display: inline-flex;
-}
-.seg button {
-  border-radius: 0;
-}
-.seg button:first-child {
-  border-radius: 6px 0 0 6px;
-}
-.seg button:last-child {
-  border-radius: 0 6px 6px 0;
-}
-.seg button.on {
-  background: var(--accent);
-  color: #0b0b0b;
-  border-color: var(--accent);
-}
-input[type="range"] {
-  width: 240px;
-  accent-color: var(--accent);
-}
-.foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--panel);
-  border-radius: 6px;
 }
 .switch {
   display: flex;
@@ -683,32 +620,5 @@ input[type="range"] {
 }
 .switch input:checked::after {
   left: 18px;
-}
-.spacer {
-  flex: 1;
-}
-.dirty {
-  color: var(--edited);
-  font-size: 12px;
-}
-.icon {
-  width: 34px;
-  height: 32px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.shuffle {
-  margin-left: 6px;
-}
-.shuffle.on {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.icon.save {
-  background: transparent;
-  color: #ffb070;
-  border-color: #8a5a20;
 }
 </style>

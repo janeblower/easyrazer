@@ -45,3 +45,7 @@ button.primary:not(:disabled) {
   color: #0b0b0b;
   border-color: var(--accent);
 }
+
+input[type="range"] {
+  accent-color: var(--accent);
+}

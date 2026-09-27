@@ -38,6 +38,11 @@ const bandStyle = computed(() => {
   return { left: `${b.x0}px`, top: `${b.y0}px`, width: `${b.x1 - b.x0}px`, height: `${b.y1 - b.y0}px` };
 });
 
+function keyClass(k: KeyView) {
+  const border = k.key in props.errors ? "border-error" : props.selection.has(k.key) ? "border-accent" : "border-transparent";
+  return [border, k.editable ? "bg-key cursor-pointer" : "bg-key-off text-muted cursor-default"];
+}
+
 function value(key: number): number | undefined {
   return props.edits[key] ?? props.baseline[key];
 }
@@ -86,65 +91,24 @@ function up(e: PointerEvent) {
 </script>
 
 <template>
-  <div ref="root" class="kb" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
+  <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
     <div
       v-for="k in layout"
       :key="k.key"
       :data-key="k.key"
-      class="key"
-      :class="{ sel: selection.has(k.key), edited: k.key in edits, err: k.key in errors, off: !k.editable }"
+      class="px-[5px] py-[3px] border-2 rounded-md border-solid flex flex-col justify-between absolute"
+      :class="keyClass(k)"
       :style="{ left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` }"
       :title="errors[k.key]"
     >
-      <span class="label">{{ k.label }}</span>
-      <span v-if="k.editable && value(k.key) != null" class="mm">{{ value(k.key)!.toFixed(1) }}</span>
+      <span class="text-xs">{{ k.label }}</span>
+      <span
+        v-if="k.editable && value(k.key) != null"
+        class="text-[11px] self-end"
+        :class="k.key in edits ? 'font-semibold text-edited' : 'text-muted'"
+        >{{ value(k.key)!.toFixed(1) }}</span
+      >
     </div>
-    <div v-if="band" class="band" :style="bandStyle"></div>
+    <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
   </div>
 </template>
-
-<style scoped>
-.kb {
-  position: relative;
-}
-.key {
-  position: absolute;
-  background: var(--key);
-  border: 2px solid transparent;
-  border-radius: 6px;
-  padding: 3px 5px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  cursor: pointer;
-}
-.key.off {
-  background: var(--key-off);
-  color: var(--muted);
-  cursor: default;
-}
-.key.sel {
-  border-color: var(--accent);
-}
-.key.edited .mm {
-  color: var(--edited);
-  font-weight: 600;
-}
-.key.err {
-  border-color: var(--error);
-}
-.label {
-  font-size: 12px;
-}
-.mm {
-  font-size: 11px;
-  color: var(--muted);
-  align-self: flex-end;
-}
-.band {
-  position: absolute;
-  border: 1px dashed var(--accent);
-  background: rgba(68, 214, 44, 0.08);
-  pointer-events: none;
-}
-</style>

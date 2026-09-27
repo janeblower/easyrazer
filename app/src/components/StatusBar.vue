@@ -4,6 +4,8 @@ import type { Status } from "../types";
 
 const props = defineProps<{ status: Status | null; progress: [number, number] | null; message: string; error: string }>();
 
+const KIND: Record<string, string> = { info: "bg-panel", warn: "bg-warn-bg text-warn", ok: "bg-panel text-accent" };
+
 const view = computed(() => {
   const s = props.status;
   if (props.error) return { kind: "warn", text: props.error };
@@ -25,20 +27,5 @@ const view = computed(() => {
 </script>
 
 <template>
-  <div class="status" :class="view.kind">{{ view.text }}</div>
+  <div class="px-4 py-2 rounded-md" :class="KIND[view.kind]">{{ view.text }}</div>
 </template>
-
-<style scoped>
-.status {
-  padding: 8px 16px;
-  border-radius: 6px;
-  background: var(--panel);
-}
-.warn {
-  background: #3a2a10;
-  color: #ffcf7a;
-}
-.ok {
-  color: var(--accent);
-}
-</style>

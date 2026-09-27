@@ -53,9 +53,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <span ref="root" class="cp">
+  <span ref="root" class="inline-flex relative">
     <button
-      class="sw"
+      class="p-0 border-[#555] rounded-md h-[30px] w-9 relative overflow-hidden"
       :class="{ empty: !modelValue }"
       :style="{ background: hex(last) }"
       :disabled="disabled"
@@ -63,39 +63,51 @@ onUnmounted(() => {
       :aria-label="modelValue ? `Цвет ${hex(modelValue)}` : 'Нет цвета'"
       @click="open = !open"
     ></button>
-    <div v-if="open" class="pop" role="dialog" aria-label="Выбор цвета" @keydown.esc="open = false">
-      <div class="grid">
-        <button v-for="c in PRESETS" :key="c" class="preset" :style="{ background: c }" :aria-label="c" @click="pick(c)"></button>
+    <div
+      v-if="open"
+      class="p-2.5 border border-line rounded-lg border-solid bg-panel w-[200px] shadow-[0_6px_20px_rgba(0,0,0,0.5)] left-0 top-9 absolute z-10"
+      role="dialog"
+      aria-label="Выбор цвета"
+      @keydown.esc="open = false"
+    >
+      <div class="gap-1.5 grid grid-cols-6">
+        <button
+          v-for="c in PRESETS"
+          :key="c"
+          class="p-0 border-[#555] rounded-[5px] size-[26px]"
+          :style="{ background: c }"
+          :aria-label="c"
+          @click="pick(c)"
+        ></button>
       </div>
-      <div class="actions">
-        <label class="custom">
+      <div class="mt-2.5 flex gap-1.5 items-center justify-between">
+        <label class="text-xs px-2 py-1 border border-line rounded-md border-solid bg-key cursor-pointer relative">
           Другой…
-          <input type="color" :value="hex(last)" @input="pick(($event.target as HTMLInputElement).value)" />
+          <input
+            class="opacity-0 cursor-pointer inset-0 absolute"
+            type="color"
+            :value="hex(last)"
+            @input="pick(($event.target as HTMLInputElement).value)"
+          />
         </label>
-        <button class="none" :class="{ on: !modelValue }" :aria-pressed="!modelValue" @click="toggleNone">⊘ Без цвета</button>
+        <button
+          class="text-xs px-2 py-1"
+          :class="{ 'border-error bg-error text-white': !modelValue }"
+          :aria-pressed="!modelValue"
+          @click="toggleNone"
+        >
+          ⊘ Без цвета
+        </button>
       </div>
     </div>
   </span>
 </template>
 
 <style scoped>
-.cp {
-  position: relative;
-  display: inline-flex;
-}
-.sw {
-  width: 36px;
-  height: 30px;
-  padding: 0;
-  border: 1px solid #555;
-  border-radius: 6px;
-  position: relative;
-  overflow: hidden;
-}
-.sw.empty {
+.empty {
   opacity: 0.35;
 }
-.sw.empty::after {
+.empty::after {
   content: "";
   position: absolute;
   left: -4px;
@@ -103,60 +115,5 @@ onUnmounted(() => {
   width: 44px;
   border-top: 2px solid var(--error);
   transform: rotate(-35deg);
-}
-.pop {
-  position: absolute;
-  top: 36px;
-  left: 0;
-  z-index: 10;
-  background: var(--panel);
-  border: 1px solid #3a3a3a;
-  border-radius: 8px;
-  padding: 10px;
-  width: 200px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
-}
-.preset {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid #555;
-  border-radius: 5px;
-}
-.actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 10px;
-  gap: 6px;
-}
-.custom {
-  position: relative;
-  padding: 4px 8px;
-  border: 1px solid #3a3a3a;
-  border-radius: 6px;
-  background: var(--key);
-  cursor: pointer;
-  font-size: 12px;
-}
-.custom input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.none {
-  font-size: 12px;
-  padding: 4px 8px;
-}
-.none.on {
-  background: var(--error);
-  border-color: var(--error);
-  color: #fff;
 }
 </style>

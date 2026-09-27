@@ -47,7 +47,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section v-if="s" class="settings">
+  <section v-if="s" class="p-4 rounded-lg bg-panel flex flex-col gap-3">
     <label
       ><input type="checkbox" :checked="s.autostart" @change="set('set_autostart', { on: checked($event) })" /> Запускать с Windows</label
     >
@@ -67,21 +67,6 @@ onUnmounted(() => {
       ><input type="checkbox" :checked="s.confirm_write" @change="set('set_confirm_write', { on: checked($event) })" /> Спрашивать перед
       записью в память клавиатуры</label
     >
-    <p v-if="message" class="err">{{ message }}</p>
+    <p v-if="message" class="text-error m-0">{{ message }}</p>
   </section>
 </template>
-
-<style scoped>
-.settings {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: var(--panel);
-  border-radius: 8px;
-}
-.err {
-  color: var(--error);
-  margin: 0;
-}
-</style>

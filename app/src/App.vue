@@ -29,6 +29,13 @@ let unlistenClose: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
+const tabClass = (t: string) => [
+  "rounded-b-none",
+  tab.value === t
+    ? "border-x-transparent border-t-transparent border-b-2 border-b-accent bg-key text-text"
+    : "bg-panel text-muted border-transparent",
+];
+
 const dirty = computed(() => Object.keys(edits.value).length);
 const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0);
 const selectedValue = computed(() => {
@@ -176,11 +183,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main>
-    <nav class="tabs">
-      <button :class="{ on: tab === 'actuation' }" @click="tab = 'actuation'">Актуация</button>
-      <button :class="{ on: tab === 'lighting' }" @click="tab = 'lighting'">Подсветка</button>
-      <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">Настройки</button>
+  <main class="p-4 flex flex-col gap-4">
+    <nav class="flex gap-1">
+      <button :class="tabClass('actuation')" @click="tab = 'actuation'">Актуация</button>
+      <button :class="tabClass('lighting')" @click="tab = 'lighting'">Подсветка</button>
+      <button :class="tabClass('settings')" @click="tab = 'settings'">Настройки</button>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
@@ -202,34 +209,6 @@ onUnmounted(() => {
     <SettingsTab v-else />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
     <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
-    <footer>EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>
+    <footer class="text-xs text-muted">EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>
   </main>
 </template>
-
-<style scoped>
-main {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-}
-footer {
-  color: var(--muted);
-  font-size: 12px;
-}
-.tabs {
-  display: flex;
-  gap: 4px;
-}
-.tabs button {
-  border-radius: 6px 6px 0 0;
-  background: var(--panel);
-  color: var(--muted);
-  border-color: transparent;
-}
-.tabs button.on {
-  background: var(--key);
-  color: var(--text);
-  border-bottom: 2px solid var(--accent);
-}
-</style>

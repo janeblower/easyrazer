@@ -8,39 +8,14 @@ function onInput(e: Event) {
 </script>
 
 <template>
-  <div class="panel">
+  <div class="px-4 py-3 card flex gap-3 items-center">
     <button @click="emit('selectAll')">Выделить все</button>
     <button :disabled="!count" @click="emit('clear')">Снять выделение</button>
-    <span class="count">{{ count ? `Выделено: ${count}` : "Выделите клавиши: клик, Ctrl+клик, рамка" }}</span>
-    <input type="range" min="1.5" max="3.6" step="0.1" :value="value ?? 1.5" :disabled="!count" @input="onInput" />
-    <span class="val">{{ value != null ? `${value.toFixed(1)} мм` : count ? "разные" : "" }}</span>
-    <span class="spacer"></span>
+    <span class="text-muted min-w-[260px]">{{ count ? `Выделено: ${count}` : "Выделите клавиши: клик, Ctrl+клик, рамка" }}</span>
+    <input class="w-[220px]" type="range" min="1.5" max="3.6" step="0.1" :value="value ?? 1.5" :disabled="!count" @input="onInput" />
+    <span class="min-w-[60px]">{{ value != null ? `${value.toFixed(1)} мм` : count ? "разные" : "" }}</span>
+    <span class="flex-1"></span>
     <button :disabled="!dirty || busy" @click="emit('revert')">Отменить</button>
     <button class="primary" :disabled="!canApply" @click="emit('apply')">Применить{{ dirty ? ` (${dirty})` : "" }}</button>
   </div>
 </template>
-
-<style scoped>
-.panel {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--panel);
-  border-radius: 6px;
-}
-.count {
-  color: var(--muted);
-  min-width: 260px;
-}
-input[type="range"] {
-  width: 220px;
-  accent-color: var(--accent);
-}
-.val {
-  min-width: 60px;
-}
-.spacer {
-  flex: 1;
-}
-</style>
