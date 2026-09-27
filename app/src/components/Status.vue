@@ -1,0 +1,25 @@
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({ status: Object, progress: Array, message: String })
+
+const view = computed(() => {
+  const s = props.status
+  if (!s) return { kind: 'info', text: 'Поиск клавиатуры…' }
+  if (s.synapse) return { kind: 'warn', text: 'Запущен Synapse (RazerAppEngine). Закройте его, включая значок в трее, — иначе он перезапишет настройки.' }
+  if (!s.device) return { kind: 'warn', text: 'Клавиатура Huntsman V2 Analog не найдена.' }
+  if (props.progress) return { kind: 'info', text: `Чтение клавиатуры: ${props.progress[0]} из ${props.progress[1]}` }
+  if (props.message) return { kind: 'info', text: props.message }
+  return { kind: 'ok', text: `Подключено, профиль ${s.profile ?? '?'}` }
+})
+</script>
+
+<template>
+  <div class="status" :class="view.kind">{{ view.text }}</div>
+</template>
+
+<style scoped>
+.status { padding: 8px 16px; border-radius: 6px; background: var(--panel); }
+.warn { background: #3a2a10; color: #ffcf7a; }
+.ok { color: var(--accent); }
+</style>
