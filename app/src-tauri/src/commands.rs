@@ -38,11 +38,16 @@ fn mm(threshold: u8) -> f32 {
     (analog::threshold_to_mm(threshold) * 10.0).round() / 10.0
 }
 
+/// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
+pub fn poll(state: &AppState) -> Status {
+    let watch = state.device.lock().unwrap().settings().watch_synapse;
+    let synapse = device::synapse_check(watch, device::synapse_running);
+    state.device.lock().unwrap().status(Some(synapse))
+}
+
 #[tauri::command]
-pub async fn status(state: State<'_, AppState>, check_synapse: bool) -> Result<Status, String> {
-    // tasklist takes a few hundred ms; keep it out of the lock so previews are not held up.
-    let synapse = check_synapse.then(device::synapse_running);
-    Ok(state.device.lock().unwrap().status(synapse))
+pub async fn status(state: State<'_, AppState>) -> Result<Status, String> {
+    Ok(poll(&state))
 }
 
 #[tauri::command]

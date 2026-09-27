@@ -194,7 +194,15 @@ impl Device {
     }
 
     pub fn set_confirm_write(&mut self, on: bool) -> Result<(), String> {
-        self.settings.confirm_write = on;
+        self.update_settings(|s| s.confirm_write = on)
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    pub fn update_settings(&mut self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
+        f(&mut self.settings);
         settings::save(&self.settings)
     }
 
@@ -244,6 +252,11 @@ fn usable(d: &DeviceSpec, look: Option<Look>) -> Option<Look> {
     look.filter(|l| lighting::encode(d, &l.effect).is_ok())
 }
 
+/// With watching off Synapse is taken as absent, so the lighting is restored if it was blocked before.
+pub fn synapse_check(watch: bool, running: impl FnOnce() -> bool) -> bool {
+    watch && running()
+}
+
 pub fn synapse_running() -> bool {
     let out = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq RazerAppEngine.exe", "/NH"])
@@ -270,6 +283,17 @@ mod tests {
 
     fn tasklist(code: u32, stdout: &[u8]) -> Option<Output> {
         Some(Output { status: ExitStatus::from_raw(code), stdout: stdout.to_vec(), stderr: Vec::new() })
+    }
+
+    #[test]
+    fn synapse_is_not_checked_when_watching_is_off() {
+        let mut ran = false;
+        assert!(!synapse_check(false, || {
+            ran = true;
+            true
+        }));
+        assert!(!ran);
+        assert!(synapse_check(true, || true));
     }
 
     #[test]

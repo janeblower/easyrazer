@@ -18,7 +18,7 @@ const busy = ref(false)
 const message = ref('')
 const tab = ref('actuation')
 let loadedProfile = null // profile the baseline was read from
-let timer
+let unlistenStatus
 
 const dirty = computed(() => Object.keys(edits.value).length)
 const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0)
@@ -27,15 +27,18 @@ const selectedValue = computed(() => {
   return values.length && values.every(v => v === values[0]) ? values[0] ?? null : null
 })
 
-async function refresh(checkSynapse) {
-  // The backend holds the device lock for the whole read or apply; polls would only queue up behind it.
-  if (busy.value) return
+async function refresh() {
   try {
-    status.value = await invoke('status', { checkSynapse })
+    await onStatus(await invoke('status'))
   } catch (e) {
     message.value = String(e)
-    return
   }
+}
+
+async function onStatus(s) {
+  // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
+  if (busy.value) return
+  status.value = s
   if (!status.value.device || status.value.synapse) {
     loadedProfile = null
     return
@@ -110,21 +113,17 @@ async function apply() {
   } finally {
     busy.value = false
   }
-  if (failed) await refresh(true)
+  if (failed) await refresh()
 }
-
-const onFocus = () => refresh(true)
 
 onMounted(async () => {
   layout.value = await invoke('layout')
-  await refresh(true)
-  timer = setInterval(() => refresh(true), 2000)
-  window.addEventListener('focus', onFocus)
+  unlistenStatus = await listen('status', e => onStatus(e.payload))
+  await refresh()
 })
 
 onUnmounted(() => {
-  clearInterval(timer)
-  window.removeEventListener('focus', onFocus)
+  unlistenStatus?.()
 })
 </script>
 
