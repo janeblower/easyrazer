@@ -194,8 +194,8 @@ pub fn lighting_keys() -> Vec<LayoutKey> {
     out.extend([
         zone(MEDIA, "● ● ●", 19.0, 0.5, 3.0, 1.0, Shape::Round),
         zone(DIAL, "◎", 22.0, 0.5, 1.0, 1.0, Shape::Round),
-        zone(EDGE, "Огранка", 0.1, 0.1, 23.3, 7.05, Shape::Ring),
-        zone(WRIST, "Подставка", 2.0, 7.5, 19.5, 1.0, Shape::Key),
+        zone(EDGE, "Edge", 0.1, 0.1, 23.3, 7.05, Shape::Ring),
+        zone(WRIST, "Wrist rest", 2.0, 7.5, 19.5, 1.0, Shape::Key),
     ]);
     out
 }

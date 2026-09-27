@@ -76,13 +76,13 @@ pub fn effect_infos(d: &DeviceSpec) -> Vec<EffectInfo> {
 
 fn template<'a>(d: &'a DeviceSpec, name: &str) -> Result<&'a EffectTemplate, Error> {
     if !d.lighting.effects.iter().any(|e| e == name) {
-        return Err(Error::BadArgument(format!("{}: эффект {name} не поддерживается", d.name)));
+        return Err(Error::BadArgument(format!("{}: effect {name} is not supported", d.name)));
     }
-    d.protocol().effects.get(name).ok_or_else(|| Error::BadArgument(format!("эффект {name} не описан в протоколе")))
+    d.protocol().effects.get(name).ok_or_else(|| Error::BadArgument(format!("effect {name} is not in the protocol")))
 }
 
 fn missing(name: &str, field: &str) -> Error {
-    Error::BadArgument(format!("эффект {name}: не задан {field}"))
+    Error::BadArgument(format!("effect {name}: {field} is missing"))
 }
 
 /// Effect bytes that follow `store led`.
@@ -95,14 +95,14 @@ pub fn encode(d: &DeviceSpec, e: &Effect) -> Result<Vec<u8>, Error> {
             "{rgb2}" => out.extend(e.rgb2.ok_or_else(|| missing(&e.name, "rgb2"))?),
             "{dir}" => {
                 let dir = e.dir.as_deref().ok_or_else(|| missing(&e.name, "dir"))?;
-                let b = t.dir.get(dir).ok_or_else(|| Error::BadArgument(format!("направление {dir} неизвестно")))?;
+                let b = t.dir.get(dir).ok_or_else(|| Error::BadArgument(format!("unknown direction {dir}")))?;
                 out.push(*b);
             }
             "{speed}" => {
                 let s = e.speed.ok_or_else(|| missing(&e.name, "speed"))?;
                 let [lo, hi] = t.speed.ok_or_else(|| missing(&e.name, "speed range"))?;
                 if !(lo..=hi).contains(&s) {
-                    return Err(Error::BadArgument(format!("скорость {s} вне {lo}..={hi}")));
+                    return Err(Error::BadArgument(format!("speed {s} is outside {lo}..={hi}")));
                 }
                 out.push(s);
             }
@@ -170,7 +170,7 @@ fn frame(colors: &BTreeMap<u8, Rgb>) -> Vec<[Rgb; FRAME_COLS]> {
 }
 
 fn set_frame(t: &impl Transport, d: &DeviceSpec, look: &Look) -> Result<(), Error> {
-    let set = d.protocol().set_frame.ok_or_else(|| Error::BadArgument(format!("{}: своя раскладка не поддерживается", d.name)))?;
+    let set = d.protocol().set_frame.ok_or_else(|| Error::BadArgument(format!("{}: custom layout is not supported", d.name)))?;
     let colors = look.effect.colors.as_ref().ok_or_else(|| missing(CUSTOM, "colors"))?;
     for (row, cells) in frame(colors).iter().enumerate() {
         let args = [&[store(d, Store::Temporary), 0, row as u8, 0, FRAME_COLS as u8 - 1][..], cells.as_flattened()].concat();
@@ -183,7 +183,7 @@ pub fn set_look(t: &impl Transport, d: &DeviceSpec, s: Store, look: &Look) -> Re
     let p = d.protocol();
     if look.effect.name == CUSTOM {
         if s == Store::Saved {
-            return Err(Error::BadArgument("своя раскладка не записывается в память клавиатуры".into()));
+            return Err(Error::BadArgument("the custom layout cannot be saved to the keyboard".into()));
         }
         template(d, CUSTOM)?;
         set_frame(t, d, look)?;

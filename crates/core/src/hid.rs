@@ -68,7 +68,7 @@ pub fn unsupported_keyboard(api: &HidApi) -> Option<u16> {
 /// Hands the lamps back to the firmware (`on`) or to the host. Going from host to firmware
 /// restarts the factory spectrum, so callers re-send their effect afterwards.
 pub fn set_autonomous(api: &HidApi, d: &DeviceSpec, on: bool) -> Result<(), Error> {
-    let report = d.lamp_array.as_ref().ok_or_else(|| Error::Io(format!("{}: нет LampArray", d.name)))?.control_report;
+    let report = d.lamp_array.as_ref().ok_or_else(|| Error::Io(format!("{}: no LampArray", d.name)))?.control_report;
     let info = api
         .device_list()
         .find(|i| i.vendor_id() == d.vid && i.product_id() == d.pid && i.usage_page() == USAGE_PAGE_LAMP_ARRAY)
