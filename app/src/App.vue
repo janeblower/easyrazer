@@ -15,7 +15,7 @@ const selection = ref(new Set())
 const progress = ref(null)
 const busy = ref(false)
 const message = ref('')
-let loaded = false
+let loadedProfile = null // profile the baseline was read from
 let timer
 
 const dirty = computed(() => Object.keys(edits.value).length)
@@ -26,6 +26,8 @@ const selectedValue = computed(() => {
 })
 
 async function refresh(checkSynapse) {
+  // The backend holds the device lock for the whole read or apply; polls would only queue up behind it.
+  if (busy.value) return
   try {
     status.value = await invoke('status', { checkSynapse })
   } catch (e) {
@@ -33,18 +35,19 @@ async function refresh(checkSynapse) {
     return
   }
   if (!status.value.device || status.value.synapse) {
-    loaded = false
+    loadedProfile = null
     return
   }
-  if (!loaded && !busy.value) await load()
+  if (loadedProfile !== status.value.profile && !busy.value) await load()
 }
 
 async function load() {
   busy.value = true
   const unlisten = await listen('read-progress', e => (progress.value = e.payload))
   try {
+    const profile = status.value.profile
     baseline.value = await invoke('read_all')
-    loaded = true
+    loadedProfile = profile
     message.value = ''
   } catch (e) {
     message.value = String(e)
