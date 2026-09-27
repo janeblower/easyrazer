@@ -1,11 +1,19 @@
 //! Built-in firmware lighting effects, encoded from the device's protocol templates.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::devices::{DeviceSpec, EffectTemplate};
+use crate::layout;
 use crate::transport::{Error, Transport, exchange};
 
 pub type Rgb = [u8; 3];
+
+/// Per-key colors; the firmware keeps them only in the temporary store.
+pub const CUSTOM: &str = "custom";
+const FRAME_ROWS: u8 = 8;
+const FRAME_COLS: usize = 23;
 
 /// One firmware effect; which fields matter is decided by its template.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -19,6 +27,9 @@ pub struct Effect {
     pub dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<u8>,
+    /// `custom` only: key `fwID` or `layout` zone id to color; the rest stays dark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<BTreeMap<u8, Rgb>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -148,8 +159,35 @@ fn get_size(d: &DeviceSpec) -> u8 {
     2 + d.protocol().effects.values().map(len).max().unwrap_or(0)
 }
 
+fn frame(colors: &BTreeMap<u8, Rgb>) -> Vec<[Rgb; FRAME_COLS]> {
+    let mut rows = vec![[[0; 3]; FRAME_COLS]; FRAME_ROWS as usize];
+    for (&id, &rgb) in colors {
+        for (r, c) in layout::cells(id) {
+            rows[r as usize][c as usize] = rgb;
+        }
+    }
+    rows
+}
+
+fn set_frame(t: &impl Transport, d: &DeviceSpec, look: &Look) -> Result<(), Error> {
+    let set = d.protocol().set_frame.ok_or_else(|| Error::BadArgument(format!("{}: своя раскладка не поддерживается", d.name)))?;
+    let colors = look.effect.colors.as_ref().ok_or_else(|| missing(CUSTOM, "colors"))?;
+    for (row, cells) in frame(colors).iter().enumerate() {
+        let args = [&[store(d, Store::Temporary), 0, row as u8, 0, FRAME_COLS as u8 - 1][..], cells.as_flattened()].concat();
+        exchange(t, set, args.len() as u8, &args)?;
+    }
+    Ok(())
+}
+
 pub fn set_look(t: &impl Transport, d: &DeviceSpec, s: Store, look: &Look) -> Result<(), Error> {
     let p = d.protocol();
+    if look.effect.name == CUSTOM {
+        if s == Store::Saved {
+            return Err(Error::BadArgument("своя раскладка не записывается в память клавиатуры".into()));
+        }
+        template(d, CUSTOM)?;
+        set_frame(t, d, look)?;
+    }
     let args = [vec![store(d, s), d.lighting.led], encode(d, &look.effect)?].concat();
     exchange(t, p.set_effect, args.len() as u8, &args)?;
     exchange(t, p.set_brightness, 3, &[store(d, s), d.lighting.led, look.brightness]).map(|_| ())
@@ -229,7 +267,7 @@ mod tests {
 
     #[test]
     fn unknown_effect_bytes_decode_to_none() {
-        assert_eq!(decode(spec(), &hex("08 00 00")), None);
+        assert_eq!(decode(spec(), &hex("09 00 00")), None);
         assert_eq!(decode(spec(), &hex("01 00 00 01 FF")), None);
     }
 
@@ -271,7 +309,7 @@ mod tests {
     #[test]
     fn unknown_effect_in_the_keyboard_is_none() {
         let kb = FakeKeyboard::new(&[]);
-        kb.effects.borrow_mut().insert(0, hex("08 00 00"));
+        kb.effects.borrow_mut().insert(0, hex("09 00 00"));
         assert_eq!(get_look(&kb, spec(), Store::Temporary).unwrap(), None);
     }
 
@@ -283,5 +321,43 @@ mod tests {
         assert_eq!((wave.colors, wave.dirs.clone(), wave.speed, wave.fast_low), (0, vec!["left".into(), "right".into()], Some([1, 255]), true));
         let two = infos.iter().find(|i| i.name == "breathing_two").unwrap();
         assert_eq!((two.colors, two.speed), (2, None));
+    }
+
+    fn custom(colors: &[(u8, Rgb)]) -> Look {
+        Look { effect: Effect { colors: Some(colors.iter().copied().collect()), ..fx(CUSTOM) }, brightness: 0x80 }
+    }
+
+    #[test]
+    fn custom_look_paints_the_frame_and_shows_it() {
+        let kb = FakeKeyboard::new(&[]);
+        let esc = crate::keymap::by_name("ESC").unwrap();
+        let space = crate::keymap::by_name("SPACEBAR").unwrap();
+        let green = [0, 0xFF, 0];
+        set_look(&kb, spec(), Store::Temporary, &custom(&[(esc, RED), (space, green), (layout::EDGE, BLUE)])).unwrap();
+        let frame = kb.frame.borrow();
+        let at = |r: u8, c: usize| frame[&r][c * 3..c * 3 + 3].to_vec();
+        assert_eq!(frame.len(), 8);
+        assert!(frame.values().all(|row| row.len() == 23 * 3));
+        assert_eq!(at(0, 1), RED);
+        assert_eq!(at(0, 0), [0, 0, 0]);
+        assert_eq!(at(5, 7), green);
+        assert!((0..23).all(|c| at(6, c) == BLUE));
+        assert!((0..23).all(|c| at(7, c) == [0, 0, 0]));
+        assert_eq!(kb.effects.borrow()[&0], hex("08 00 00 00"));
+        assert_eq!(kb.brightness.borrow()[&0], 0x80);
+    }
+
+    #[test]
+    fn custom_look_cannot_go_to_the_flash() {
+        let kb = FakeKeyboard::new(&[]);
+        assert!(matches!(set_look(&kb, spec(), Store::Saved, &custom(&[])), Err(Error::BadArgument(_))));
+        assert!(matches!(set_look(&kb, spec(), Store::Temporary, &Look { effect: fx(CUSTOM), brightness: 1 }), Err(Error::BadArgument(_))));
+        assert!(kb.sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn custom_effect_is_offered_and_recognised() {
+        assert!(effect_infos(spec()).iter().any(|i| i.name == CUSTOM));
+        assert_eq!(decode(spec(), &hex("08 00 00 00 00")), Some(fx(CUSTOM)));
     }
 }

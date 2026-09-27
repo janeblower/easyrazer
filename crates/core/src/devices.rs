@@ -49,6 +49,9 @@ pub struct Protocol {
     pub set_brightness: Command,
     #[serde(deserialize_with = "command")]
     pub get_brightness: Command,
+    /// Per-key colors of the `custom` effect: `store 00 row first last RGB…`.
+    #[serde(default, deserialize_with = "opt_command")]
+    pub set_frame: Option<Command>,
     pub stores: Stores,
     pub effects: BTreeMap<String, EffectTemplate>,
 }
@@ -98,6 +101,10 @@ fn hex_u8<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
 
 fn hex_u16<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     u16::from_str_radix(&String::deserialize(d)?, 16).map_err(serde::de::Error::custom)
+}
+
+fn opt_command<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Command>, D::Error> {
+    command(d).map(Some)
 }
 
 fn command<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> {

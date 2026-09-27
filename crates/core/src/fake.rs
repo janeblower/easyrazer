@@ -28,6 +28,8 @@ pub struct FakeKeyboard {
     /// Effect bytes after `store led`, per store.
     pub effects: RefCell<BTreeMap<u8, Vec<u8>>>,
     pub brightness: RefCell<BTreeMap<u8, u8>>,
+    /// Custom frame rows of the temporary store: RGB bytes per row.
+    pub frame: RefCell<BTreeMap<u8, Vec<u8>>>,
     reply: RefCell<Report>,
 }
 
@@ -63,6 +65,7 @@ impl FakeKeyboard {
             sent: RefCell::new(Vec::new()),
             effects: RefCell::new([(0, vec![0x03, 0, 0, 0]), (1, vec![0x03, 0, 0, 0])].into()),
             brightness: RefCell::new([(0, 0xF2), (1, 0xF2)].into()),
+            frame: RefCell::new(BTreeMap::new()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
     }
@@ -119,6 +122,10 @@ impl FakeKeyboard {
                 Some(e) => (OK, [&a[..2], e.as_slice()].concat()),
                 None => (FAIL, Vec::new()),
             },
+            (0x0F, 0x03) if a[0] == 0 && a.len() == 5 + 3 * (a[4] - a[3] + 1) as usize => {
+                self.frame.borrow_mut().insert(a[2], a[5..].to_vec());
+                (OK, a.to_vec())
+            }
             (0x0F, 0x04) => {
                 self.brightness.borrow_mut().insert(a[0], a[2]);
                 (OK, a.to_vec())

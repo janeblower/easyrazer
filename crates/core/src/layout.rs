@@ -11,7 +11,26 @@ pub struct LayoutKey {
     pub w: f32,
     pub h: f32,
     pub editable: bool,
+    pub round: bool,
 }
+
+/// Lit areas that are not keys; ids above every `fwID`.
+pub const MEDIA: u8 = 200;
+pub const DIAL: u8 = 201;
+pub const EDGE: u8 = 202;
+pub const WRIST: u8 = 203;
+
+/// Custom frame column of each key, per row, in the order the keys appear in `KEYS`.
+/// Taken on the device (RECON «Раскладка custom frame»); rows follow `y`.
+const LED_COLS: [&[u8]; 6] = [
+    &[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20],
+    &[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 19, 20, 21],
+    &[1, 2, 3, 7, 11, 12, 13, 14, 15, 16, 17, 19, 20],
+];
+const FRAME_COLS: u8 = 23;
 
 /// The Fn key sits where `RIGHT_GUI` is on a standard board; it switches layers and is not tuned.
 const FN_KEY: &str = "RIGHT_GUI";
@@ -134,8 +153,43 @@ pub fn keys() -> Vec<LayoutKey> {
             w,
             h,
             editable: name != FN_KEY,
+            round: false,
         })
         .collect()
+}
+
+/// Cells of the custom frame (row, column) that a key or zone lights.
+pub fn cells(id: u8) -> Vec<(u8, u8)> {
+    match id {
+        MEDIA => vec![(0, 18)],
+        DIAL => vec![(0, 21)],
+        EDGE => (0..FRAME_COLS).map(|c| (6, c)).collect(),
+        WRIST => (0..FRAME_COLS).map(|c| (7, c)).collect(),
+        _ => {
+            let Some(i) = KEYS.iter().position(|k| keymap::by_name(k.0) == Some(id)) else { return Vec::new() };
+            let row = KEYS[i].3 as usize;
+            let nth = KEYS[..i].iter().filter(|k| k.3 as usize == row).count();
+            vec![(row as u8, LED_COLS[row][nth])]
+        }
+    }
+}
+
+/// Keys and lit zones for painting: the edge rings the keys, the media buttons and dial sit
+/// above the numpad, the wrist rest below.
+pub fn lighting_keys() -> Vec<LayoutKey> {
+    let zone = |key, label, x, y, w, h, round| LayoutKey { key, label, x, y, w, h, editable: true, round };
+    let mut out: Vec<LayoutKey> =
+        keys().into_iter().map(|k| LayoutKey { x: k.x + 0.5, y: k.y + 0.5, editable: true, ..k }).collect();
+    out.extend([
+        zone(MEDIA, "● ● ●", 19.0, 0.5, 3.0, 1.0, true),
+        zone(DIAL, "◎", 22.0, 0.5, 1.0, 1.0, true),
+        zone(EDGE, "", 0.1, 0.1, 23.3, 0.3, false),
+        zone(EDGE, "", 0.1, 6.85, 23.3, 0.3, false),
+        zone(EDGE, "", 0.1, 0.1, 0.3, 7.05, false),
+        zone(EDGE, "", 23.1, 0.1, 0.3, 7.05, false),
+        zone(WRIST, "Подставка", 2.0, 7.5, 19.5, 1.0, false),
+    ]);
+    out
 }
 
 #[cfg(test)]
@@ -169,5 +223,61 @@ mod tests {
     fn only_fn_is_not_editable() {
         let fixed: Vec<u8> = keys().iter().filter(|k| !k.editable).map(|k| k.key).collect();
         assert_eq!(fixed, [keymap::by_name("RIGHT_GUI").unwrap()]);
+    }
+
+    fn cell(name: &str) -> Vec<(u8, u8)> {
+        cells(keymap::by_name(name).unwrap())
+    }
+
+    #[test]
+    fn every_key_lights_its_own_cell() {
+        let mut seen: Vec<(u8, u8)> = keys().iter().flat_map(|k| cells(k.key)).collect();
+        assert_eq!(seen.len(), 104);
+        assert!(seen.iter().all(|&(r, c)| r < 6 && c < 23), "{seen:?}");
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 104);
+    }
+
+    #[test]
+    fn cells_match_the_hardware_table() {
+        for (name, rc) in [
+            ("ESC", (0, 1)),
+            ("F1", (0, 3)),
+            ("PAUSE", (0, 17)),
+            ("TILDE", (1, 1)),
+            ("NUMPAD_DASH", (1, 21)),
+            ("BACKSLASH", (2, 14)),
+            ("NUMPAD_PLUS", (2, 21)),
+            ("ENTER", (3, 14)),
+            ("NUMPAD_6", (3, 20)),
+            ("Z", (4, 3)),
+            ("UP_ARROW", (4, 16)),
+            ("NUMPAD_ENTER", (4, 21)),
+            ("SPACEBAR", (5, 7)),
+            ("RIGHT_GUI", (5, 12)),
+            ("NUMPAD_0", (5, 19)),
+            ("NUMPAD_PERIOD", (5, 20)),
+        ] {
+            assert_eq!(cell(name), [rc], "{name}");
+        }
+    }
+
+    #[test]
+    fn zones_light_their_cells() {
+        assert_eq!(cells(MEDIA), [(0, 18)]);
+        assert_eq!(cells(DIAL), [(0, 21)]);
+        assert_eq!(cells(EDGE), (0..23).map(|c| (6, c)).collect::<Vec<_>>());
+        assert_eq!(cells(WRIST), (0..23).map(|c| (7, c)).collect::<Vec<_>>());
+        assert!(cells(0).is_empty());
+    }
+
+    #[test]
+    fn lighting_map_has_every_key_and_zone_selectable() {
+        let map = lighting_keys();
+        assert!(map.iter().all(|k| k.editable && k.x >= 0.0 && k.y >= 0.0));
+        for id in keys().iter().map(|k| k.key).chain([MEDIA, DIAL, EDGE, WRIST]) {
+            assert!(map.iter().any(|k| k.key == id), "{id}");
+        }
     }
 }

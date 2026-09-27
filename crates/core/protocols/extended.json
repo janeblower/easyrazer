@@ -3,6 +3,7 @@
   "get_effect": "0F:82",
   "set_brightness": "0F:04",
   "get_brightness": "0F:84",
+  "set_frame": "0F:03",
   "stores": { "temporary": 0, "saved": 1 },
   "effects": {
     "off": { "bytes": "00 00 00 00" },
@@ -18,6 +19,7 @@
     "reactive_ripple_random": { "bytes": "06 00 02 00" },
     "starlight_random": { "bytes": "07 00 {speed} 00", "speed": [1, 3], "fast": "low" },
     "starlight_one": { "bytes": "07 00 {speed} 01 {rgb1}", "speed": [1, 3], "fast": "low" },
-    "starlight_two": { "bytes": "07 00 {speed} 02 {rgb1} {rgb2}", "speed": [1, 3], "fast": "low" }
+    "starlight_two": { "bytes": "07 00 {speed} 02 {rgb1} {rgb2}", "speed": [1, 3], "fast": "low" },
+    "custom": { "bytes": "08 00 00 00" }
   }
 }
