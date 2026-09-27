@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import Keyboard from './components/Keyboard.vue'
 import Panel from './components/Panel.vue'
 import Status from './components/Status.vue'
+import Lighting from './components/Lighting.vue'
 
 const status = ref(null)
 const layout = ref([])
@@ -15,6 +16,7 @@ const selection = ref(new Set())
 const progress = ref(null)
 const busy = ref(false)
 const message = ref('')
+const tab = ref('actuation')
 let loadedProfile = null // profile the baseline was read from
 let timer
 
@@ -128,20 +130,27 @@ onUnmounted(() => {
 
 <template>
   <main>
-    <Status :status="status" :progress="progress" :message="message" />
-    <Keyboard :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" v-model:selection="selection" />
-    <Panel
-      :count="selection.size"
-      :value="selectedValue"
-      :dirty="dirty"
-      :can-apply="canApply"
-      :busy="busy"
-      @set="setValue"
-      @apply="apply"
-      @revert="revert"
-      @select-all="selectAll"
-      @clear="selection = new Set()"
-    />
+    <nav class="tabs">
+      <button :class="{ on: tab === 'actuation' }" @click="tab = 'actuation'">Актуация</button>
+      <button :class="{ on: tab === 'lighting' }" @click="tab = 'lighting'">Подсветка</button>
+    </nav>
+    <Status :status="status" :progress="progress" :message="tab === 'actuation' ? message : ''" />
+    <template v-if="tab === 'actuation'">
+      <Keyboard :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" v-model:selection="selection" />
+      <Panel
+        :count="selection.size"
+        :value="selectedValue"
+        :dirty="dirty"
+        :can-apply="canApply"
+        :busy="busy"
+        @set="setValue"
+        @apply="apply"
+        @revert="revert"
+        @select-all="selectAll"
+        @clear="selection = new Set()"
+      />
+    </template>
+    <Lighting v-else :status="status" />
     <footer>EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>
   </main>
 </template>
@@ -149,4 +158,7 @@ onUnmounted(() => {
 <style scoped>
 main { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
 footer { color: var(--muted); font-size: 12px; }
+.tabs { display: flex; gap: 4px; }
+.tabs button { border-radius: 6px 6px 0 0; background: var(--panel); color: var(--muted); border-color: transparent; }
+.tabs button.on { background: var(--key); color: var(--text); border-bottom: 2px solid var(--accent); }
 </style>
