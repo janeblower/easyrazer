@@ -60,6 +60,7 @@ const currentGroup = computed(() => ui.value && groups.value.find(g => g.group =
 const cands = computed(() => (ui.value ? candidates(ui.value) : []))
 const slots = computed(() => Math.max(0, ...cands.value.map(e => e.colors)))
 const hasRandom = computed(() => cands.value.some(e => e.variant === 'random'))
+const randomOn = computed(() => ui.value.random && hasRandom.value)
 
 // One set color picks the one-color effect, two pick the two-color one, none turn the lighting off.
 function resolve(s) {
@@ -163,14 +164,16 @@ const speedSlider = computed({
 })
 
 let pending = null
-let timer = null
+let sending = false
 
-// At most one preview per 50 ms; the newest draft wins.
-function preview() {
+// One preview in flight, at most one per 50 ms; the newest draft wins. Parallel calls
+// would race for the device lock and could land out of order.
+async function preview() {
   pending = norm(draft.value)
-  if (timer) return
-  timer = setTimeout(async () => {
-    timer = null
+  if (sending) return
+  sending = true
+  while (pending) {
+    await new Promise(done => setTimeout(done, 50))
     const look = pending
     pending = null
     try {
@@ -178,7 +181,8 @@ function preview() {
     } catch (e) {
       message.value = String(e)
     }
-  }, 50)
+  }
+  sending = false
 }
 
 watch(draft, (now, before) => {
@@ -298,10 +302,10 @@ onMounted(load)
               type="color"
               :value="hex(ui.colors[i - 1] ?? lastColors[i - 1])"
               :title="ui.colors[i - 1] ? 'Выбрать цвет' : 'Нет цвета — выберите, чтобы включить'"
-              :disabled="blocked || ui.random"
+              :disabled="blocked || randomOn"
               @input="setColor(i - 1, rgbOf($event.target.value))"
             />
-            <button class="clear" title="Без цвета" aria-label="Без цвета" :disabled="blocked || ui.random || !ui.colors[i - 1]" @click="clearColor(i - 1)">×</button>
+            <button class="clear" title="Без цвета" aria-label="Без цвета" :disabled="blocked || randomOn || !ui.colors[i - 1]" @click="clearColor(i - 1)">×</button>
           </span>
           <label v-if="hasRandom" class="check">
             <input type="checkbox" :checked="ui.random" :disabled="blocked" @change="setUi('random', $event.target.checked)" />
