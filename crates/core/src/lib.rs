@@ -1,5 +1,6 @@
 //! Razer control protocol, independent of the OS transport.
 
+pub mod actuation;
 pub mod analog;
 pub mod control;
 #[cfg(test)]

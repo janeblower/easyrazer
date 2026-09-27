@@ -1,0 +1,182 @@
+//! Reading and applying per-key press points in the normal layer of one profile.
+
+use std::fmt::Write as _;
+
+use crate::analog::{self, KeyAssignment, MAX_MM, MIN_MM, Mode};
+use crate::keymap;
+use crate::transport::{Error, Transport, exchange};
+
+pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignment, Error> {
+    let r = exchange(
+        t,
+        analog::GET_KEY_ASSIGNMENT,
+        analog::KEY_ASSIGNMENT_SIZE,
+        &analog::get_args(profile, key, Mode::Normal),
+    )?;
+    analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
+}
+
+pub fn write_key(t: &impl Transport, a: &KeyAssignment) -> Result<(), Error> {
+    exchange(t, analog::SET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &analog::set_args(a)).map(|_| ())
+}
+
+pub fn read_all(
+    t: &impl Transport,
+    profile: u8,
+    keys: &[u8],
+    mut progress: impl FnMut(usize),
+) -> Result<Vec<KeyAssignment>, Error> {
+    keys.iter()
+        .enumerate()
+        .map(|(i, &k)| {
+            let a = read_key(t, profile, k)?;
+            progress(i + 1);
+            Ok(a)
+        })
+        .collect()
+}
+
+/// Result of writing one key; the assignment is what the device reported afterwards.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Ok(KeyAssignment),
+    Unconfirmed(KeyAssignment),
+    Failed(Error),
+}
+
+/// Sets the press point of each `(key, mm)`; one failing key does not stop the rest.
+pub fn apply(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
+    changes
+        .iter()
+        .map(|&(key, mm)| (key, apply_one(t, profile, key, mm).unwrap_or_else(Outcome::Failed)))
+        .collect()
+}
+
+fn apply_one(t: &impl Transport, profile: u8, key: u8, mm: f32) -> Result<Outcome, Error> {
+    // The UI works in 0.1 mm steps; rounding absorbs float drift from the slider.
+    let mm = (mm * 10.0).round() / 10.0;
+    if !(MIN_MM..=MAX_MM).contains(&mm) {
+        return Err(Error::OutOfRange(mm));
+    }
+    let current = read_key(t, profile, key)?;
+    let wanted = KeyAssignment { threshold_low: analog::mm_to_threshold(mm), ..current };
+    write_key(t, &wanted)?;
+    let stored = read_key(t, profile, key)?;
+    Ok(if stored == wanted { Outcome::Ok(stored) } else { Outcome::Unconfirmed(stored) })
+}
+
+/// Plain-text snapshot, one key per line, same fields as `razer-probe dump`.
+pub fn format_backup(profile: u8, keys: &[KeyAssignment]) -> String {
+    let mut out = format!("profile {profile}\n");
+    for a in keys {
+        let fn_data: Vec<String> = a.fn_data.iter().map(|b| format!("{b:02X}")).collect();
+        let _ = writeln!(
+            out,
+            "{:3} {:<22} low {:3} high {:3} fn {:02X} [{}]",
+            a.key,
+            keymap::name(a.key).unwrap_or("?"),
+            a.threshold_low,
+            a.threshold_high,
+            a.fn_id,
+            fn_data.join(" ")
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake::FakeKeyboard;
+    use crate::packet::Status;
+
+    const A: u8 = 31;
+    const S: u8 = 32;
+    const W: u8 = 18;
+
+    #[test]
+    fn read_all_returns_every_key_and_reports_progress() {
+        let kb = FakeKeyboard::new(&[A, S, W]);
+        let mut seen = Vec::new();
+        let all = read_all(&kb, 1, &[A, S, W], |n| seen.push(n)).unwrap();
+        assert_eq!(all.iter().map(|a| a.key).collect::<Vec<_>>(), [A, S, W]);
+        assert_eq!(seen, [1, 2, 3]);
+    }
+
+    #[test]
+    fn apply_changes_only_the_press_point() {
+        let kb = FakeKeyboard::new(&[A]);
+        kb.keys.borrow_mut().get_mut(&A).unwrap().threshold_high = 77;
+        let before = kb.key(A);
+        let expected = KeyAssignment { threshold_low: 109, ..before };
+        assert_eq!(apply(&kb, 1, &[(A, 2.4)]), [(A, Outcome::Ok(expected.clone()))]);
+        assert_eq!(kb.key(A), expected);
+    }
+
+    #[test]
+    fn apply_continues_after_a_failed_key() {
+        let mut kb = FakeKeyboard::new(&[A, S, W]);
+        kb.failing_writes.insert(S);
+        let r = apply(&kb, 1, &[(A, 2.0), (S, 2.0), (W, 2.0)]);
+        assert!(matches!(r[0], (A, Outcome::Ok(_))), "{r:?}");
+        assert!(matches!(r[1], (S, Outcome::Failed(Error::Status(_, Status::Fail)))), "{r:?}");
+        assert!(matches!(r[2], (W, Outcome::Ok(_))), "{r:?}");
+    }
+
+    #[test]
+    fn unconfirmed_when_read_back_differs() {
+        let mut kb = FakeKeyboard::new(&[A]);
+        kb.ignored_writes.insert(A);
+        assert_eq!(apply(&kb, 1, &[(A, 3.0)]), [(A, Outcome::Unconfirmed(kb.key(A)))]);
+        assert_eq!(kb.key(A).threshold_low, 0);
+    }
+
+    #[test]
+    fn out_of_range_is_rejected_without_touching_the_device() {
+        let kb = FakeKeyboard::new(&[A]);
+        let r = apply(&kb, 1, &[(A, 3.7), (A, 1.44), (A, f32::NAN)]);
+        assert!(r.iter().all(|(_, o)| matches!(o, Outcome::Failed(Error::OutOfRange(_)))), "{r:?}");
+        assert!(kb.sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn slider_float_drift_is_rounded_to_a_tenth() {
+        let kb = FakeKeyboard::new(&[A, S]);
+        let r = apply(&kb, 1, &[(A, 3.600_000_1), (S, 1.499_999_9)]);
+        assert!(matches!(&r[0].1, Outcome::Ok(a) if a.threshold_low == 255), "{r:?}");
+        assert!(matches!(&r[1].1, Outcome::Ok(a) if a.threshold_low == 0), "{r:?}");
+    }
+
+    #[test]
+    fn unplugged_device_fails_every_key() {
+        let kb = FakeKeyboard::new(&[A, S]);
+        kb.unplugged.set(true);
+        let r = apply(&kb, 1, &[(A, 2.0), (S, 2.0)]);
+        assert!(r.iter().all(|(_, o)| matches!(o, Outcome::Failed(Error::Io(_)))), "{r:?}");
+    }
+
+    #[test]
+    fn empty_changes_send_nothing() {
+        let kb = FakeKeyboard::new(&[A]);
+        assert!(apply(&kb, 1, &[]).is_empty());
+        assert!(kb.sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn write_key_stores_the_whole_assignment() {
+        let kb = FakeKeyboard::new(&[A]);
+        let a = KeyAssignment { threshold_low: 143, threshold_high: 111, ..kb.key(A) };
+        write_key(&kb, &a).unwrap();
+        assert_eq!(read_key(&kb, 1, A).unwrap(), a);
+    }
+
+    #[test]
+    fn backup_lists_every_key() {
+        let kb = FakeKeyboard::new(&[A, S]);
+        let all = read_all(&kb, 1, &[A, S], |_| {}).unwrap();
+        let text = format_backup(1, &all);
+        assert!(text.starts_with("profile 1\n"), "{text}");
+        assert!(text.lines().any(|l| l.starts_with(" 31 A ") && l.ends_with("fn 02 [00 1F]")), "{text}");
+        assert!(text.lines().any(|l| l.starts_with(" 32 S ")), "{text}");
+    }
+}
