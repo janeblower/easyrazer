@@ -1,0 +1,112 @@
+{
+  "language": { "name": "English" },
+  "tabs": { "actuation": "Actuation", "lighting": "Lighting", "settings": "Settings" },
+  "footer": "EasyRazer is an unofficial project, not affiliated with Razer Inc.",
+  "common": {
+    "selectAll": "Select all",
+    "clearSelection": "Clear selection",
+    "selected": "Selected: {n}",
+    "selectHint": "Select keys: click, Ctrl+click, drag a box",
+    "revert": "Revert changes",
+    "apply": "Apply",
+    "write": "Save to keyboard memory",
+    "dontAsk": "Don't ask again",
+    "notApplied": "● not applied",
+    "notAppliedN": "● not applied: {n}"
+  },
+  "actuation": {
+    "mm": "{v} mm",
+    "mixed": "mixed",
+    "unconfirmed": "Not confirmed: the keyboard has {v} mm",
+    "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
+    "applied": "Applied until the keyboard is unplugged",
+    "saved": "Saved to the keyboard",
+    "unsavedKey": "Applied but not saved to the keyboard"
+  },
+  "lighting": {
+    "groups": {
+      "off": "Off",
+      "custom": "Custom layout",
+      "static": "Static",
+      "breathing": "Breathing",
+      "spectrum": "Spectrum",
+      "wave": "Wave",
+      "reactive": "Reactive",
+      "starlight": "Starlight"
+    },
+    "types": { "key": "Key", "ripple": "Ripple" },
+    "dirs": { "left": "← left", "right": "right →" },
+    "applied": "Applied",
+    "saved": "Saved to keyboard memory",
+    "dlWarning": "⚠ Windows Dynamic Lighting controls the lighting — keyboard effects are not visible.",
+    "dlOff": "Turn off",
+    "dynamic": "Windows Dynamic Lighting",
+    "connect": "Connect the keyboard to see its effects.",
+    "type": "Type",
+    "color": "Color",
+    "colors": "Colors",
+    "random": "Random colors",
+    "direction": "Direction",
+    "speed": "Speed",
+    "slow": "slow",
+    "fast": "fast",
+    "brightness": "Brightness",
+    "isOff": "The lighting is off.",
+    "customWarning": "⚠ The custom layout is not saved to keyboard memory: it works while EasyRazer is running (including minimized to the tray)."
+  },
+  "zones": { "media": "Media keys", "dial": "Dial", "edge": "Case edge", "wrist": "Wrist rest" },
+  "picker": {
+    "color": "Color",
+    "colorHex": "Color {hex}",
+    "none": "No color",
+    "open": "Pick a color",
+    "other": "Custom…",
+    "noColor": "⊘ No color"
+  },
+  "dialogs": {
+    "autostart": {
+      "title": "Start EasyRazer with Windows?",
+      "text": "It will stay in the tray and bring the lighting back by itself.",
+      "no": "No thanks",
+      "yes": "Turn on"
+    },
+    "close": {
+      "title": "Close the window",
+      "text": "In the tray EasyRazer keeps watching the keyboard and brings the lighting back after a replug.",
+      "exit": "Quit",
+      "tray": "Minimize to tray"
+    },
+    "write": {
+      "title": "Save to keyboard memory?",
+      "text": "The settings will stay in the keyboard and work without EasyRazer. Its flash memory wears out with rewrites — don't do this too often.",
+      "yes": "Yes, save",
+      "no": "No"
+    }
+  },
+  "settings": {
+    "language": "Language:",
+    "autostart": "Start with Windows",
+    "onClose": "When the window is closed:",
+    "ask": "Ask",
+    "tray": "Minimize to tray",
+    "exit": "Quit",
+    "watchSynapse": "Watch for Synapse",
+    "confirmWrite": "Ask before saving to keyboard memory"
+  },
+  "status": {
+    "searching": "Looking for the keyboard…",
+    "synapse": "Synapse (RazerAppEngine) is running. Close it, including its tray icon, or it will overwrite the settings.",
+    "unsupported": "This Razer keyboard model is not supported (PID {pid}).",
+    "notFound": "No supported Razer keyboard found.",
+    "reading": "Reading the keyboard: {done} of {total}",
+    "connected": "Connected: {model}, profile {profile}"
+  },
+  "backend": {
+    "synapseRunning": "Synapse is running — close it, including its tray icon",
+    "noKeyboard": "No supported Razer keyboard found",
+    "restoreLighting": "Could not restore the lighting: {error}",
+    "restoreActuation": "Could not restore the actuation of keys: {keys}",
+    "autostart": "Autostart: {error}"
+  },
+  "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
+}

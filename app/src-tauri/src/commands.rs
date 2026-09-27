@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::device::{self, Device, LightingState, Status, Written, mm};
 use crate::settings::CloseAction;
-use crate::{autostart, tray};
+use crate::{autostart, i18n, tray};
 
 pub struct AppState {
     pub device: Mutex<Device>,
@@ -155,6 +155,7 @@ pub struct AppSettings {
     watch_synapse: bool,
     confirm_write: bool,
     autostart_offered: bool,
+    language: Option<String>,
 }
 
 #[tauri::command]
@@ -166,6 +167,7 @@ pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
         watch_synapse: s.watch_synapse,
         confirm_write: s.confirm_write,
         autostart_offered: s.autostart_offered,
+        language: s.language,
     })
 }
 
@@ -195,6 +197,16 @@ pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
     state.device().update_settings(|s| s.watch_synapse = on)
+}
+
+#[tauri::command]
+pub async fn set_language(app: AppHandle, state: State<'_, AppState>, language: String) -> Result<(), String> {
+    if !i18n::known(&language) {
+        return Err(format!("unknown language {language}"));
+    }
+    state.device().update_settings(|s| s.language = Some(language))?;
+    tray::retitle(&app);
+    Ok(())
 }
 
 #[tauri::command]

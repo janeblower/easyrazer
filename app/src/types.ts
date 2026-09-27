@@ -74,6 +74,7 @@ export interface AppSettings {
   watch_synapse: boolean;
   confirm_write: boolean;
   autostart_offered: boolean;
+  language: string | null;
 }
 
 // fwID -> value

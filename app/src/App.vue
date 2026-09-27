@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import type { Actuation, AppSettings, CloseAction, Status as DeviceStatus, KeyMap, KeyView, WriteResult } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
@@ -11,7 +12,9 @@ import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
 import AutostartOffer from "./components/AutostartOffer.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
+import { setLanguage, systemLanguage } from "./i18n";
 
+const { t } = useI18n();
 const status = ref<DeviceStatus | null>(null);
 const layout = ref<KeyView[]>([]);
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
@@ -132,13 +135,13 @@ async function write(command: "apply" | "save", done: string) {
       }
       base[r.key] = r.mm;
       delete next[r.key];
-      if (r.status === "unconfirmed") errs[r.key] = `Не подтверждено: в клавиатуре ${r.mm.toFixed(1)} мм`;
+      if (r.status === "unconfirmed") errs[r.key] = t("actuation.unconfirmed", { v: r.mm.toFixed(1) });
     }
     baseline.value = base;
     edits.value = next;
     errors.value = errs;
     const bad = Object.keys(errs).length;
-    message.value = bad ? `Не применено или не подтверждено: ${bad} клав. (наведите на красные)` : done;
+    message.value = bad ? t("actuation.failed", { n: bad }) : t(done);
   } catch (error) {
     message.value = String(error);
     failed = true;
@@ -159,13 +162,13 @@ async function save() {
     message.value = String(error);
     return;
   }
-  await write("save", "Записано в клавиатуру");
+  await write("save", "actuation.saved");
 }
 
 async function onConfirm(dontAsk: boolean) {
   asking.value = false;
   if (dontAsk) await invoke("set_confirm_write", { on: false }).catch(showError);
-  await write("save", "Записано в клавиатуру");
+  await write("save", "actuation.saved");
 }
 
 async function onClose(action: CloseAction, remember: boolean) {
@@ -192,6 +195,10 @@ onMounted(async () => {
   try {
     const settings = await invoke<AppSettings>("app_settings");
     offering.value = !settings.autostart_offered;
+    const lang = settings.language ?? systemLanguage();
+    setLanguage(lang);
+    // The tray and backend messages follow the stored language.
+    if (!settings.language) await invoke("set_language", { language: lang });
   } catch (error) {
     message.value = String(error);
   }
@@ -213,9 +220,9 @@ onUnmounted(() => {
 <template>
   <main class="p-4 flex flex-col gap-4">
     <nav class="flex gap-1">
-      <button :class="tabClass('actuation')" @click="tab = 'actuation'">Срабатывание</button>
-      <button :class="tabClass('lighting')" @click="tab = 'lighting'">Подсветка</button>
-      <button :class="tabClass('settings')" @click="tab = 'settings'">Настройки</button>
+      <button :class="tabClass('actuation')" @click="tab = 'actuation'">{{ $t("tabs.actuation") }}</button>
+      <button :class="tabClass('lighting')" @click="tab = 'lighting'">{{ $t("tabs.lighting") }}</button>
+      <button :class="tabClass('settings')" @click="tab = 'settings'">{{ $t("tabs.settings") }}</button>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
@@ -228,7 +235,7 @@ onUnmounted(() => {
         :can-save="canSave"
         :busy="busy"
         @set="setValue"
-        @apply="write('apply', 'Применено до отключения клавиатуры')"
+        @apply="write('apply', 'actuation.applied')"
         @save="save"
         @revert="revert"
         @select-all="selectAll"
@@ -240,6 +247,6 @@ onUnmounted(() => {
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
     <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
-    <footer class="text-xs text-muted">EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>
+    <footer class="text-xs text-muted">{{ $t("footer") }}</footer>
   </main>
 </template>

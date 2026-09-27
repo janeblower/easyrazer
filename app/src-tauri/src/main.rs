@@ -4,6 +4,7 @@ mod autostart;
 mod commands;
 mod device;
 mod dynamic_lighting;
+mod i18n;
 mod settings;
 mod tray;
 
@@ -69,6 +70,7 @@ fn main() {
             commands::autostart_answered,
             commands::set_close_action,
             commands::set_watch_synapse,
+            commands::set_language,
             commands::hide_window,
             commands::quit
         ])

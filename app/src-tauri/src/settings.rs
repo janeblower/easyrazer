@@ -38,11 +38,13 @@ pub struct Settings {
     pub watch_synapse: bool,
     /// The first-run autostart question has been answered.
     pub autostart_offered: bool,
+    /// Interface language; `None` until the window picks one from the system.
+    pub language: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, actuation: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false }
+        Self { applied: None, actuation: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
     }
 }
 
@@ -60,7 +62,7 @@ fn parse(text: &str) -> Settings {
 }
 
 pub fn save(s: &Settings) -> Result<(), String> {
-    let p = path().ok_or("APPDATA не задан")?;
+    let p = path().ok_or("APPDATA is not set")?;
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -97,6 +99,7 @@ mod tests {
             close_action: CloseAction::Tray,
             watch_synapse: false,
             autostart_offered: true,
+            language: Some("ru".into()),
         };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
     }

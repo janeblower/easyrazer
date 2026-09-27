@@ -19,11 +19,11 @@ onUnmounted(() => {
 <template>
   <div class="dlg-backdrop" @click.self="emit('later')">
     <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="ao-title">
-      <h3 id="ao-title" class="dlg-title">Запускать EasyRazer вместе с Windows?</h3>
-      <p>Программа будет в трее и сама вернёт подсветку.</p>
+      <h3 id="ao-title" class="dlg-title">{{ $t("dialogs.autostart.title") }}</h3>
+      <p>{{ $t("dialogs.autostart.text") }}</p>
       <div class="dlg-btns">
-        <button @click="emit('answer', false)">Не надо</button>
-        <button ref="yes" class="primary" @click="emit('answer', true)">Включить</button>
+        <button @click="emit('answer', false)">{{ $t("dialogs.autostart.no") }}</button>
+        <button ref="yes" class="primary" @click="emit('answer', true)">{{ $t("dialogs.autostart.yes") }}</button>
       </div>
     </div>
   </div>

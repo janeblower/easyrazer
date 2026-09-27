@@ -9,14 +9,20 @@ function onInput(e: Event) {
 
 <template>
   <div class="px-4 py-3 card flex gap-3 items-center">
-    <button @click="emit('selectAll')">Выделить все</button>
-    <button :disabled="!count" @click="emit('clear')">Снять выделение</button>
-    <span class="text-muted min-w-[260px]">{{ count ? `Выделено: ${count}` : "Выделите клавиши: клик, Ctrl+клик, рамка" }}</span>
+    <button @click="emit('selectAll')">{{ $t("common.selectAll") }}</button>
+    <button :disabled="!count" @click="emit('clear')">{{ $t("common.clearSelection") }}</button>
+    <span class="text-muted min-w-[260px]">{{ count ? $t("common.selected", { n: count }) : $t("common.selectHint") }}</span>
     <input class="w-[220px]" type="range" min="1.5" max="3.6" step="0.1" :value="value ?? 1.5" :disabled="!count" @input="onInput" />
-    <span class="min-w-[60px]">{{ value != null ? `${value.toFixed(1)} мм` : count ? "разные" : "" }}</span>
+    <span class="min-w-[60px]">{{ value != null ? $t("actuation.mm", { v: value.toFixed(1) }) : count ? $t("actuation.mixed") : "" }}</span>
     <span class="flex-1"></span>
-    <span v-if="dirty" class="text-xs text-edited">● не применено: {{ dirty }}</span>
-    <button class="icon-btn" title="Отменить изменения" aria-label="Отменить изменения" :disabled="!dirty || busy" @click="emit('revert')">
+    <span v-if="dirty" class="text-xs text-edited">{{ $t("common.notAppliedN", { n: dirty }) }}</span>
+    <button
+      class="icon-btn"
+      :title="$t('common.revert')"
+      :aria-label="$t('common.revert')"
+      :disabled="!dirty || busy"
+      @click="emit('revert')"
+    >
       <svg
         viewBox="0 0 24 24"
         width="18"
@@ -31,11 +37,11 @@ function onInput(e: Event) {
         <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
       </svg>
     </button>
-    <button class="primary" :disabled="!canApply" @click="emit('apply')">Применить</button>
+    <button class="primary" :disabled="!canApply" @click="emit('apply')">{{ $t("common.apply") }}</button>
     <button
       class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
-      title="Записать в память клавиатуры"
-      aria-label="Записать в память клавиатуры"
+      :title="$t('common.write')"
+      :aria-label="$t('common.write')"
       :disabled="!canSave"
       @click="emit('save')"
     >

@@ -21,12 +21,12 @@ onUnmounted(() => {
 <template>
   <div class="dlg-backdrop" @click.self="emit('cancel')">
     <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="cd-title">
-      <h3 id="cd-title" class="dlg-title">Закрыть окно</h3>
-      <p>В трее EasyRazer продолжит следить за клавиатурой и вернёт подсветку после переподключения.</p>
-      <label class="dlg-check"><input v-model="remember" type="checkbox" /> Больше не спрашивать</label>
+      <h3 id="cd-title" class="dlg-title">{{ $t("dialogs.close.title") }}</h3>
+      <p>{{ $t("dialogs.close.text") }}</p>
+      <label class="dlg-check"><input v-model="remember" type="checkbox" /> {{ $t("common.dontAsk") }}</label>
       <div class="dlg-btns">
-        <button @click="emit('choose', 'exit', remember)">Закрыть программу</button>
-        <button ref="tray" class="primary" @click="emit('choose', 'tray', remember)">Свернуть в трей</button>
+        <button @click="emit('choose', 'exit', remember)">{{ $t("dialogs.close.exit") }}</button>
+        <button ref="tray" class="primary" @click="emit('choose', 'tray', remember)">{{ $t("dialogs.close.tray") }}</button>
       </div>
     </div>
   </div>

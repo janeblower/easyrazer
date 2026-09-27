@@ -17,12 +17,11 @@ use razer_core::{control, keymap, layout};
 use serde::Serialize;
 
 use crate::dynamic_lighting;
+use crate::i18n;
 use crate::settings::{self, Settings};
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-pub const SYNAPSE_RUNNING: &str = "Запущен Synapse — закройте его, включая значок в трее";
-pub const NO_KEYBOARD: &str = "Поддерживаемая клавиатура Razer не найдена";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
@@ -105,13 +104,26 @@ impl Device {
         if let Some(look) = &self.settings.applied
             && let Err(e) = lighting::set_look(t, d, Store::Temporary, look)
         {
-            errors.push(format!("Не удалось вернуть подсветку: {e}"));
+            errors.push(i18n::tf(self.lang(), "backend.restoreLighting", &[("error", &e.to_string())]));
         }
         let changes: Vec<(u8, f32)> = self.settings.actuation.iter().map(|(&k, &mm)| (k, mm)).collect();
-        errors.extend(restore_error(&actuation::apply(t, actuation::LIVE, &changes)));
+        errors.extend(restore_error(self.lang(), &actuation::apply(t, actuation::LIVE, &changes)));
         if !errors.is_empty() {
             self.restore_error = Some(errors.join("; "));
         }
+    }
+
+    pub fn lang(&self) -> &str {
+        self.settings.language.as_deref().unwrap_or("en")
+    }
+
+    fn msg(&self, key: &str) -> String {
+        i18n::t(self.lang(), key)
+    }
+
+    fn keyboard(&mut self) -> Result<(&HidTransport, &'static DeviceSpec), String> {
+        let missing = self.msg("backend.noKeyboard");
+        self.connect().ok_or(missing)
     }
 
     pub fn connect(&mut self) -> Option<(&HidTransport, &'static DeviceSpec)> {
@@ -146,9 +158,9 @@ impl Device {
     /// Press points the keyboard types with now, and the keys a replug would reset.
     pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<(Vec<KeyAssignment>, Vec<u8>), String> {
         if self.synapse {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
-        let (t, _) = self.connect().ok_or(NO_KEYBOARD)?;
+        let (t, _) = self.keyboard()?;
         let keys = editable_keys();
         let all = actuation::read_all(t, actuation::LIVE, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())?;
         Ok((all, self.unsaved()))
@@ -157,9 +169,9 @@ impl Device {
     /// Applies press points until the next replug; the app restores them on every connect.
     pub fn apply(&mut self, changes: &[(u8, f32)]) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
-        let (t, _) = self.connect().ok_or(NO_KEYBOARD)?;
+        let (t, _) = self.keyboard()?;
         let results = actuation::apply(t, actuation::LIVE, changes);
         let touched: Vec<u8> = results.iter().filter(|(_, o)| !matches!(o, Outcome::Failed(_))).map(|&(k, _)| k).collect();
         // Unknown whether they match the profile: keep them all, restoring an equal value is harmless.
@@ -180,10 +192,10 @@ impl Device {
             return Ok(Written { results: Vec::new(), unsaved: Vec::new() });
         }
         if self.check_synapse(synapse_running) {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
         let backed_up = self.backed_up;
-        let (t, _) = self.connect().ok_or(NO_KEYBOARD)?;
+        let (t, _) = self.keyboard()?;
         let profile = control::active_profile(t).map_err(|e| e.to_string())?;
         if !backed_up {
             let all = actuation::read_all(t, profile, &editable_keys(), |_| {}).map_err(|e| e.to_string())?;
@@ -223,16 +235,16 @@ impl Device {
 
     pub fn lighting_preview(&mut self, look: &Look) -> Result<(), String> {
         if self.synapse {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
-        let (t, d) = self.connect().ok_or(NO_KEYBOARD)?;
+        let (t, d) = self.keyboard()?;
         lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())
     }
 
     /// Remembers the look; without a keyboard it is shown on the next connect.
     pub fn lighting_apply(&mut self, look: Look) -> Result<(), String> {
         if self.synapse {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
@@ -247,9 +259,9 @@ impl Device {
     /// Writes the keyboard's flash; checks Synapse afresh like actuation writes.
     pub fn lighting_write(&mut self, look: Look) -> Result<(), String> {
         if self.check_synapse(synapse_running) {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
-        let (t, d) = self.connect().ok_or(NO_KEYBOARD)?;
+        let (t, d) = self.keyboard()?;
         lighting::set_look(t, d, Store::Saved, &look).map_err(|e| e.to_string())?;
         lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         self.settings.applied = Some(look);
@@ -277,13 +289,13 @@ impl Device {
 
     pub fn set_dynamic_lighting(&mut self, on: bool) -> Result<(), String> {
         if !on && self.synapse {
-            return Err(SYNAPSE_RUNNING.into());
+            return Err(self.msg("backend.synapseRunning"));
         }
         dynamic_lighting::set(on)?;
         if on {
             return Ok(());
         }
-        let d = self.connect().map(|(_, d)| d).ok_or(NO_KEYBOARD)?;
+        let d = self.keyboard()?.1;
         hid::set_autonomous(&self.api, d, true).map_err(|e| e.to_string())?;
         if let (Some((t, _)), Some(look)) = (&self.control, &self.settings.applied) {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
@@ -312,13 +324,13 @@ fn to_save(overrides: &BTreeMap<u8, f32>, edits: &[(u8, f32)]) -> Vec<(u8, f32)>
     all.into_iter().collect()
 }
 
-fn restore_error(results: &[(u8, Outcome)]) -> Option<String> {
+fn restore_error(lang: &str, results: &[(u8, Outcome)]) -> Option<String> {
     let bad: Vec<&str> = results
         .iter()
         .filter(|(_, o)| !matches!(o, Outcome::Ok(_)))
         .map(|&(k, _)| keymap::name(k).unwrap_or("?"))
         .collect();
-    (!bad.is_empty()).then(|| format!("Не удалось вернуть точки срабатывания клавиш: {}", bad.join(", ")))
+    (!bad.is_empty()).then(|| i18n::tf(lang, "backend.restoreActuation", &[("keys", &bad.join(", "))]))
 }
 
 fn editable_keys() -> Vec<u8> {
@@ -505,8 +517,8 @@ mod tests {
     #[test]
     fn restore_reports_keys_that_were_not_applied() {
         let a = |t| KeyAssignment { profile: 0, key: 31, mode: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
-        assert_eq!(restore_error(&[(31, Outcome::Ok(a(0)))]), None);
-        let e = restore_error(&[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
+        assert_eq!(restore_error("ru", &[(31, Outcome::Ok(a(0)))]), None);
+        let e = restore_error("ru", &[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
         assert_eq!(e.as_deref(), Some("Не удалось вернуть точки срабатывания клавиш: S, W"));
     }
 }

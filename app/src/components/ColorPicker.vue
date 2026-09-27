@@ -59,15 +59,15 @@ onUnmounted(() => {
       :class="{ empty: !modelValue }"
       :style="{ background: hex(last) }"
       :disabled="disabled"
-      :title="modelValue ? 'Цвет' : 'Нет цвета'"
-      :aria-label="modelValue ? `Цвет ${hex(modelValue)}` : 'Нет цвета'"
+      :title="modelValue ? $t('picker.color') : $t('picker.none')"
+      :aria-label="modelValue ? $t('picker.colorHex', { hex: hex(modelValue) }) : $t('picker.none')"
       @click="open = !open"
     ></button>
     <div
       v-if="open"
       class="p-2.5 border border-line rounded-lg border-solid bg-panel w-[200px] shadow-[0_6px_20px_rgba(0,0,0,0.5)] left-0 top-9 absolute z-10"
       role="dialog"
-      aria-label="Выбор цвета"
+      :aria-label="$t('picker.open')"
       @keydown.esc="open = false"
     >
       <div class="gap-1.5 grid grid-cols-6">
@@ -82,7 +82,7 @@ onUnmounted(() => {
       </div>
       <div class="mt-2.5 flex gap-1.5 items-center justify-between">
         <label class="text-xs px-2 py-1 border border-line rounded-md border-solid bg-key cursor-pointer relative">
-          Другой…
+          {{ $t("picker.other") }}
           <input
             class="opacity-0 cursor-pointer inset-0 absolute"
             type="color"
@@ -96,7 +96,7 @@ onUnmounted(() => {
           :aria-pressed="!modelValue"
           @click="toggleNone"
         >
-          ⊘ Без цвета
+          {{ $t("picker.noColor") }}
         </button>
       </div>
     </div>

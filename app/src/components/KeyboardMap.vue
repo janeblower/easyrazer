@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import type { KeyMap, KeyView, Rgb } from "../types";
 
 interface Band {
@@ -28,6 +29,9 @@ const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
 
 // Width of a ring's frame, in key units.
 const RING = 0.3;
+const { t } = useI18n();
+// Zones are named by the window; key caps keep the labels from the layout.
+const ZONES: Record<number, string> = { 200: "zones.media", 201: "zones.dial", 202: "zones.edge", 203: "zones.wrist" };
 const U = 50;
 const box = ref<HTMLElement | null>(null);
 const root = ref<HTMLElement | null>(null);
@@ -115,7 +119,8 @@ function valueClass(key: number) {
 }
 
 function title(key: number) {
-  return props.errors[key] ?? (props.unsaved.has(key) ? "Применено, но не записано в клавиатуру" : undefined);
+  if (key in ZONES) return t(ZONES[key]);
+  return props.errors[key] ?? (props.unsaved.has(key) ? t("actuation.unsavedKey") : undefined);
 }
 
 function value(key: number): number | undefined {
@@ -190,7 +195,7 @@ function up(e: PointerEvent) {
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
-        <span class="text-xs">{{ k.label }}</span>
+        <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
           value(k.key)!.toFixed(1)
         }}</span>

@@ -20,15 +20,12 @@ onUnmounted(() => {
 <template>
   <div class="dlg-backdrop" @click.self="emit('no')">
     <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="cw-title">
-      <h3 id="cw-title" class="dlg-title">Записать в память клавиатуры?</h3>
-      <p>
-        Настройки сохранятся в клавиатуре и будут работать без EasyRazer. Ресурс перезаписи её флеш-памяти ограничен — не делайте этого
-        слишком часто.
-      </p>
-      <label class="dlg-check"><input v-model="dontAsk" type="checkbox" /> Больше не спрашивать</label>
+      <h3 id="cw-title" class="dlg-title">{{ $t("dialogs.write.title") }}</h3>
+      <p>{{ $t("dialogs.write.text") }}</p>
+      <label class="dlg-check"><input v-model="dontAsk" type="checkbox" /> {{ $t("common.dontAsk") }}</label>
       <div class="dlg-btns">
-        <button @click="emit('yes', dontAsk)">Да, записать</button>
-        <button ref="no" class="primary" @click="emit('no')">Нет</button>
+        <button @click="emit('yes', dontAsk)">{{ $t("dialogs.write.yes") }}</button>
+        <button ref="no" class="primary" @click="emit('no')">{{ $t("dialogs.write.no") }}</button>
       </div>
     </div>
   </div>

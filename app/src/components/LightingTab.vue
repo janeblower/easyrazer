@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
@@ -32,19 +33,11 @@ interface Group {
 
 const props = defineProps<{ status: Status | null }>();
 
-const GROUPS: Record<string, string> = {
-  off: "Выключено",
-  static: "Статичный",
-  breathing: "Дыхание",
-  spectrum: "Спектр",
-  wave: "Волна",
-  reactive: "Отклик",
-  starlight: "Звёздное небо",
-  custom: "Своя раскладка",
-};
-const TYPES: Record<string, string> = { key: "Клавиша", ripple: "Рябь" };
+const i18n = useI18n();
+const { t } = i18n;
+// Names the description adds later show as they are until translated.
+const label = (section: string, name: string) => (i18n.te(`lighting.${section}.${name}`) ? t(`lighting.${section}.${name}`) : name);
 const COLOR_VARIANTS = new Set(["one", "two", "random"]);
-const DIRS: Record<string, string> = { left: "← влево", right: "вправо →" };
 const DEFAULT_COLORS: Rgb[] = [
   [0x44, 0xd6, 0x2c],
   [0x00, 0x40, 0xff],
@@ -82,7 +75,15 @@ const groups = computed(() => {
   for (const e of effects.value) {
     const p = parse(e.name);
     let g = out.find((g) => g.group === p.group);
-    if (!g) out.push((g = { group: p.group, label: GROUPS[p.group] ?? p.group, types: [], effects: [] }));
+    if (!g)
+      out.push(
+        (g = {
+          group: p.group,
+          label: label("groups", p.group),
+          types: [],
+          effects: [],
+        }),
+      );
     if (p.type && !g.types.includes(p.type)) g.types.push(p.type);
     g.effects.push({ ...e, ...p });
   }
@@ -286,7 +287,7 @@ async function apply() {
     await invoke("lighting_apply", { look });
     applied.value = look;
     if (look?.effect.colors) custom.value = look.effect.colors;
-    message.value = "Применено";
+    message.value = t("lighting.applied");
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -301,7 +302,7 @@ async function write() {
     await invoke("lighting_write", { look });
     applied.value = look;
     saved.value = look;
-    message.value = "Записано в память клавиатуры";
+    message.value = t("lighting.saved");
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -344,11 +345,11 @@ onMounted(load);
 <template>
   <section class="flex flex-col gap-3">
     <div v-if="dynamicLighting" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
-      ⚠ Подсветкой управляет динамическое освещение Windows — эффекты клавиатуры не видны.
-      <button :disabled="blocked" @click="toggleDynamic">Отключить</button>
+      {{ $t("lighting.dlWarning") }}
+      <button :disabled="blocked" @click="toggleDynamic">{{ $t("lighting.dlOff") }}</button>
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
-    <p v-if="!draft" class="msg">Подключите клавиатуру, чтобы увидеть её эффекты.</p>
+    <p v-if="!draft" class="msg">{{ $t("lighting.connect") }}</p>
     <div v-else-if="ui" class="flex gap-3" :class="{ 'pointer-events-none opacity-40': blocked }">
       <ul class="m-0 p-2.5 list-none card w-[210px]">
         <li
@@ -363,22 +364,22 @@ onMounted(load);
       </ul>
       <div class="px-3.5 py-2.5 card flex-1 min-w-0">
         <div v-if="currentGroup?.types.length" class="field">
-          <span class="field-label">Тип</span>
+          <span class="field-label">{{ $t("lighting.type") }}</span>
           <span class="inline-flex">
             <button
-              v-for="t in currentGroup.types"
-              :key="t"
+              v-for="ty in currentGroup.types"
+              :key="ty"
               class="seg-btn"
-              :class="{ 'seg-on': ui.type === t }"
+              :class="{ 'seg-on': ui.type === ty }"
               :disabled="blocked"
-              @click="setUi('type', t)"
+              @click="setUi('type', ty)"
             >
-              {{ TYPES[t] ?? t }}
+              {{ label("types", ty) }}
             </button>
           </span>
         </div>
         <div v-if="slots" class="field">
-          <span class="field-label">{{ slots > 1 ? "Цвета" : "Цвет" }}</span>
+          <span class="field-label">{{ slots > 1 ? $t("lighting.colors") : $t("lighting.color") }}</span>
           <ColorPicker
             v-for="i in slots"
             :key="i"
@@ -391,8 +392,8 @@ onMounted(load);
             class="ml-1.5 icon-btn"
             :class="{ 'border-accent text-accent': ui.random }"
             :aria-pressed="ui.random"
-            title="Случайные цвета"
-            aria-label="Случайные цвета"
+            :title="$t('lighting.random')"
+            :aria-label="$t('lighting.random')"
             :disabled="blocked"
             @click="setUi('random', !ui.random)"
           >
@@ -415,7 +416,7 @@ onMounted(load);
           </button>
         </div>
         <div v-if="dirInfo" class="field">
-          <span class="field-label">Направление</span>
+          <span class="field-label">{{ $t("lighting.direction") }}</span>
           <span class="inline-flex">
             <button
               v-for="d in dirInfo.dirs"
@@ -425,13 +426,13 @@ onMounted(load);
               :disabled="blocked"
               @click="setUi('dir', d)"
             >
-              {{ DIRS[d] ?? d }}
+              {{ label("dirs", d) }}
             </button>
           </span>
         </div>
         <div v-if="speedInfo" class="field">
-          <span class="field-label">Скорость</span>
-          <span class="hint">медленно</span>
+          <span class="field-label">{{ $t("lighting.speed") }}</span>
+          <span class="hint">{{ $t("lighting.slow") }}</span>
           <input
             v-model.number="speedSlider"
             class="w-60"
@@ -441,24 +442,24 @@ onMounted(load);
             step="1"
             :disabled="blocked"
           />
-          <span class="hint">быстро</span>
+          <span class="hint">{{ $t("lighting.fast") }}</span>
         </div>
         <template v-if="isCustom">
           <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" fit />
           <div class="field">
-            <span class="field-label">Цвет</span>
+            <span class="field-label">{{ $t("lighting.color") }}</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
-            <span class="hint">{{ selection.size > 0 ? `Выделено: ${selection.size}` : "Выделите клавиши: клик, Ctrl+клик, рамка" }}</span>
-            <button @click="selectAll">Выделить все</button>
-            <button :disabled="selection.size === 0" @click="selection = new Set()">Снять выделение</button>
+            <span class="hint">{{ selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint") }}</span>
+            <button @click="selectAll">{{ $t("common.selectAll") }}</button>
+            <button :disabled="selection.size === 0" @click="selection = new Set()">{{ $t("common.clearSelection") }}</button>
           </div>
           <p class="text-warn m-0">
-            ⚠ Своя раскладка не записывается в память клавиатуры: она работает, пока запущен EasyRazer (в том числе свёрнутый в трей).
+            {{ $t("lighting.customWarning") }}
           </p>
         </template>
-        <p v-if="ui.group === 'off'" class="msg">Подсветка выключена.</p>
+        <p v-if="ui.group === 'off'" class="msg">{{ $t("lighting.isOff") }}</p>
         <div v-else class="field">
-          <span class="field-label">Яркость</span>
+          <span class="field-label">{{ $t("lighting.brightness") }}</span>
           <input v-model.number="percent" class="w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
           <span>{{ percent }}%</span>
         </div>
@@ -467,14 +468,14 @@ onMounted(load);
     <div class="px-4 py-3 card flex gap-2 items-center">
       <label class="switch">
         <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
-        Динамическое освещение Windows
+        {{ $t("lighting.dynamic") }}
       </label>
       <span class="flex-1"></span>
-      <span v-if="dirty" class="text-xs text-edited">● не применено</span>
+      <span v-if="dirty" class="text-xs text-edited">{{ $t("common.notApplied") }}</span>
       <button
         class="icon-btn"
-        title="Отменить изменения"
-        aria-label="Отменить изменения"
+        :title="$t('common.revert')"
+        :aria-label="$t('common.revert')"
         :disabled="!dirty || busy || blocked"
         @click="revert"
       >
@@ -492,12 +493,12 @@ onMounted(load);
           <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
         </svg>
       </button>
-      <button class="primary" :disabled="!dirty || busy || blocked" @click="apply">Применить</button>
+      <button class="primary" :disabled="!dirty || busy || blocked" @click="apply">{{ $t("common.apply") }}</button>
       <button
         v-if="!isCustom"
         class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
-        title="Записать в память клавиатуры"
-        aria-label="Записать в память клавиатуры"
+        :title="$t('common.write')"
+        :aria-label="$t('common.write')"
         :disabled="!canSave"
         @click="save"
       >
