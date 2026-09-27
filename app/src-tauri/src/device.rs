@@ -1,15 +1,22 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
-use razer_core::control;
+use razer_core::actuation::{self, Outcome};
+use razer_core::analog::KeyAssignment;
 use razer_core::hid::{self, HidTransport};
 use razer_core::transport::Error;
+use razer_core::{control, layout};
 use serde::Serialize;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub const SYNAPSE_RUNNING: &str = "Запущен Synapse — закройте его, включая значок в трее";
+pub const NO_KEYBOARD: &str = "Клавиатура Huntsman V2 Analog не найдена";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
@@ -24,12 +31,14 @@ pub struct Device {
     control: Option<HidTransport>,
     /// Last known Synapse state; assumed running until checked.
     synapse: bool,
+    /// A backup has been written this session.
+    backed_up: bool,
 }
 
 impl Device {
     pub fn new() -> Result<Self, Error> {
         let api = HidApi::new().map_err(|e| Error::Io(e.to_string()))?;
-        Ok(Self { api, control: None, synapse: true })
+        Ok(Self { api, control: None, synapse: true, backed_up: false })
     }
 
     /// Connected control interface, reopened if the keyboard was replugged.
@@ -57,6 +66,50 @@ impl Device {
         }
         Status { device: true, synapse, mode, profile: control::active_profile(t).ok() }
     }
+
+    /// Press points of every editable key in the active profile.
+    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<Vec<KeyAssignment>, String> {
+        if self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        let t = self.connect().ok_or(NO_KEYBOARD)?;
+        let profile = control::active_profile(t).map_err(|e| e.to_string())?;
+        let keys = editable_keys();
+        actuation::read_all(t, profile, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())
+    }
+
+    /// Writes press points; checks Synapse afresh and backs up the keyboard before the first write.
+    pub fn apply(&mut self, changes: &[(u8, f32)]) -> Result<Vec<(u8, Outcome)>, String> {
+        if changes.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.synapse = synapse_running();
+        if self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        let backed_up = self.backed_up;
+        let t = self.connect().ok_or(NO_KEYBOARD)?;
+        let profile = control::active_profile(t).map_err(|e| e.to_string())?;
+        if !backed_up {
+            let all = actuation::read_all(t, profile, &editable_keys(), |_| {}).map_err(|e| e.to_string())?;
+            write_backup(&actuation::format_backup(profile, &all))?;
+        }
+        let results = actuation::apply(t, profile, changes);
+        self.backed_up = true;
+        Ok(results)
+    }
+}
+
+fn editable_keys() -> Vec<u8> {
+    layout::keys().into_iter().filter(|k| k.editable).map(|k| k.key).collect()
+}
+
+fn write_backup(text: &str) -> Result<(), String> {
+    let appdata = std::env::var("APPDATA").map_err(|e| e.to_string())?;
+    let dir = PathBuf::from(appdata).join("EasyRazer");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    std::fs::write(dir.join(format!("backup-{secs}.txt")), text).map_err(|e| e.to_string())
 }
 
 /// Synapse leaves the keyboard in driver mode, where it types nothing on its own.
@@ -100,5 +153,28 @@ mod tests {
         assert!(!should_release_driver_mode(false, false, Some(control::MODE_DRIVER)));
         assert!(!should_release_driver_mode(true, true, Some(control::MODE_DRIVER)));
         assert!(!should_release_driver_mode(true, false, Some(control::MODE_HARDWARE)));
+    }
+
+    use razer_core::{analog, keymap};
+
+    #[test]
+    #[ignore = "needs the keyboard connected and Synapse closed"]
+    fn apply_round_trip_on_hardware() {
+        assert!(!synapse_running(), "close Synapse first");
+        let mut dev = Device::new().unwrap();
+        let (profile, a, original) = {
+            let t = dev.connect().expect("keyboard not connected");
+            let profile = control::active_profile(t).unwrap();
+            let a = keymap::by_name("A").unwrap();
+            (profile, a, actuation::read_key(t, profile, a).unwrap())
+        };
+        let result = dev.apply(&[(a, 2.4)]).unwrap();
+        let t = dev.connect().unwrap();
+        actuation::write_key(t, &original).unwrap();
+        assert!(
+            matches!(&result[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)),
+            "{result:?}"
+        );
+        assert_eq!(actuation::read_key(t, profile, a).unwrap(), original);
     }
 }
