@@ -125,8 +125,7 @@ impl Device {
         if changes.is_empty() {
             return Ok(Vec::new());
         }
-        self.synapse = synapse_running();
-        if self.synapse {
+        if self.check_synapse(synapse_running) {
             return Err(SYNAPSE_RUNNING.into());
         }
         let backed_up = self.backed_up;
@@ -182,8 +181,7 @@ impl Device {
 
     /// Writes the keyboard's flash; checks Synapse afresh like actuation writes.
     pub fn lighting_write(&mut self, look: Look) -> Result<(), String> {
-        self.synapse = synapse_running();
-        if self.synapse {
+        if self.check_synapse(synapse_running) {
             return Err(SYNAPSE_RUNNING.into());
         }
         let (t, d) = self.connect().ok_or(NO_KEYBOARD)?;
@@ -195,6 +193,12 @@ impl Device {
 
     pub fn set_confirm_write(&mut self, on: bool) -> Result<(), String> {
         self.update_settings(|s| s.confirm_write = on)
+    }
+
+    /// Fresh check before a write, honouring `watch_synapse`.
+    fn check_synapse(&mut self, running: impl FnOnce() -> bool) -> bool {
+        self.synapse = synapse_check(self.settings.watch_synapse, running);
+        self.synapse
     }
 
     pub fn settings(&self) -> &Settings {
@@ -294,6 +298,15 @@ mod tests {
         }));
         assert!(!ran);
         assert!(synapse_check(true, || true));
+    }
+
+    #[test]
+    fn writes_skip_the_synapse_check_when_watching_is_off() {
+        let settings = Settings { watch_synapse: false, ..Default::default() };
+        let api = HidApi::new().unwrap();
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None };
+        assert!(!d.check_synapse(|| true));
+        assert!(!d.synapse);
     }
 
     #[test]
