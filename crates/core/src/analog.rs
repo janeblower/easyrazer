@@ -4,7 +4,7 @@
 //! "not supported" on this device; actuation lives inside the key assignment instead.
 //! Layout: `[profile, key, mode, thresholdL, thresholdH, fnId, fnSize, fnData..]`.
 //! Thresholds map 0..=255 onto 1.5..=3.6 mm
-//! (`obmEngineKeyboard.convertUIThresholdToFWThreshold`); 0 means firmware default.
+//! (`obmEngineKeyboard.convertUIThresholdToFWThreshold`); 0 is the 1.5 mm minimum.
 
 use crate::packet::Command;
 
