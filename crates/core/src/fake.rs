@@ -15,6 +15,8 @@ pub struct FakeKeyboard {
     pub mode: Cell<u8>,
     pub active_profile: u8,
     pub keys: RefCell<BTreeMap<u8, KeyAssignment>>,
+    /// Profile 0: the copy the keyboard types with, lost on unplug.
+    pub live: RefCell<BTreeMap<u8, KeyAssignment>>,
     /// `02:12` for these keys answers "fail".
     pub failing_writes: BTreeSet<u8>,
     /// `02:12` for these keys answers "ok" but stores nothing.
@@ -47,11 +49,13 @@ impl FakeKeyboard {
                 };
                 (k, a)
             })
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        let live = keys.iter().map(|(&k, a)| (k, KeyAssignment { profile: 0, ..a.clone() })).collect();
         Self {
             mode: Cell::new(0x03),
             active_profile: profile,
             keys: RefCell::new(keys),
+            live: RefCell::new(live),
             failing_writes: BTreeSet::new(),
             ignored_writes: BTreeSet::new(),
             unplugged: Cell::new(false),
@@ -67,6 +71,18 @@ impl FakeKeyboard {
         self.keys.borrow()[&k].clone()
     }
 
+    pub fn live_key(&self, k: u8) -> KeyAssignment {
+        self.live.borrow()[&k].clone()
+    }
+
+    fn profile(&self, p: u8) -> Option<&RefCell<BTreeMap<u8, KeyAssignment>>> {
+        match p {
+            0 => Some(&self.live),
+            p if p == self.active_profile => Some(&self.keys),
+            _ => None,
+        }
+    }
+
     fn answer(&self, req: &Response) -> (u8, Vec<u8>) {
         let a = req.data();
         match (req.cmd.class, req.cmd.id) {
@@ -76,19 +92,22 @@ impl FakeKeyboard {
                 (OK, a[..2].to_vec())
             }
             (0x05, 0x84) => (OK, vec![self.active_profile]),
-            (0x02, 0x92) => match self.keys.borrow().get(&a[1]) {
-                Some(k) if a[0] == self.active_profile => (OK, analog::set_args(k)),
-                _ => (FAIL, Vec::new()),
+            (0x02, 0x92) => match self.profile(a[0]).and_then(|p| p.borrow().get(&a[1]).cloned()) {
+                Some(k) => (OK, analog::set_args(&k)),
+                None => (FAIL, Vec::new()),
             },
             (0x02, 0x12) => {
                 let Some(k) = analog::parse(a) else {
+                    return (FAIL, Vec::new());
+                };
+                let Some(store) = self.profile(k.profile) else {
                     return (FAIL, Vec::new());
                 };
                 if self.failing_writes.contains(&k.key) {
                     return (FAIL, Vec::new());
                 }
                 if !self.ignored_writes.contains(&k.key) {
-                    self.keys.borrow_mut().insert(k.key, k);
+                    store.borrow_mut().insert(k.key, k);
                 }
                 (OK, a.to_vec())
             }
