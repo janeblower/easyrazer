@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import ColorPicker from './ColorPicker.vue'
 import ConfirmWrite from './ConfirmWrite.vue'
 
 const props = defineProps({ status: Object })
@@ -129,16 +130,6 @@ function setColor(i, rgb) {
   colors[i] = rgb
   setUi('colors', colors)
 }
-
-// Cleared slots remember their color so the picker reopens on it.
-const lastColors = [...DEFAULT_COLORS]
-function clearColor(i) {
-  lastColors[i] = ui.value.colors[i] ?? lastColors[i]
-  setColor(i, null)
-}
-
-const hex = rgb => '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('')
-const rgbOf = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
 
 const percent = computed({
   get: () => Math.round((ui.value.brightness / 255) * 100),
@@ -297,20 +288,31 @@ onMounted(load)
         </div>
         <div v-if="slots" class="row">
           <span class="lbl">{{ slots > 1 ? 'Цвета' : 'Цвет' }}</span>
-          <span v-for="i in slots" :key="i" class="slot" :class="{ empty: !ui.colors[i - 1] }">
-            <input
-              type="color"
-              :value="hex(ui.colors[i - 1] ?? lastColors[i - 1])"
-              :title="ui.colors[i - 1] ? 'Выбрать цвет' : 'Нет цвета — выберите, чтобы включить'"
-              :disabled="blocked || randomOn"
-              @input="setColor(i - 1, rgbOf($event.target.value))"
-            />
-            <button class="clear" title="Без цвета" aria-label="Без цвета" :disabled="blocked || randomOn || !ui.colors[i - 1]" @click="clearColor(i - 1)">×</button>
-          </span>
-          <label v-if="hasRandom" class="check">
-            <input type="checkbox" :checked="ui.random" :disabled="blocked" @change="setUi('random', $event.target.checked)" />
-            Случайно
-          </label>
+          <ColorPicker
+            v-for="i in slots"
+            :key="i"
+            :model-value="ui.colors[i - 1]"
+            :disabled="blocked || randomOn"
+            @update:model-value="setColor(i - 1, $event)"
+          />
+          <button
+            v-if="hasRandom"
+            class="icon shuffle"
+            :class="{ on: ui.random }"
+            :aria-pressed="ui.random"
+            title="Случайные цвета"
+            aria-label="Случайные цвета"
+            :disabled="blocked"
+            @click="setUi('random', !ui.random)"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
+              <path d="m18 2 4 4-4 4" />
+              <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+              <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+              <path d="m18 14 4 4-4 4" />
+            </svg>
+          </button>
         </div>
         <div v-if="dirInfo" class="row">
           <span class="lbl">Направление</span>
@@ -326,7 +328,8 @@ onMounted(load)
           <input v-model.number="speedSlider" type="range" :min="speedInfo.speed[0]" :max="speedInfo.speed[1]" step="1" :disabled="blocked" />
           <span class="hint">быстро</span>
         </div>
-        <div class="row">
+        <p v-if="ui.group === 'off'" class="msg">Подсветка выключена.</p>
+        <div v-else class="row">
           <span class="lbl">Яркость</span>
           <input v-model.number="percent" type="range" min="0" max="100" step="1" :disabled="blocked" />
           <span>{{ percent }}%</span>
@@ -378,7 +381,6 @@ onMounted(load)
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 .seg button.on { background: var(--accent); color: #0b0b0b; border-color: var(--accent); }
 input[type='range'] { width: 240px; accent-color: var(--accent); }
-input[type='color'] { width: 36px; height: 30px; padding: 0; border: 1px solid #555; border-radius: 6px; background: none; }
 .foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--panel); border-radius: 6px; }
 .switch { display: flex; align-items: center; gap: 8px; }
 .switch input { appearance: none; width: 34px; height: 18px; border-radius: 9px; background: #3a3a3a; position: relative; cursor: pointer; }
@@ -388,10 +390,7 @@ input[type='color'] { width: 36px; height: 30px; padding: 0; border: 1px solid #
 .spacer { flex: 1; }
 .dirty { color: var(--edited); font-size: 12px; }
 .icon { width: 34px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
-.slot { position: relative; display: inline-flex; align-items: center; gap: 2px; }
-.slot.empty input[type='color'] { opacity: 0.35; }
-.slot.empty::after { content: ''; position: absolute; left: 3px; top: 50%; width: 32px; border-top: 2px solid var(--error); transform: rotate(-35deg); pointer-events: none; }
-.clear { width: 22px; height: 22px; padding: 0; line-height: 1; }
-.check { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
+.shuffle { margin-left: 6px; }
+.shuffle.on { color: var(--accent); border-color: var(--accent); }
 .icon.save { background: transparent; color: #ffb070; border-color: #8a5a20; }
 </style>
