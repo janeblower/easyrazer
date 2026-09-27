@@ -46,7 +46,10 @@ async function load() {
   const unlisten = await listen('read-progress', e => (progress.value = e.payload))
   try {
     const profile = status.value.profile
-    baseline.value = await invoke('read_all')
+    const base = await invoke('read_all')
+    baseline.value = base
+    edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[k] !== mm))
+    errors.value = {}
     loadedProfile = profile
     message.value = ''
   } catch (e) {
