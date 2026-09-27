@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { KeyMap, KeyView, Rgb } from "../types";
 
 interface Band {
@@ -19,24 +19,39 @@ const props = withDefaults(
     unsaved?: Set<number>;
     colors?: KeyMap<Rgb>;
     selection: Set<number>;
-    unit?: number;
+    /** Shrink the whole map to the container width instead of scrolling. */
+    fit?: boolean;
   }>(),
-  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined, unit: 50 },
+  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined, fit: false },
 );
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
 
 // Width of a ring's frame, in key units.
 const RING = 0.3;
-const U = computed(() => props.unit);
+const U = 50;
+const box = ref<HTMLElement | null>(null);
 const root = ref<HTMLElement | null>(null);
+const scale = ref(1);
+let observer: ResizeObserver | undefined;
 const band = ref<Band | null>(null);
 let start: [number, number] | null = null;
 let additive = false;
 
+const width = computed(() => Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U);
 const size = computed(() => ({
-  width: `${Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U.value}px`,
-  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U.value}px`,
+  width: `${width.value}px`,
+  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U}px`,
+  zoom: scale.value,
 }));
+
+onMounted(() => {
+  if (!props.fit) return;
+  observer = new ResizeObserver(() => {
+    scale.value = Math.min(1, box.value!.clientWidth / width.value);
+  });
+  observer.observe(box.value!);
+});
+onUnmounted(() => observer?.disconnect());
 
 function norm(b: Band): Band {
   return { x0: Math.min(b.x0, b.x1), y0: Math.min(b.y0, b.y1), x1: Math.max(b.x0, b.x1), y1: Math.max(b.y0, b.y1) };
@@ -52,7 +67,7 @@ const rings = computed(() => props.layout.filter((k) => k.shape === "ring"));
 
 function ringStyle(k: KeyView) {
   const [r, g, b] = props.colors?.[k.key] ?? [0x3a, 0x3a, 0x3a];
-  const u = U.value;
+  const u = U;
   return {
     left: `${k.x * u}px`,
     top: `${k.y * u}px`,
@@ -65,7 +80,7 @@ function ringStyle(k: KeyView) {
 
 // A ring is hit on its frame only; the keys inside stay reachable.
 function onRing(k: KeyView, x0: number, y0: number, x1: number, y1: number) {
-  const u = U.value;
+  const u = U;
   const t = RING * u;
   const [l, t0, r, b] = [k.x * u, k.y * u, (k.x + k.w) * u, (k.y + k.h) * u];
   const overlaps = l < x1 && r > x0 && t0 < y1 && b > y0;
@@ -86,7 +101,7 @@ function keyClass(k: KeyView) {
 
 // Painted keys keep their label readable on light and dark colors.
 function keyStyle(k: KeyView) {
-  const u = U.value;
+  const u = U;
   const box = { left: `${k.x * u}px`, top: `${k.y * u}px`, width: `${k.w * u - 4}px`, height: `${k.h * u - 4}px` };
   if (!props.colors) return box;
   const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
@@ -108,8 +123,9 @@ function value(key: number): number | undefined {
 }
 
 function point(e: PointerEvent): [number, number] {
+  // The rect is zoomed, the key geometry is not.
   const r = root.value!.getBoundingClientRect();
-  return [e.clientX - r.left, e.clientY - r.top];
+  return [(e.clientX - r.left) / scale.value, (e.clientY - r.top) / scale.value];
 }
 
 function down(e: PointerEvent) {
@@ -131,7 +147,7 @@ function up(e: PointerEvent) {
   const next = additive ? new Set(props.selection) : new Set<number>();
   if (band.value) {
     const b = norm(band.value);
-    const u = U.value;
+    const u = U;
     for (const k of props.layout) {
       const hit =
         k.shape === "ring"
@@ -156,28 +172,30 @@ function up(e: PointerEvent) {
 </script>
 
 <template>
-  <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
-    <div
-      v-for="k in rings"
-      :key="`ring-${k.key}`"
-      class="rounded-lg border-solid pointer-events-none box-border absolute"
-      :class="{ 'outline-2 outline-solid outline-text outline-offset-2': selection.has(k.key) }"
-      :style="ringStyle(k)"
-    ></div>
-    <div
-      v-for="k in keys"
-      :key="k.key"
-      :data-key="k.key"
-      class="px-[5px] py-[3px] border-2 border-solid flex flex-col justify-between absolute"
-      :class="keyClass(k)"
-      :style="keyStyle(k)"
-      :title="title(k.key)"
-    >
-      <span class="text-xs">{{ k.label }}</span>
-      <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
-        value(k.key)!.toFixed(1)
-      }}</span>
+  <div ref="box">
+    <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
+      <div
+        v-for="k in rings"
+        :key="`ring-${k.key}`"
+        class="rounded-lg border-solid pointer-events-none box-border absolute"
+        :class="{ 'outline-2 outline-solid outline-text outline-offset-2': selection.has(k.key) }"
+        :style="ringStyle(k)"
+      ></div>
+      <div
+        v-for="k in keys"
+        :key="k.key"
+        :data-key="k.key"
+        class="px-[5px] py-[3px] border-2 border-solid flex flex-col justify-between absolute"
+        :class="keyClass(k)"
+        :style="keyStyle(k)"
+        :title="title(k.key)"
+      >
+        <span class="text-xs">{{ k.label }}</span>
+        <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
+          value(k.key)!.toFixed(1)
+        }}</span>
+      </div>
+      <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
     </div>
-    <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
   </div>
 </template>

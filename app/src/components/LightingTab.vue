@@ -361,7 +361,7 @@ onMounted(load);
           <span>{{ g.label }}</span>
         </li>
       </ul>
-      <div class="px-3.5 py-2.5 card flex-1">
+      <div class="px-3.5 py-2.5 card flex-1 min-w-0">
         <div v-if="currentGroup?.types.length" class="field">
           <span class="field-label">Тип</span>
           <span class="inline-flex">
@@ -444,9 +444,7 @@ onMounted(load);
           <span class="hint">быстро</span>
         </div>
         <template v-if="isCustom">
-          <div class="overflow-x-auto">
-            <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" :unit="40" />
-          </div>
+          <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" fit />
           <div class="field">
             <span class="field-label">Цвет</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
