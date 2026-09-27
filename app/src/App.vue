@@ -6,6 +6,9 @@ import Keyboard from './components/Keyboard.vue'
 import Panel from './components/Panel.vue'
 import Status from './components/Status.vue'
 import Lighting from './components/Lighting.vue'
+import Settings from './components/Settings.vue'
+import CloseDialog from './components/CloseDialog.vue'
+import AutostartOffer from './components/AutostartOffer.vue'
 
 const status = ref(null)
 const layout = ref([])
@@ -17,8 +20,11 @@ const progress = ref(null)
 const busy = ref(false)
 const message = ref('')
 const tab = ref('actuation')
+const closing = ref(false)
+const offering = ref(false)
 let loadedProfile = null // profile the baseline was read from
 let unlistenStatus
+let unlistenClose
 
 const dirty = computed(() => Object.keys(edits.value).length)
 const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0)
@@ -116,7 +122,32 @@ async function apply() {
   if (failed) await refresh()
 }
 
+async function onClose(action, remember) {
+  closing.value = false
+  try {
+    if (remember) await invoke('set_close_action', { action })
+    await invoke(action === 'tray' ? 'hide_window' : 'quit')
+  } catch (e) {
+    message.value = String(e)
+  }
+}
+
+async function onOffer(on) {
+  offering.value = false
+  try {
+    await invoke('autostart_answered', { on })
+  } catch (e) {
+    message.value = String(e)
+  }
+}
+
 onMounted(async () => {
+  unlistenClose = await listen('close-requested', () => (closing.value = true))
+  try {
+    offering.value = !(await invoke('app_settings')).autostart_offered
+  } catch (e) {
+    message.value = String(e)
+  }
   layout.value = await invoke('layout')
   unlistenStatus = await listen('status', e => onStatus(e.payload))
   await refresh()
@@ -124,6 +155,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenStatus?.()
+  unlistenClose?.()
 })
 </script>
 
@@ -132,8 +164,9 @@ onUnmounted(() => {
     <nav class="tabs">
       <button :class="{ on: tab === 'actuation' }" @click="tab = 'actuation'">Актуация</button>
       <button :class="{ on: tab === 'lighting' }" @click="tab = 'lighting'">Подсветка</button>
+      <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">Настройки</button>
     </nav>
-    <Status :status="status" :progress="progress" :message="tab === 'actuation' ? message : ''" />
+    <Status :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" />
     <template v-if="tab === 'actuation'">
       <Keyboard :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" v-model:selection="selection" />
       <Panel
@@ -149,7 +182,10 @@ onUnmounted(() => {
         @clear="selection = new Set()"
       />
     </template>
-    <Lighting v-else :status="status" />
+    <Lighting v-else-if="tab === 'lighting'" :status="status" />
+    <Settings v-else />
+    <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
+    <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
     <footer>EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>
   </main>
 </template>
