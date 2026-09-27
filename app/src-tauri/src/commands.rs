@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use razer_core::actuation::Outcome;
+use razer_core::lighting::Look;
 use razer_core::{analog, layout as kb_layout};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::device::{Device, Status};
+use crate::device::{Device, LightingState, Status};
 
 pub struct AppState {
     pub device: Mutex<Device>,
@@ -69,4 +70,34 @@ pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Resul
             Outcome::Failed(e) => ApplyResult::Error { key, message: e.to_string() },
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn lighting_state(state: State<'_, AppState>) -> Result<LightingState, String> {
+    state.device.lock().unwrap().lighting_state()
+}
+
+#[tauri::command]
+pub async fn lighting_preview(state: State<'_, AppState>, look: Look) -> Result<(), String> {
+    state.device.lock().unwrap().lighting_preview(&look)
+}
+
+#[tauri::command]
+pub async fn lighting_apply(state: State<'_, AppState>, look: Look) -> Result<(), String> {
+    state.device.lock().unwrap().lighting_apply(look)
+}
+
+#[tauri::command]
+pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<(), String> {
+    state.device.lock().unwrap().lighting_write(look)
+}
+
+#[tauri::command]
+pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.device.lock().unwrap().set_confirm_write(on)
+}
+
+#[tauri::command]
+pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.device.lock().unwrap().set_dynamic_lighting(on)
 }

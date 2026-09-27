@@ -15,7 +15,13 @@ fn main() {
             commands::status,
             commands::layout,
             commands::read_all,
-            commands::apply
+            commands::apply,
+            commands::lighting_state,
+            commands::lighting_preview,
+            commands::lighting_apply,
+            commands::lighting_write,
+            commands::set_confirm_write,
+            commands::set_dynamic_lighting
         ])
         .run(tauri::generate_context!())
         .expect("tauri run");

@@ -10,9 +10,13 @@ use razer_core::actuation::{self, Outcome};
 use razer_core::analog::KeyAssignment;
 use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
+use razer_core::lighting::{self, EffectInfo, Look, Store};
 use razer_core::transport::Error;
 use razer_core::{control, layout};
 use serde::Serialize;
+
+use crate::dynamic_lighting;
+use crate::settings::{self, Settings};
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -30,6 +34,16 @@ pub struct Status {
     pub unsupported: Option<u16>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct LightingState {
+    pub effects: Vec<EffectInfo>,
+    pub applied: Option<Look>,
+    /// What the keyboard's flash holds; `None` when unknown or unreadable.
+    pub saved: Option<Look>,
+    pub dynamic_lighting: bool,
+    pub confirm_write: bool,
+}
+
 pub struct Device {
     api: HidApi,
     control: Option<(HidTransport, &'static DeviceSpec)>,
@@ -37,12 +51,15 @@ pub struct Device {
     synapse: bool,
     /// A backup has been written this session.
     backed_up: bool,
+    settings: Settings,
+    /// Description of the last keyboard seen, so the lighting tab can be edited while it is unplugged.
+    last_spec: Option<&'static DeviceSpec>,
 }
 
 impl Device {
     pub fn new() -> Result<Self, Error> {
         let api = HidApi::new().map_err(|e| Error::Io(e.to_string()))?;
-        Ok(Self { api, control: None, synapse: true, backed_up: false })
+        Ok(Self { api, control: None, synapse: true, backed_up: false, settings: settings::load(), last_spec: None })
     }
 
     /// Reopens the control interface if the keyboard was replugged; `true` when connected.
@@ -52,6 +69,12 @@ impl Device {
             self.control = None;
             let _ = self.api.refresh_devices();
             self.control = hid::open_control(&self.api).ok().flatten();
+            if let Some((t, d)) = &self.control {
+                self.last_spec = Some(*d);
+                if let (false, Some(look)) = (self.synapse, &self.settings.applied) {
+                    let _ = lighting::set_look(t, d, Store::Temporary, look);
+                }
+            }
         }
         self.control.is_some()
     }
@@ -109,6 +132,76 @@ impl Device {
         let results = actuation::apply(t, profile, changes);
         self.backed_up = true;
         Ok(results)
+    }
+
+    pub fn lighting_state(&mut self) -> Result<LightingState, String> {
+        let dynamic_lighting = dynamic_lighting::enabled();
+        self.ensure_connected();
+        let saved = match (&self.control, self.synapse) {
+            (Some((t, d)), false) => lighting::get_look(t, d, Store::Saved).map_err(|e| e.to_string())?,
+            _ => None,
+        };
+        Ok(LightingState {
+            effects: self.last_spec.map(lighting::effect_infos).unwrap_or_default(),
+            applied: self.settings.applied.clone(),
+            saved,
+            dynamic_lighting,
+            confirm_write: self.settings.confirm_write,
+        })
+    }
+
+    pub fn lighting_preview(&mut self, look: &Look) -> Result<(), String> {
+        if self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        let (t, d) = self.connect().ok_or(NO_KEYBOARD)?;
+        lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())
+    }
+
+    /// Remembers the look; without a keyboard it is shown on the next connect.
+    pub fn lighting_apply(&mut self, look: Look) -> Result<(), String> {
+        if self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        if let Some((t, d)) = self.connect() {
+            lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
+        }
+        self.settings.applied = Some(look);
+        settings::save(&self.settings)
+    }
+
+    /// Writes the keyboard's flash; checks Synapse afresh like actuation writes.
+    pub fn lighting_write(&mut self, look: Look) -> Result<(), String> {
+        self.synapse = synapse_running();
+        if self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        let (t, d) = self.connect().ok_or(NO_KEYBOARD)?;
+        lighting::set_look(t, d, Store::Saved, &look).map_err(|e| e.to_string())?;
+        lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
+        self.settings.applied = Some(look);
+        settings::save(&self.settings)
+    }
+
+    pub fn set_confirm_write(&mut self, on: bool) -> Result<(), String> {
+        self.settings.confirm_write = on;
+        settings::save(&self.settings)
+    }
+
+    pub fn set_dynamic_lighting(&mut self, on: bool) -> Result<(), String> {
+        if !on && self.synapse {
+            return Err(SYNAPSE_RUNNING.into());
+        }
+        dynamic_lighting::set(on)?;
+        if on {
+            return Ok(());
+        }
+        let d = self.connect().map(|(_, d)| d).ok_or(NO_KEYBOARD)?;
+        hid::set_autonomous(&self.api, d, true).map_err(|e| e.to_string())?;
+        if let (Some((t, _)), Some(look)) = (&self.control, &self.settings.applied) {
+            lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -200,5 +293,27 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(actuation::read_key(t, profile, a).unwrap(), original);
+    }
+
+    use razer_core::lighting::Effect;
+
+    #[test]
+    #[ignore = "needs the keyboard connected and Synapse closed"]
+    fn lighting_preview_round_trip_on_hardware() {
+        assert!(!synapse_running(), "close Synapse first");
+        let mut dev = Device::new().unwrap();
+        dev.status(true);
+        let (original, saved_before) = {
+            let (t, d) = dev.connect().expect("keyboard not connected");
+            let original = lighting::get_look(t, d, Store::Temporary).unwrap().expect("known effect in the temporary store");
+            (original, lighting::get_look(t, d, Store::Saved).unwrap())
+        };
+        let test = Look { effect: Effect { name: "static".into(), rgb1: Some([0x12, 0x34, 0x56]), ..Default::default() }, brightness: 0x80 };
+        dev.lighting_preview(&test).unwrap();
+        let (t, d) = dev.connect().unwrap();
+        let read = lighting::get_look(t, d, Store::Temporary).unwrap();
+        lighting::set_look(t, d, Store::Temporary, &original).unwrap();
+        assert_eq!(read, Some(test));
+        assert_eq!(lighting::get_look(t, d, Store::Saved).unwrap(), saved_before);
     }
 }
