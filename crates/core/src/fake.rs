@@ -23,6 +23,9 @@ pub struct FakeKeyboard {
     /// Unplugs itself once this many commands have been sent.
     pub unplug_after: Option<usize>,
     pub sent: RefCell<Vec<Command>>,
+    /// Effect bytes after `store led`, per store.
+    pub effects: RefCell<BTreeMap<u8, Vec<u8>>>,
+    pub brightness: RefCell<BTreeMap<u8, u8>>,
     reply: RefCell<Report>,
 }
 
@@ -54,6 +57,8 @@ impl FakeKeyboard {
             unplugged: Cell::new(false),
             unplug_after: None,
             sent: RefCell::new(Vec::new()),
+            effects: RefCell::new([(0, vec![0x03, 0, 0, 0]), (1, vec![0x03, 0, 0, 0])].into()),
+            brightness: RefCell::new([(0, 0xF2), (1, 0xF2)].into()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
     }
@@ -87,6 +92,22 @@ impl FakeKeyboard {
                 }
                 (OK, a.to_vec())
             }
+            (0x0F, 0x02) => {
+                self.effects.borrow_mut().insert(a[0], a[2..].to_vec());
+                (OK, a.to_vec())
+            }
+            (0x0F, 0x82) => match self.effects.borrow().get(&a[0]) {
+                Some(e) => (OK, [&a[..2], e.as_slice()].concat()),
+                None => (FAIL, Vec::new()),
+            },
+            (0x0F, 0x04) => {
+                self.brightness.borrow_mut().insert(a[0], a[2]);
+                (OK, a.to_vec())
+            }
+            (0x0F, 0x84) => match self.brightness.borrow().get(&a[0]) {
+                Some(&b) => (OK, vec![a[0], a[1], b]),
+                None => (FAIL, Vec::new()),
+            },
             _ => (NOT_SUPPORTED, Vec::new()),
         }
     }

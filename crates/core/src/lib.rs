@@ -10,5 +10,6 @@ mod fake;
 pub mod hid;
 pub mod keymap;
 pub mod layout;
+pub mod lighting;
 pub mod packet;
 pub mod transport;

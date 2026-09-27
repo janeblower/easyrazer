@@ -23,6 +23,7 @@ pub enum Error {
     Crc(Command),
     ShortReply(Command),
     OutOfRange(f32),
+    BadArgument(String),
 }
 
 impl fmt::Display for Error {
@@ -35,6 +36,7 @@ impl fmt::Display for Error {
             Error::Crc(c) => write!(f, "{c}: reply crc mismatch"),
             Error::ShortReply(c) => write!(f, "{c}: reply too short"),
             Error::OutOfRange(mm) => write!(f, "{mm} mm is outside 1.5..=3.6"),
+            Error::BadArgument(m) => write!(f, "{m}"),
         }
     }
 }
