@@ -10,7 +10,7 @@
     "beforeBuildCommand": "bun run build"
   },
   "app": {
-    "windows": [{ "title": "EasyRazer", "width": 1240, "height": 560 }],
+    "windows": [{ "label": "main", "title": "EasyRazer", "width": 1240, "height": 560, "visible": false }],
     "security": { "csp": null }
   },
   "bundle": { "active": false, "icon": ["icons/icon.ico"] }

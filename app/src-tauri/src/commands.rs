@@ -7,9 +7,11 @@ use razer_core::actuation::Outcome;
 use razer_core::lighting::Look;
 use razer_core::{analog, layout as kb_layout};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::device::{self, Device, LightingState, Status};
+use crate::settings::CloseAction;
+use crate::{autostart, tray};
 
 pub struct AppState {
     pub device: Mutex<Device>,
@@ -107,4 +109,63 @@ pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(
 #[tauri::command]
 pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
     state.device.lock().unwrap().set_dynamic_lighting(on)
+}
+
+#[derive(Serialize)]
+pub struct AppSettings {
+    autostart: bool,
+    close_action: CloseAction,
+    watch_synapse: bool,
+    confirm_write: bool,
+    autostart_offered: bool,
+}
+
+#[tauri::command]
+pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
+    let s = state.device.lock().unwrap().settings().clone();
+    Ok(AppSettings {
+        autostart: autostart::enabled(),
+        close_action: s.close_action,
+        watch_synapse: s.watch_synapse,
+        confirm_write: s.confirm_write,
+        autostart_offered: s.autostart_offered,
+    })
+}
+
+#[tauri::command]
+pub async fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
+    let r = autostart::set(on);
+    tray::sync_autostart(&app);
+    r
+}
+
+/// Any answer to the first-run question is final; a failed registry write leaves it unanswered.
+#[tauri::command]
+pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    if on {
+        let r = autostart::set(true);
+        tray::sync_autostart(&app);
+        r?;
+    }
+    state.device.lock().unwrap().update_settings(|s| s.autostart_offered = true)
+}
+
+#[tauri::command]
+pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -> Result<(), String> {
+    state.device.lock().unwrap().update_settings(|s| s.close_action = action)
+}
+
+#[tauri::command]
+pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.device.lock().unwrap().update_settings(|s| s.watch_synapse = on)
+}
+
+#[tauri::command]
+pub fn hide_window(window: WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn quit(app: AppHandle) {
+    app.exit(0);
 }
