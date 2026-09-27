@@ -7,6 +7,7 @@ mod dynamic_lighting;
 mod settings;
 mod tray;
 
+use std::panic::AssertUnwindSafe;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -25,15 +26,18 @@ fn main() {
             }
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
-                let status = commands::poll(&handle.state::<commands::AppState>());
-                let _ = handle.emit("status", &status);
+                // One failed step must not end the watching for the rest of the session.
+                let step = std::panic::catch_unwind(AssertUnwindSafe(|| commands::poll(&handle.state::<commands::AppState>())));
+                if let Ok(status) = step {
+                    let _ = handle.emit("status", &status);
+                }
                 std::thread::sleep(Duration::from_secs(2));
             });
             Ok(())
         })
         .on_window_event(|w, e| {
             if let WindowEvent::CloseRequested { api, .. } = e {
-                let action = w.state::<commands::AppState>().device.lock().unwrap().settings().close_action;
+                let action = w.state::<commands::AppState>().device().settings().close_action;
                 match action {
                     CloseAction::Ask => {
                         api.prevent_close();

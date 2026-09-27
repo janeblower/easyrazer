@@ -1,7 +1,7 @@
 //! Tauri commands: the only surface the UI can reach.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use razer_core::actuation::Outcome;
 use razer_core::lighting::Look;
@@ -15,6 +15,13 @@ use crate::{autostart, tray};
 
 pub struct AppState {
     pub device: Mutex<Device>,
+}
+
+impl AppState {
+    /// A command that panicked mid-way leaves the device in a usable state, so poisoning is ignored.
+    pub fn device(&self) -> MutexGuard<'_, Device> {
+        self.device.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 #[derive(Serialize)]
@@ -42,9 +49,9 @@ fn mm(threshold: u8) -> f32 {
 
 /// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
 pub fn poll(state: &AppState) -> Status {
-    let watch = state.device.lock().unwrap().settings().watch_synapse;
+    let watch = state.device().settings().watch_synapse;
     let synapse = device::synapse_check(watch, device::synapse_running);
-    state.device.lock().unwrap().status(Some(synapse))
+    state.device().status(Some(synapse))
 }
 
 #[tauri::command]
@@ -62,7 +69,7 @@ pub fn layout() -> Vec<KeyView> {
 
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<BTreeMap<u8, f32>, String> {
-    let all = state.device.lock().unwrap().read_all(|done, total| {
+    let all = state.device().read_all(|done, total| {
         let _ = app.emit("read-progress", (done, total));
     })?;
     Ok(all.iter().map(|a| (a.key, mm(a.threshold_low))).collect())
@@ -70,7 +77,7 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<BTre
 
 #[tauri::command]
 pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<Vec<ApplyResult>, String> {
-    let results = state.device.lock().unwrap().apply(&changes)?;
+    let results = state.device().apply(&changes)?;
     Ok(results
         .into_iter()
         .map(|(key, o)| match o {
@@ -83,32 +90,32 @@ pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Resul
 
 #[tauri::command]
 pub async fn lighting_state(state: State<'_, AppState>) -> Result<LightingState, String> {
-    state.device.lock().unwrap().lighting_state()
+    state.device().lighting_state()
 }
 
 #[tauri::command]
 pub async fn lighting_preview(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device.lock().unwrap().lighting_preview(&look)
+    state.device().lighting_preview(&look)
 }
 
 #[tauri::command]
 pub async fn lighting_apply(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device.lock().unwrap().lighting_apply(look)
+    state.device().lighting_apply(look)
 }
 
 #[tauri::command]
 pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device.lock().unwrap().lighting_write(look)
+    state.device().lighting_write(look)
 }
 
 #[tauri::command]
 pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device.lock().unwrap().set_confirm_write(on)
+    state.device().set_confirm_write(on)
 }
 
 #[tauri::command]
 pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device.lock().unwrap().set_dynamic_lighting(on)
+    state.device().set_dynamic_lighting(on)
 }
 
 #[derive(Serialize)]
@@ -122,7 +129,7 @@ pub struct AppSettings {
 
 #[tauri::command]
 pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    let s = state.device.lock().unwrap().settings().clone();
+    let s = state.device().settings().clone();
     Ok(AppSettings {
         autostart: autostart::enabled(),
         close_action: s.close_action,
@@ -147,17 +154,17 @@ pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: 
         tray::sync_autostart(&app);
         r?;
     }
-    state.device.lock().unwrap().update_settings(|s| s.autostart_offered = true)
+    state.device().update_settings(|s| s.autostart_offered = true)
 }
 
 #[tauri::command]
 pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -> Result<(), String> {
-    state.device.lock().unwrap().update_settings(|s| s.close_action = action)
+    state.device().update_settings(|s| s.close_action = action)
 }
 
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device.lock().unwrap().update_settings(|s| s.watch_synapse = on)
+    state.device().update_settings(|s| s.watch_synapse = on)
 }
 
 #[tauri::command]
@@ -168,4 +175,23 @@ pub fn hide_window(window: WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_under_the_lock_does_not_lock_everyone_out() {
+        let state = AppState { device: Mutex::new(Device::new().unwrap()) };
+        let _ = std::thread::scope(|s| {
+            s.spawn(|| {
+                let _guard = state.device();
+                panic!("command failed");
+            })
+            .join()
+        });
+        assert!(state.device.is_poisoned());
+        let _ = state.device().settings();
+    }
 }
