@@ -21,6 +21,9 @@ usage: razer-probe <command>
   mode <0|3>                    device mode: 0 hardware, 3 driver (not persisted)
   actuate <profile> <key> <low> <high>  WRITE thresholds of one key (normal layer)
   stream [secs]                 raw input reports from MI_01 vendor collections
+  lamps                         HID LampArray (MI_04, usage page 0x59): descriptor, attributes, lamps
+  lampauto <0|1>                WRITE LampArray autonomous mode (1 = firmware effects)
+  lampfill <r> <g> <b>          WRITE every LampArray lamp to one color
   set <cls> <id> <size> [hex..] WRITE raw command";
 
 type Result<T> = std::result::Result<T, String>;
@@ -47,6 +50,12 @@ fn run(args: &[String]) -> Result<()> {
     }
     if cmd == "list" {
         return list(&api);
+    }
+    if cmd == "lamps" {
+        return lamps(&api);
+    }
+    if cmd == "lampauto" || cmd == "lampfill" {
+        return lamp_write(&api, cmd, rest);
     }
     warn_if_synapse_running();
     let dev = open(&api)?;
@@ -244,6 +253,84 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
 }
 
 /// Prints raw input reports from the vendor collections of MI_01 for a few seconds.
+fn open_lamps(api: &HidApi) -> Result<HidDevice> {
+    let info = api
+        .device_list()
+        .find(|d| d.vendor_id() == VID && d.product_id() == PID && d.usage_page() == 0x59)
+        .ok_or("LampArray collection not found")?;
+    info.open_device(api).map_err(|e| e.to_string())
+}
+
+fn lamp_write(api: &HidApi, cmd: &str, a: &[String]) -> Result<()> {
+    let bytes: Vec<u8> = a.iter().map(|s| s.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+    let dev = open_lamps(api)?;
+    let [last_lo, last_hi] = (lamp_count(&dev)? - 1).to_le_bytes();
+    let report = match (cmd, bytes.as_slice()) {
+        ("lampauto", &[on @ (0 | 1)]) => vec![6, on],
+        // LampRangeUpdateReport: flags (1 = update complete), first and last lamp id, RGB.
+        ("lampfill", &[r, g, b]) => vec![5, 1, 0, 0, last_lo, last_hi, r, g, b],
+        _ => return Err(USAGE.into()),
+    };
+    dev.send_feature_report(&report).map_err(|e| e.to_string())
+}
+
+fn lamp_count(dev: &HidDevice) -> Result<u16> {
+    let mut r = [0u8; 23];
+    r[0] = 1;
+    dev.get_feature_report(&mut r).map_err(|e| e.to_string())?;
+    Ok(u16::from_le_bytes([r[1], r[2]]))
+}
+
+fn lamps(api: &HidApi) -> Result<()> {
+    let dev = open_lamps(api)?;
+    let mut buf = [0u8; 4096];
+    let n = dev.get_report_descriptor(&mut buf).map_err(|e| e.to_string())?;
+    println!("descriptor ({n} bytes)");
+    for line in buf[..n].chunks(16) {
+        println!("{}", hex(line));
+    }
+    let feature = |id: u8, len: usize| -> Result<Vec<u8>> {
+        let mut r = vec![0u8; len + 1];
+        r[0] = id;
+        let n = dev.get_feature_report(&mut r).map_err(|e| format!("report {id}: {e}"))?;
+        Ok(r[1..n].to_vec())
+    };
+    let u16_at = |b: &[u8], i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
+    let u32_at = |b: &[u8], i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+    let a = feature(1, 22)?;
+    let count = u16_at(&a, 0);
+    println!(
+        "lamps {count}, box {}x{}x{} um, kind {}, min update {} us",
+        u32_at(&a, 2),
+        u32_at(&a, 6),
+        u32_at(&a, 10),
+        u32_at(&a, 14),
+        u32_at(&a, 18)
+    );
+    println!("autonomous {}", hex(&feature(6, 1)?));
+    println!("vendor 07  {}", hex(&feature(7, 63)?));
+    for id in 0..count {
+        let [lo, hi] = id.to_le_bytes();
+        dev.send_feature_report(&[2, lo, hi]).map_err(|e| format!("report 2: {e}"))?;
+        let l = feature(3, 27)?;
+        println!(
+            "lamp {:3} pos {:6} {:6} {:6} latency {:5} purposes {:X} levels {} {} {} prog {} key {:02X}",
+            u16_at(&l, 0),
+            u32_at(&l, 2),
+            u32_at(&l, 6),
+            u32_at(&l, 10),
+            u32_at(&l, 14),
+            u32_at(&l, 18),
+            l[22],
+            l[23],
+            l[24],
+            l[25],
+            l[26]
+        );
+    }
+    Ok(())
+}
+
 fn stream(api: &HidApi, a: &[String]) -> Result<()> {
     let secs: u64 = a.first().map_or(Ok(10), |s| s.parse()).map_err(|_| "seconds must be a number")?;
     let devs: Vec<(String, HidDevice)> = api
