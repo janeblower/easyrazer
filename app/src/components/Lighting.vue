@@ -273,8 +273,8 @@ onMounted(load)
     <p v-if="!draft" class="msg">Подключите клавиатуру, чтобы увидеть её эффекты.</p>
     <div v-else class="body" :class="{ blocked }">
       <ul class="fx">
-        <li v-for="g in groups" :key="g.group" :class="{ on: currentGroup === g }" @click="!blocked && pickGroup(g)">
-          {{ g.label }}
+        <li v-for="g in groups" :key="g.group" :class="['g-' + g.group, { on: currentGroup === g }]" @click="!blocked && pickGroup(g)">
+          <span>{{ g.label }}</span>
         </li>
       </ul>
       <div class="params">
@@ -369,8 +369,53 @@ onMounted(load)
 .body { display: flex; gap: 12px; }
 .body.blocked { opacity: 0.4; pointer-events: none; }
 .fx { list-style: none; margin: 0; padding: 10px; width: 210px; background: var(--panel); border-radius: 6px; }
-.fx li { padding: 8px 10px; margin-bottom: 4px; border-radius: 6px; background: var(--key); border: 2px solid transparent; cursor: pointer; }
+.fx li { position: relative; overflow: hidden; padding: 8px 10px; margin-bottom: 4px; border-radius: 6px; background: var(--key); border: 2px solid transparent; cursor: pointer; }
 .fx li.on { border-color: var(--accent); }
+.fx li > span { position: relative; z-index: 1; }
+.fx li::before,
+.fx li::after { content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+.fx li:hover::before,
+.fx li.on::before,
+.fx li:hover::after,
+.fx li.on::after { opacity: 0.45; }
+.g-static::before { background: var(--accent); }
+.g-breathing::before { animation: fx-breathe 3s ease-in-out infinite; }
+.g-spectrum::before { background: #ff0000; animation: fx-hue 4s linear infinite; }
+.g-wave::before {
+  background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  background-size: 200% 100%;
+  animation: fx-wave 3s linear infinite;
+}
+.g-reactive::before {
+  background: radial-gradient(circle at 20% 50%, transparent var(--r), var(--accent) calc(var(--r) + 3px), transparent calc(var(--r) + 14px));
+  animation: fx-ripple 1.6s ease-out infinite;
+}
+.g-starlight::before,
+.g-starlight::after { animation: fx-twinkle 1.8s ease-in-out infinite; }
+.g-starlight::before {
+  background:
+    radial-gradient(circle at 12% 30%, rgb(255 255 255 / var(--a)) 0 2px, transparent 3px),
+    radial-gradient(circle at 48% 70%, rgb(68 214 44 / var(--a)) 0 2px, transparent 3px),
+    radial-gradient(circle at 80% 35%, rgb(255 255 255 / var(--a)) 0 2px, transparent 3px);
+}
+.g-starlight::after {
+  animation-delay: -0.9s;
+  background:
+    radial-gradient(circle at 30% 60%, rgb(0 128 255 / var(--a)) 0 2px, transparent 3px),
+    radial-gradient(circle at 66% 25%, rgb(255 255 255 / var(--a)) 0 2px, transparent 3px),
+    radial-gradient(circle at 92% 70%, rgb(68 214 44 / var(--a)) 0 2px, transparent 3px);
+}
+@property --r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --a { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes fx-breathe { 0%, 100% { background-color: transparent; } 50% { background-color: var(--accent); } }
+@keyframes fx-hue { to { filter: hue-rotate(360deg); } }
+@keyframes fx-wave { to { background-position: -100% 0; } }
+@keyframes fx-ripple { from { --r: 0px; } to { --r: 220px; } }
+@keyframes fx-twinkle { 0%, 100% { --a: 0; } 50% { --a: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .fx li::before,
+  .fx li::after { animation: none; }
+}
 .params { flex: 1; padding: 10px 14px; background: var(--panel); border-radius: 6px; }
 .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
 .lbl { color: var(--muted); min-width: 100px; }
