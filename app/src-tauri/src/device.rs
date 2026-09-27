@@ -84,18 +84,25 @@ impl Device {
         self.control.as_ref().map(|(t, d)| (t, *d))
     }
 
-    pub fn status(&mut self, check_synapse: bool) -> Status {
-        if check_synapse {
-            self.synapse = synapse_running();
+    /// `fresh_synapse` is a Synapse check made just now, outside the device lock.
+    pub fn status(&mut self, fresh_synapse: Option<bool>) -> Status {
+        let was = self.synapse;
+        if let Some(s) = fresh_synapse {
+            self.synapse = s;
         }
         let synapse = self.synapse;
         self.ensure_connected();
+        if should_restore(was, fresh_synapse)
+            && let (Some((t, d)), Some(look)) = (&self.control, &self.settings.applied)
+        {
+            let _ = lighting::set_look(t, d, Store::Temporary, look);
+        }
         let Some((t, spec)) = &self.control else {
             let unsupported = hid::unsupported_keyboard(&self.api);
             return Status { device: false, synapse, mode: None, profile: None, model: None, unsupported };
         };
         let mut mode = control::mode(t).ok();
-        if should_release_driver_mode(check_synapse, synapse, mode) && control::set_hardware_mode(t).is_ok() {
+        if should_release_driver_mode(fresh_synapse.is_some(), synapse, mode) && control::set_hardware_mode(t).is_ok() {
             mode = control::mode(t).ok();
         }
         let profile = control::active_profile(t).ok();
@@ -138,12 +145,15 @@ impl Device {
         let dynamic_lighting = dynamic_lighting::enabled();
         self.ensure_connected();
         let saved = match (&self.control, self.synapse) {
-            (Some((t, d)), false) => lighting::get_look(t, d, Store::Saved).map_err(|e| e.to_string())?,
+            (Some((t, d)), false) => lighting::get_look(t, d, Store::Saved).ok().flatten(),
             _ => None,
         };
         Ok(LightingState {
             effects: self.last_spec.map(lighting::effect_infos).unwrap_or_default(),
-            applied: self.settings.applied.clone(),
+            applied: match self.last_spec {
+                Some(d) => usable(d, self.settings.applied.clone()),
+                None => self.settings.applied.clone(),
+            },
             saved,
             dynamic_lighting,
             confirm_write: self.settings.confirm_write,
@@ -224,6 +234,16 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
     fresh_check && !synapse && mode == Some(control::MODE_DRIVER)
 }
 
+/// Synapse overwrites the temporary store; once it is gone, bring the applied look back.
+fn should_restore(was_running: bool, fresh_synapse: Option<bool>) -> bool {
+    was_running && fresh_synapse == Some(false)
+}
+
+/// Settings from an older description may name effects that no longer exist.
+fn usable(d: &DeviceSpec, look: Option<Look>) -> Option<Look> {
+    look.filter(|l| lighting::encode(d, &l.effect).is_ok())
+}
+
 pub fn synapse_running() -> bool {
     let out = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq RazerAppEngine.exe", "/NH"])
@@ -242,6 +262,7 @@ fn synapse_in(tasklist: Option<Output>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use razer_core::lighting::Effect;
     use super::*;
 
     use std::os::windows::process::ExitStatusExt;
@@ -272,6 +293,23 @@ mod tests {
         assert!(!should_release_driver_mode(true, false, Some(control::MODE_HARDWARE)));
     }
 
+    #[test]
+    fn applied_look_is_restored_once_synapse_is_gone() {
+        assert!(should_restore(true, Some(false)));
+        assert!(!should_restore(true, Some(true)));
+        assert!(!should_restore(false, Some(false)));
+        assert!(!should_restore(true, None));
+    }
+
+    #[test]
+    fn applied_look_the_description_cannot_encode_is_dropped() {
+        let d = razer_core::devices::by_pid(0x0266).unwrap();
+        let stale = Look { effect: Effect { name: "reactive".into(), speed: Some(2), ..Default::default() }, brightness: 9 };
+        assert_eq!(usable(d, Some(stale)), None);
+        let ok = Look { effect: Effect { name: "spectrum".into(), ..Default::default() }, brightness: 9 };
+        assert_eq!(usable(d, Some(ok.clone())), Some(ok));
+    }
+
     use razer_core::{analog, keymap};
 
     #[test]
@@ -295,14 +333,13 @@ mod tests {
         assert_eq!(actuation::read_key(t, profile, a).unwrap(), original);
     }
 
-    use razer_core::lighting::Effect;
 
     #[test]
     #[ignore = "needs the keyboard connected and Synapse closed"]
     fn lighting_preview_round_trip_on_hardware() {
         assert!(!synapse_running(), "close Synapse first");
         let mut dev = Device::new().unwrap();
-        dev.status(true);
+        dev.status(Some(false));
         let (original, saved_before) = {
             let (t, d) = dev.connect().expect("keyboard not connected");
             let original = lighting::get_look(t, d, Store::Temporary).unwrap().expect("known effect in the temporary store");

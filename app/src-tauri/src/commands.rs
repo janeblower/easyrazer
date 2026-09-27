@@ -9,7 +9,7 @@ use razer_core::{analog, layout as kb_layout};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::device::{Device, LightingState, Status};
+use crate::device::{self, Device, LightingState, Status};
 
 pub struct AppState {
     pub device: Mutex<Device>,
@@ -40,7 +40,9 @@ fn mm(threshold: u8) -> f32 {
 
 #[tauri::command]
 pub async fn status(state: State<'_, AppState>, check_synapse: bool) -> Result<Status, String> {
-    Ok(state.device.lock().unwrap().status(check_synapse))
+    // tasklist takes a few hundred ms; keep it out of the lock so previews are not held up.
+    let synapse = check_synapse.then(device::synapse_running);
+    Ok(state.device.lock().unwrap().status(synapse))
 }
 
 #[tauri::command]
