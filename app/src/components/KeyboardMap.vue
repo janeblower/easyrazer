@@ -29,6 +29,10 @@ const size = computed(() => ({
   height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U}px`,
 }));
 
+function norm(b: Band): Band {
+  return { x0: Math.min(b.x0, b.x1), y0: Math.min(b.y0, b.y1), x1: Math.max(b.x0, b.x1), y1: Math.max(b.y0, b.y1) };
+}
+
 const bandStyle = computed(() => {
   const b = norm(band.value!);
   return { left: `${b.x0}px`, top: `${b.y0}px`, width: `${b.x1 - b.x0}px`, height: `${b.y1 - b.y0}px` };
@@ -41,10 +45,6 @@ function value(key: number): number | undefined {
 function point(e: PointerEvent): [number, number] {
   const r = root.value!.getBoundingClientRect();
   return [e.clientX - r.left, e.clientY - r.top];
-}
-
-function norm(b: Band): Band {
-  return { x0: Math.min(b.x0, b.x1), y0: Math.min(b.y0, b.y1), x1: Math.max(b.x0, b.x1), y1: Math.max(b.y0, b.y1) };
 }
 
 function down(e: PointerEvent) {

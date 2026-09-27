@@ -4,7 +4,9 @@ import { onMounted, onUnmounted, ref } from "vue";
 const emit = defineEmits<{ yes: [dontAsk: boolean]; no: [] }>();
 const dontAsk = ref(false);
 const no = ref<HTMLButtonElement | null>(null);
-const onKey = (e: KeyboardEvent) => e.key === "Escape" && emit("no");
+const onKey = (e: KeyboardEvent) => {
+  if (e.key === "Escape") emit("no");
+};
 
 onMounted(() => {
   window.addEventListener("keydown", onKey);

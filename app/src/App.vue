@@ -3,11 +3,11 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import type { AppSettings, ApplyResult, CloseAction, Status as DeviceStatus, KeyMap, KeyView } from "./types";
-import Keyboard from "./components/Keyboard.vue";
-import Panel from "./components/Panel.vue";
-import Status from "./components/Status.vue";
-import Lighting from "./components/Lighting.vue";
-import Settings from "./components/Settings.vue";
+import KeyboardMap from "./components/KeyboardMap.vue";
+import ActuationPanel from "./components/ActuationPanel.vue";
+import StatusBar from "./components/StatusBar.vue";
+import LightingTab from "./components/LightingTab.vue";
+import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
 import AutostartOffer from "./components/AutostartOffer.vue";
 
@@ -36,25 +36,6 @@ const selectedValue = computed(() => {
   return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
 });
 
-async function refresh() {
-  try {
-    await onStatus(await invoke<DeviceStatus>("status"));
-  } catch (error) {
-    message.value = String(error);
-  }
-}
-
-async function onStatus(s: DeviceStatus) {
-  // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
-  if (busy.value) return;
-  status.value = s;
-  if (!s.device || s.synapse) {
-    loadedProfile = null;
-    return;
-  }
-  if (loadedProfile !== s.profile && !busy.value) await load();
-}
-
 async function load() {
   busy.value = true;
   const unlisten = await listen<[number, number]>("read-progress", (e) => (progress.value = e.payload));
@@ -72,6 +53,25 @@ async function load() {
     unlisten();
     progress.value = null;
     busy.value = false;
+  }
+}
+
+async function onStatus(s: DeviceStatus) {
+  // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
+  if (busy.value) return;
+  status.value = s;
+  if (!s.device || s.synapse) {
+    loadedProfile = null;
+    return;
+  }
+  if (loadedProfile !== s.profile && !busy.value) await load();
+}
+
+async function refresh() {
+  try {
+    await onStatus(await invoke<DeviceStatus>("status"));
+  } catch (error) {
+    message.value = String(error);
   }
 }
 
@@ -155,12 +155,15 @@ onMounted(async () => {
     showError(e.payload);
   });
   try {
-    offering.value = !(await invoke<AppSettings>("app_settings")).autostart_offered;
+    const settings = await invoke<AppSettings>("app_settings");
+    offering.value = !settings.autostart_offered;
   } catch (error) {
     message.value = String(error);
   }
   layout.value = await invoke<KeyView[]>("layout");
-  unlistenStatus = await listen<DeviceStatus>("status", async (e) => onStatus(e.payload));
+  unlistenStatus = await listen<DeviceStatus>("status", (e) => {
+    void onStatus(e.payload);
+  });
   await refresh();
 });
 
@@ -179,10 +182,10 @@ onUnmounted(() => {
       <button :class="{ on: tab === 'lighting' }" @click="tab = 'lighting'">Подсветка</button>
       <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">Настройки</button>
     </nav>
-    <Status :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
+    <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
-      <Keyboard v-model:selection="selection" :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" />
-      <Panel
+      <KeyboardMap v-model:selection="selection" :layout="layout" :baseline="baseline" :edits="edits" :errors="errors" />
+      <ActuationPanel
         :count="selection.size"
         :value="selectedValue"
         :dirty="dirty"
@@ -195,8 +198,8 @@ onUnmounted(() => {
         @clear="selection = new Set()"
       />
     </template>
-    <Lighting v-else-if="tab === 'lighting'" :status="status" />
-    <Settings v-else />
+    <LightingTab v-else-if="tab === 'lighting'" :status="status" />
+    <SettingsTab v-else />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
     <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
     <footer>EasyRazer — неофициальный проект, не связан с Razer Inc.</footer>

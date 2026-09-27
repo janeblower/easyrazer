@@ -30,7 +30,9 @@ async function set(cmd: string, args: Record<string, unknown>) {
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
 
 onMounted(async () => {
-  unlisten = await listen("settings-changed", load);
+  unlisten = await listen("settings-changed", () => {
+    void load();
+  });
   // Switched away before listen() resolved: onUnmounted has already run.
   if (unmounted) {
     unlisten();

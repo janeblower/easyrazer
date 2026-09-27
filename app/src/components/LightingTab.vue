@@ -40,7 +40,7 @@ const GROUPS: Record<string, string> = {
   starlight: "Звёздное небо",
 };
 const TYPES: Record<string, string> = { key: "Клавиша", ripple: "Рябь" };
-const COLOR_VARIANTS: string[] = ["one", "two", "random"];
+const COLOR_VARIANTS = new Set(["one", "two", "random"]);
 const DIRS: Record<string, string> = { left: "← влево", right: "вправо →" };
 const DEFAULT_COLORS: Rgb[] = [
   [0x44, 0xd6, 0x2c],
@@ -62,7 +62,7 @@ let loading = false;
 // Effect names are `group[_type][_one|_two|_random]`.
 function parse(name: string): Parsed {
   const parts = name.split("_");
-  const variant = COLOR_VARIANTS.includes(parts.at(-1)!) ? (parts.pop() as Variant) : null;
+  const variant = COLOR_VARIANTS.has(parts.at(-1)!) ? (parts.pop() as Variant) : null;
   return { group: parts[0], type: parts[1] ?? null, variant };
 }
 
@@ -128,10 +128,6 @@ function stateFrom(stored: Look | null): Ui | null {
   return s;
 }
 
-const draft = computed(() => ui.value && resolve(ui.value));
-const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
-const canSave = computed(() => connected.value && !busy.value && !!draft.value && !same(draft.value, saved.value));
-
 // The backend omits unset effect fields; compare looks by the fields that are set.
 function norm(look?: Look | null): Look | null {
   if (!look) return null;
@@ -147,6 +143,10 @@ function norm(look?: Look | null): Look | null {
 function same(a?: Look | null, b?: Look | null) {
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
+
+const draft = computed(() => ui.value && resolve(ui.value));
+const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
+const canSave = computed(() => connected.value && !busy.value && !!draft.value && !same(draft.value, saved.value));
 
 function setUi<K extends keyof Ui>(k: K, v: Ui[K]) {
   ui.value = { ...ui.value!, [k]: v };
@@ -184,15 +184,15 @@ const speedInfo = computed(() => cands.value.find((e) => e.speed));
 const speedSlider = computed({
   get: () => {
     const [lo, hi] = speedInfo.value!.speed!;
-    const fast_low = speedInfo.value!.fast_low;
+    const fastLow = speedInfo.value!.fast_low;
     const cur = ui.value!.speed;
     const s = cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2);
-    return fast_low ? lo + hi - s : s;
+    return fastLow ? lo + hi - s : s;
   },
   set: (v: number) => {
     const [lo, hi] = speedInfo.value!.speed!;
-    const fast_low = speedInfo.value!.fast_low;
-    setUi("speed", fast_low ? lo + hi - v : v);
+    const fastLow = speedInfo.value!.fast_low;
+    setUi("speed", fastLow ? lo + hi - v : v);
   },
 });
 
@@ -219,7 +219,7 @@ async function preview() {
 }
 
 watch(draft, (now, before) => {
-  if (!loading && connected.value && now && !same(now, before)) preview();
+  if (!loading && connected.value && now && !same(now, before)) void preview();
 });
 
 async function load() {

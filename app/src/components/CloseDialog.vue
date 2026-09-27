@@ -5,7 +5,9 @@ import type { CloseAction } from "../types";
 const emit = defineEmits<{ choose: [action: CloseAction, remember: boolean]; cancel: [] }>();
 const remember = ref(false);
 const tray = ref<HTMLButtonElement | null>(null);
-const onKey = (e: KeyboardEvent) => e.key === "Escape" && emit("cancel");
+const onKey = (e: KeyboardEvent) => {
+  if (e.key === "Escape") emit("cancel");
+};
 
 onMounted(() => {
   window.addEventListener("keydown", onKey);
