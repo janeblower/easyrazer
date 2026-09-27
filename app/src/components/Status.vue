@@ -7,10 +7,14 @@ const view = computed(() => {
   const s = props.status
   if (!s) return { kind: 'info', text: 'Поиск клавиатуры…' }
   if (s.synapse) return { kind: 'warn', text: 'Запущен Synapse (RazerAppEngine). Закройте его, включая значок в трее, — иначе он перезапишет настройки.' }
-  if (!s.device) return { kind: 'warn', text: 'Клавиатура Huntsman V2 Analog не найдена.' }
+  if (!s.device && s.unsupported != null) {
+    const pid = s.unsupported.toString(16).toUpperCase().padStart(4, '0')
+    return { kind: 'warn', text: `Модель клавиатуры Razer не поддерживается (PID ${pid}).` }
+  }
+  if (!s.device) return { kind: 'warn', text: 'Поддерживаемая клавиатура Razer не найдена.' }
   if (props.progress) return { kind: 'info', text: `Чтение клавиатуры: ${props.progress[0]} из ${props.progress[1]}` }
   if (props.message) return { kind: 'info', text: props.message }
-  return { kind: 'ok', text: `Подключено, профиль ${s.profile ?? '?'}` }
+  return { kind: 'ok', text: `Подключено: ${s.model}, профиль ${s.profile ?? '?'}` }
 })
 </script>
 

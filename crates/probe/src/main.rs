@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
 use razer_core::analog::{self, Mode};
-use razer_core::hid::{self, HidTransport, PID, VID};
+use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
 use razer_core::packet::{self, Command, Response};
 use razer_core::transport;
@@ -27,6 +27,9 @@ usage: razer-probe <command>
   set <cls> <id> <size> [hex..] WRITE raw command";
 
 type Result<T> = std::result::Result<T, String>;
+
+/// The probe explores one model; the app finds models through `razer_core::devices`.
+const PID: u16 = 0x0266;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -87,7 +90,10 @@ fn list(api: &HidApi) -> Result<()> {
 }
 
 fn open(api: &HidApi) -> Result<HidTransport> {
-    hid::open_control(api).map_err(|e| e.to_string())?.ok_or_else(|| "control interface MI_03 not found".into())
+    hid::open_control(api)
+        .map_err(|e| e.to_string())?
+        .map(|(t, _)| t)
+        .ok_or_else(|| "control interface MI_03 not found".into())
 }
 
 fn warn_if_synapse_running() {

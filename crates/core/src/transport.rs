@@ -45,12 +45,18 @@ impl std::error::Error for Error {}
 pub trait Transport {
     fn send_feature(&self, report: &Report) -> Result<(), Error>;
     fn get_feature(&self, report: &mut Report) -> Result<(), Error>;
+
+    /// Transaction id the device answers to.
+    fn tid(&self) -> u8 {
+        TID
+    }
 }
 
 /// Sends one command and polls until the device answers it.
 pub fn exchange(t: &impl Transport, cmd: Command, size: u8, args: &[u8]) -> Result<Response, Error> {
+    let tid = t.tid();
     let mut tx = [0u8; packet::LEN + 1];
-    tx[1..].copy_from_slice(&packet::request(TID, cmd, size, args));
+    tx[1..].copy_from_slice(&packet::request(tid, cmd, size, args));
     t.send_feature(&tx)?;
     for _ in 0..MAX_POLLS {
         sleep(POLL_DELAY);
@@ -59,7 +65,7 @@ pub fn exchange(t: &impl Transport, cmd: Command, size: u8, args: &[u8]) -> Resu
         let r = Response::parse(rx[1..].try_into().unwrap());
         match r.status {
             Status::Busy => continue,
-            Status::Ok if r.cmd != cmd || r.tid != TID => {
+            Status::Ok if r.cmd != cmd || r.tid != tid => {
                 return Err(Error::WrongReply { sent: cmd, got: r.cmd, tid: r.tid });
             }
             Status::Ok if !r.crc_ok => return Err(Error::Crc(cmd)),
@@ -81,12 +87,13 @@ mod tests {
     struct Scripted {
         sent: RefCell<Vec<Report>>,
         replies: RefCell<Vec<Report>>,
+        tid: u8,
     }
 
     impl Scripted {
         fn new(mut replies: Vec<Report>) -> Self {
             replies.reverse();
-            Self { sent: RefCell::new(Vec::new()), replies: RefCell::new(replies) }
+            Self { sent: RefCell::new(Vec::new()), replies: RefCell::new(replies), tid: TID }
         }
     }
 
@@ -99,6 +106,10 @@ mod tests {
         fn get_feature(&self, r: &mut Report) -> Result<(), Error> {
             *r = self.replies.borrow_mut().pop().ok_or(Error::Io("no reply".into()))?;
             Ok(())
+        }
+
+        fn tid(&self) -> u8 {
+            self.tid
         }
     }
 
@@ -153,5 +164,13 @@ mod tests {
         r[89] ^= 0xFF;
         let t = Scripted::new(vec![r]);
         assert_eq!(exchange(&t, CMD, 1, &[]).unwrap_err(), Error::Crc(CMD));
+    }
+
+    #[test]
+    fn uses_the_transport_tid() {
+        let mut t = Scripted::new(vec![reply(0x02, 0x3F, CMD, &[1])]);
+        t.tid = 0x3F;
+        assert_eq!(exchange(&t, CMD, 1, &[]).unwrap().data(), [1]);
+        assert_eq!(t.sent.borrow()[0][2], 0x3F);
     }
 }
