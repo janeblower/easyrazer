@@ -1,14 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import type { CloseAction } from '../types'
 
-const emit = defineEmits(['choose', 'cancel'])
+const emit = defineEmits<{ choose: [action: CloseAction, remember: boolean]; cancel: [] }>()
 const remember = ref(false)
-const tray = ref(null)
-const onKey = e => e.key === 'Escape' && emit('cancel')
+const tray = ref<HTMLButtonElement | null>(null)
+const onKey = (e: KeyboardEvent) => e.key === 'Escape' && emit('cancel')
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  tray.value.focus()
+  tray.value?.focus()
 })
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>

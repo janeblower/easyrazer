@@ -1,7 +1,8 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { AppSettings, ApplyResult, CloseAction, KeyMap, KeyView, Status as DeviceStatus } from './types'
 import Keyboard from './components/Keyboard.vue'
 import Panel from './components/Panel.vue'
 import Status from './components/Status.vue'
@@ -10,23 +11,23 @@ import Settings from './components/Settings.vue'
 import CloseDialog from './components/CloseDialog.vue'
 import AutostartOffer from './components/AutostartOffer.vue'
 
-const status = ref(null)
-const layout = ref([])
-const baseline = ref({}) // fwID -> mm, as last read from the keyboard
-const edits = ref({}) // fwID -> mm, not applied yet
-const errors = ref({}) // fwID -> message from the last apply
-const selection = ref(new Set())
-const progress = ref(null)
+const status = ref<DeviceStatus | null>(null)
+const layout = ref<KeyView[]>([])
+const baseline = ref<KeyMap<number>>({}) // mm, as last read from the keyboard
+const edits = ref<KeyMap<number>>({}) // mm, not applied yet
+const errors = ref<KeyMap<string>>({}) // message from the last apply
+const selection = ref(new Set<number>())
+const progress = ref<[number, number] | null>(null)
 const busy = ref(false)
 const message = ref('')
 const tab = ref('actuation')
 const closing = ref(false)
 const offering = ref(false)
-let loadedProfile = null // profile the baseline was read from
-let unlistenStatus
-let unlistenClose
-let unlistenError
-let errorTimer
+let loadedProfile: number | null = null // profile the baseline was read from
+let unlistenStatus: UnlistenFn | undefined
+let unlistenClose: UnlistenFn | undefined
+let unlistenError: UnlistenFn | undefined
+let errorTimer: ReturnType<typeof setTimeout> | undefined
 
 const dirty = computed(() => Object.keys(edits.value).length)
 const canApply = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value && dirty.value > 0)
@@ -37,31 +38,31 @@ const selectedValue = computed(() => {
 
 async function refresh() {
   try {
-    await onStatus(await invoke('status'))
+    await onStatus(await invoke<DeviceStatus>('status'))
   } catch (e) {
     message.value = String(e)
   }
 }
 
-async function onStatus(s) {
+async function onStatus(s: DeviceStatus) {
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
   if (busy.value) return
   status.value = s
-  if (!status.value.device || status.value.synapse) {
+  if (!s.device || s.synapse) {
     loadedProfile = null
     return
   }
-  if (loadedProfile !== status.value.profile && !busy.value) await load()
+  if (loadedProfile !== s.profile && !busy.value) await load()
 }
 
 async function load() {
   busy.value = true
-  const unlisten = await listen('read-progress', e => (progress.value = e.payload))
+  const unlisten = await listen<[number, number]>('read-progress', e => (progress.value = e.payload))
   try {
-    const profile = status.value.profile
-    const base = await invoke('read_all')
+    const profile = status.value?.profile ?? null
+    const base = await invoke<KeyMap<number>>('read_all')
     baseline.value = base
-    edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[k] !== mm))
+    edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[Number(k)] !== mm))
     errors.value = {}
     loadedProfile = profile
     message.value = ''
@@ -74,7 +75,7 @@ async function load() {
   }
 }
 
-function setValue(mm) {
+function setValue(mm: number) {
   const next = { ...edits.value }
   for (const k of selection.value) {
     if (baseline.value[k] === mm) delete next[k]
@@ -97,10 +98,10 @@ async function apply() {
   let failed = false
   try {
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm])
-    const results = await invoke('apply', { changes })
+    const results = await invoke<ApplyResult[]>('apply', { changes })
     const base = { ...baseline.value }
     const next = { ...edits.value }
-    const errs = {}
+    const errs: KeyMap<string> = {}
     for (const r of results) {
       if (r.status === 'error') {
         errs[r.key] = r.message
@@ -126,20 +127,20 @@ async function apply() {
 
 // Errors not tied to a tab; shown over whatever tab is open.
 const appError = ref('')
-function showError(e) {
+function showError(e: unknown) {
   appError.value = String(e)
   clearTimeout(errorTimer)
   errorTimer = setTimeout(() => (appError.value = ''), 10000)
 }
 
-async function onClose(action, remember) {
+async function onClose(action: CloseAction, remember: boolean) {
   closing.value = false
   // The choice still applies this session even if it could not be saved.
   if (remember) await invoke('set_close_action', { action }).catch(showError)
   await invoke(action === 'tray' ? 'hide_window' : 'quit').catch(showError)
 }
 
-async function onOffer(on) {
+async function onOffer(on: boolean) {
   offering.value = false
   try {
     await invoke('autostart_answered', { on })
@@ -150,14 +151,14 @@ async function onOffer(on) {
 
 onMounted(async () => {
   unlistenClose = await listen('close-requested', () => (closing.value = true))
-  unlistenError = await listen('app-error', e => showError(e.payload))
+  unlistenError = await listen<string>('app-error', e => showError(e.payload))
   try {
-    offering.value = !(await invoke('app_settings')).autostart_offered
+    offering.value = !(await invoke<AppSettings>('app_settings')).autostart_offered
   } catch (e) {
     message.value = String(e)
   }
-  layout.value = await invoke('layout')
-  unlistenStatus = await listen('status', e => onStatus(e.payload))
+  layout.value = await invoke<KeyView[]>('layout')
+  unlistenStatus = await listen<DeviceStatus>('status', e => onStatus(e.payload))
   await refresh()
 })
 

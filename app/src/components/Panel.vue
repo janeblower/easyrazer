@@ -1,9 +1,9 @@
-<script setup>
-const props = defineProps({ count: Number, value: Number, dirty: Number, canApply: Boolean, busy: Boolean })
-const emit = defineEmits(['set', 'apply', 'revert', 'selectAll', 'clear'])
+<script setup lang="ts">
+defineProps<{ count: number; value: number | null; dirty: number; canApply: boolean; busy: boolean }>()
+const emit = defineEmits<{ set: [mm: number]; apply: []; revert: []; selectAll: []; clear: [] }>()
 
-function onInput(e) {
-  emit('set', Math.round(Number(e.target.value) * 10) / 10)
+function onInput(e: Event) {
+  emit('set', Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10)
 }
 </script>
 

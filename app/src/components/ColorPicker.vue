@@ -1,8 +1,9 @@
-<script setup>
+<script setup lang="ts">
 import { ref, watch, onUnmounted } from 'vue'
+import type { Rgb } from '../types'
 
-const props = defineProps({ modelValue: Array, disabled: Boolean })
-const emit = defineEmits(['update:modelValue'])
+const props = defineProps<{ modelValue: Rgb | null; disabled: boolean }>()
+const emit = defineEmits<{ 'update:modelValue': [rgb: Rgb | null] }>()
 
 const PRESETS = [
   '#ff0000', '#ff8000', '#ffff00', '#44d62c', '#00ff80', '#00ffff',
@@ -10,21 +11,21 @@ const PRESETS = [
 ]
 
 const open = ref(false)
-const root = ref(null)
+const root = ref<HTMLElement | null>(null)
 // Colour to come back to after "no colour" is switched off again.
-const last = ref(props.modelValue ?? [0x44, 0xd6, 0x2c])
+const last = ref<Rgb>(props.modelValue ?? [0x44, 0xd6, 0x2c])
 watch(
   () => props.modelValue,
   v => v && (last.value = v),
 )
 
-const hex = rgb => '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('')
-const rgbOf = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+const hex = (rgb: Rgb) => '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('')
+const rgbOf = (h: string) => [1, 3, 5].map(i => Number.parseInt(h.slice(i, i + 2), 16)) as Rgb
 
-const pick = h => emit('update:modelValue', rgbOf(h))
+const pick = (h: string) => emit('update:modelValue', rgbOf(h))
 const toggleNone = () => emit('update:modelValue', props.modelValue ? null : last.value)
 
-const onOutside = e => root.value && !root.value.contains(e.target) && (open.value = false)
+const onOutside = (e: MouseEvent) => root.value && !root.value.contains(e.target as Node) && (open.value = false)
 watch(open, o => (o ? document.addEventListener('mousedown', onOutside) : document.removeEventListener('mousedown', onOutside)))
 watch(
   () => props.disabled,
@@ -51,7 +52,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onOutside))
       <div class="actions">
         <label class="custom">
           Другой…
-          <input type="color" :value="hex(last)" @input="pick($event.target.value)" />
+          <input type="color" :value="hex(last)" @input="pick(($event.target as HTMLInputElement).value)" />
         </label>
         <button class="none" :class="{ on: !modelValue }" :aria-pressed="!modelValue" @click="toggleNone">⊘ Без цвета</button>
       </div>

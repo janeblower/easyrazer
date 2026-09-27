@@ -1,12 +1,36 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import ColorPicker from './ColorPicker.vue'
 import ConfirmWrite from './ConfirmWrite.vue'
+import type { Effect, EffectInfo, LightingState, Look, Rgb, Status } from '../types'
 
-const props = defineProps({ status: Object })
+interface Ui {
+  group: string
+  type: string | null
+  colors: (Rgb | null)[]
+  random: boolean
+  dir: string | null
+  speed: number | null
+  brightness: number
+}
+type Variant = 'one' | 'two' | 'random'
+interface Parsed {
+  group: string
+  type: string | null
+  variant: Variant | null
+}
+type Candidate = EffectInfo & Parsed
+interface Group {
+  group: string
+  label: string
+  types: string[]
+  effects: Candidate[]
+}
 
-const GROUPS = {
+const props = defineProps<{ status: Status | null }>()
+
+const GROUPS: Record<string, string> = {
   off: 'Выключено',
   static: 'Статичный',
   breathing: 'Дыхание',
@@ -15,16 +39,19 @@ const GROUPS = {
   reactive: 'Отклик',
   starlight: 'Звёздное небо',
 }
-const TYPES = { key: 'Клавиша', ripple: 'Рябь' }
-const COLOR_VARIANTS = ['one', 'two', 'random']
-const DIRS = { left: '← влево', right: 'вправо →' }
-const DEFAULT_COLORS = [[0x44, 0xd6, 0x2c], [0x00, 0x40, 0xff]]
+const TYPES: Record<string, string> = { key: 'Клавиша', ripple: 'Рябь' }
+const COLOR_VARIANTS: string[] = ['one', 'two', 'random']
+const DIRS: Record<string, string> = { left: '← влево', right: 'вправо →' }
+const DEFAULT_COLORS: Rgb[] = [
+  [0x44, 0xd6, 0x2c],
+  [0x00, 0x40, 0xff],
+]
 
-const effects = ref([])
-const applied = ref(null)
-const saved = ref(null)
+const effects = ref<EffectInfo[]>([])
+const applied = ref<Look | null>(null)
+const saved = ref<Look | null>(null)
 // What the controls show; the effect sent to the keyboard is derived from it.
-const ui = ref(null)
+const ui = ref<Ui | null>(null)
 const dynamicLighting = ref(false)
 const confirmWrite = ref(true)
 const asking = ref(false)
@@ -33,16 +60,16 @@ const message = ref('')
 let loading = false
 
 // Effect names are `group[_type][_one|_two|_random]`.
-function parse(name) {
+function parse(name: string): Parsed {
   const parts = name.split('_')
-  const variant = COLOR_VARIANTS.includes(parts.at(-1)) ? parts.pop() : null
-  return { group: parts[0], type: parts[1] ?? null, variant }
+  const variant = COLOR_VARIANTS.includes(parts.at(-1)!) ? (parts.pop() as Variant) : null
+  return { group: parts[0]!, type: parts[1] ?? null, variant }
 }
 
 const blocked = computed(() => !props.status || props.status.synapse)
 const connected = computed(() => !!props.status?.device && !blocked.value)
 const groups = computed(() => {
-  const out = []
+  const out: Group[] = []
   for (const e of effects.value) {
     const p = parse(e.name)
     let g = out.find(g => g.group === p.group)
@@ -53,41 +80,42 @@ const groups = computed(() => {
   return out
 })
 
-function candidates(s) {
+function candidates(s: Ui): Candidate[] {
   return groups.value.find(g => g.group === s.group)?.effects.filter(e => e.type === s.type) ?? []
 }
 
-const currentGroup = computed(() => ui.value && groups.value.find(g => g.group === ui.value.group))
+const currentGroup = computed(() => groups.value.find(g => g.group === ui.value?.group))
 const cands = computed(() => (ui.value ? candidates(ui.value) : []))
 const slots = computed(() => Math.max(0, ...cands.value.map(e => e.colors)))
 const hasRandom = computed(() => cands.value.some(e => e.variant === 'random'))
-const randomOn = computed(() => ui.value.random && hasRandom.value)
+const randomOn = computed(() => !!ui.value?.random && hasRandom.value)
 
 // One set color picks the one-color effect, two pick the two-color one, none turn the lighting off.
-function resolve(s) {
+function resolve(s: Ui): Look | null {
   const cs = candidates(s)
   if (!cs.length) return null
-  const set = s.colors.slice(0, Math.max(0, ...cs.map(e => e.colors))).filter(Boolean)
-  let e = cs[0]
-  if (s.random && cs.some(c => c.variant === 'random')) e = cs.find(c => c.variant === 'random')
+  const set = s.colors.slice(0, Math.max(0, ...cs.map(e => e.colors))).filter((c): c is Rgb => !!c)
+  let e: Candidate = cs[0]!
+  const random = cs.find(c => c.variant === 'random')
+  if (s.random && random) e = random
   else if (cs.some(c => c.colors)) {
     if (!set.length) return { effect: { name: 'off' }, brightness: s.brightness }
-    e = cs.find(c => c.colors === set.length) ?? cs.find(c => c.colors === 1)
+    e = cs.find(c => c.colors === set.length) ?? cs.find(c => c.colors === 1) ?? e
   }
-  const effect = { name: e.name }
+  const effect: Effect = { name: e.name }
   if (e.colors >= 1) effect.rgb1 = set[0]
   if (e.colors >= 2) effect.rgb2 = set[1]
-  if (e.dirs.length) effect.dir = e.dirs.includes(s.dir) ? s.dir : e.dirs[0]
+  if (e.dirs.length) effect.dir = s.dir && e.dirs.includes(s.dir) ? s.dir : e.dirs[0]
   if (e.speed) {
     const [lo, hi] = e.speed
-    effect.speed = s.speed >= lo && s.speed <= hi ? s.speed : Math.round((lo + hi) / 2)
+    effect.speed = s.speed != null && s.speed >= lo && s.speed <= hi ? s.speed : Math.round((lo + hi) / 2)
   }
   return { effect, brightness: s.brightness }
 }
 
-function stateFrom(look) {
-  if (look && !effects.value.some(e => e.name === look.effect.name)) look = null
-  const s = { group: null, type: null, colors: [...DEFAULT_COLORS], random: false, dir: null, speed: null, brightness: 255 }
+function stateFrom(stored: Look | null): Ui | null {
+  const look = stored && effects.value.some(e => e.name === stored.effect.name) ? stored : null
+  const s: Ui = { group: '', type: null, colors: [...DEFAULT_COLORS], random: false, dir: null, speed: null, brightness: 255 }
   const name = look?.effect.name ?? effects.value[0]?.name
   if (!name) return null
   const p = parse(name)
@@ -105,56 +133,68 @@ const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?
 const canSave = computed(() => connected.value && !busy.value && !!draft.value && !same(draft.value, saved.value))
 
 // The backend omits unset effect fields; compare looks by the fields that are set.
-function norm(look) {
+function norm(look?: Look | null): Look | null {
   if (!look) return null
-  const effect = { name: look.effect.name }
-  for (const k of ['rgb1', 'rgb2', 'dir', 'speed']) if (look.effect[k] != null) effect[k] = look.effect[k]
+  const { name, rgb1, rgb2, dir, speed } = look.effect
+  const effect: Effect = { name }
+  if (rgb1 != null) effect.rgb1 = rgb1
+  if (rgb2 != null) effect.rgb2 = rgb2
+  if (dir != null) effect.dir = dir
+  if (speed != null) effect.speed = speed
   return { effect, brightness: look.brightness }
 }
 
-function same(a, b) {
+function same(a?: Look | null, b?: Look | null) {
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
 }
 
-function setUi(k, v) {
-  ui.value = { ...ui.value, [k]: v }
+function setUi<K extends keyof Ui>(k: K, v: Ui[K]) {
+  ui.value = { ...ui.value!, [k]: v }
 }
 
-function pickGroup(g) {
+function pickGroup(g: Group) {
   setUi('group', g.group)
-  setUi('type', g.types.includes(ui.value.type) ? ui.value.type : (g.types[0] ?? null))
+  const type = ui.value!.type
+  setUi('type', type && g.types.includes(type) ? type : (g.types[0] ?? null))
 }
 
-function setColor(i, rgb) {
-  const colors = [...ui.value.colors]
+function setColor(i: number, rgb: Rgb | null) {
+  const colors = [...ui.value!.colors]
   colors[i] = rgb
   setUi('colors', colors)
 }
 
 const percent = computed({
-  get: () => Math.round((ui.value.brightness / 255) * 100),
-  set: p => setUi('brightness', Math.round((p * 255) / 100)),
+  get: () => Math.round((ui.value!.brightness / 255) * 100),
+  set: (p: number) => setUi('brightness', Math.round((p * 255) / 100)),
 })
 
 // Taken from the group, not the resolved effect: with no colors the effect is "off" but the controls stay.
 const dirInfo = computed(() => cands.value.find(e => e.dirs.length))
-const dirOf = computed(() => (dirInfo.value.dirs.includes(ui.value.dir) ? ui.value.dir : dirInfo.value.dirs[0]))
+const dirOf = computed(() => {
+  const dirs = dirInfo.value?.dirs ?? []
+  const dir = ui.value?.dir
+  return dir && dirs.includes(dir) ? dir : dirs[0]
+})
 const speedInfo = computed(() => cands.value.find(e => e.speed))
 
 // Some firmware speeds are "lower is faster"; the slider always reads slow → fast.
 const speedSlider = computed({
   get: () => {
-    const { speed: [lo, hi], fast_low } = speedInfo.value
-    const s = ui.value.speed >= lo && ui.value.speed <= hi ? ui.value.speed : Math.round((lo + hi) / 2)
+    const [lo, hi] = speedInfo.value!.speed!
+    const fast_low = speedInfo.value!.fast_low
+    const cur = ui.value!.speed
+    const s = cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2)
     return fast_low ? lo + hi - s : s
   },
-  set: v => {
-    const { speed: [lo, hi], fast_low } = speedInfo.value
+  set: (v: number) => {
+    const [lo, hi] = speedInfo.value!.speed!
+    const fast_low = speedInfo.value!.fast_low
     setUi('speed', fast_low ? lo + hi - v : v)
   },
 })
 
-let pending = null
+let pending: Look | null = null
 let sending = false
 
 // One preview in flight, at most one per 50 ms; the newest draft wins. Parallel calls
@@ -182,7 +222,7 @@ watch(draft, (now, before) => {
 
 async function load() {
   try {
-    const s = await invoke('lighting_state')
+    const s = await invoke<LightingState>('lighting_state')
     effects.value = s.effects
     applied.value = s.applied
     saved.value = s.saved
@@ -236,7 +276,7 @@ async function save() {
   else await write()
 }
 
-async function onConfirm(dontAsk) {
+async function onConfirm(dontAsk: boolean) {
   asking.value = false
   if (dontAsk) {
     try {
@@ -271,7 +311,7 @@ onMounted(load)
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
     <p v-if="!draft" class="msg">Подключите клавиатуру, чтобы увидеть её эффекты.</p>
-    <div v-else class="body" :class="{ blocked }">
+    <div v-else-if="ui" class="body" :class="{ blocked }">
       <ul class="fx">
         <li v-for="g in groups" :key="g.group" :class="['g-' + g.group, { on: currentGroup === g }]" @click="!blocked && pickGroup(g)">
           <span>{{ g.label }}</span>
@@ -325,7 +365,7 @@ onMounted(load)
         <div v-if="speedInfo" class="row">
           <span class="lbl">Скорость</span>
           <span class="hint">медленно</span>
-          <input v-model.number="speedSlider" type="range" :min="speedInfo.speed[0]" :max="speedInfo.speed[1]" step="1" :disabled="blocked" />
+          <input v-model.number="speedSlider" type="range" :min="speedInfo.speed![0]" :max="speedInfo.speed![1]" step="1" :disabled="blocked" />
           <span class="hint">быстро</span>
         </div>
         <p v-if="ui.group === 'off'" class="msg">Подсветка выключена.</p>

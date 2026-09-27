@@ -1,19 +1,27 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
+import type { KeyMap, KeyView } from '../types'
 
-const props = defineProps({
-  layout: Array,
-  baseline: Object,
-  edits: Object,
-  errors: Object,
-  selection: Set,
-})
-const emit = defineEmits(['update:selection'])
+interface Band {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+const props = defineProps<{
+  layout: KeyView[]
+  baseline: KeyMap<number>
+  edits: KeyMap<number>
+  errors: KeyMap<string>
+  selection: Set<number>
+}>()
+const emit = defineEmits<{ 'update:selection': [selection: Set<number>] }>()
 
 const U = 50
-const root = ref(null)
-const band = ref(null)
-let start = null
+const root = ref<HTMLElement | null>(null)
+const band = ref<Band | null>(null)
+let start: [number, number] | null = null
 let additive = false
 
 const size = computed(() => ({
@@ -22,30 +30,30 @@ const size = computed(() => ({
 }))
 
 const bandStyle = computed(() => {
-  const b = norm(band.value)
+  const b = norm(band.value!)
   return { left: b.x0 + 'px', top: b.y0 + 'px', width: b.x1 - b.x0 + 'px', height: b.y1 - b.y0 + 'px' }
 })
 
-function value(key) {
+function value(key: number): number | undefined {
   return props.edits[key] ?? props.baseline[key]
 }
 
-function point(e) {
-  const r = root.value.getBoundingClientRect()
+function point(e: PointerEvent): [number, number] {
+  const r = root.value!.getBoundingClientRect()
   return [e.clientX - r.left, e.clientY - r.top]
 }
 
-function norm(b) {
+function norm(b: Band): Band {
   return { x0: Math.min(b.x0, b.x1), y0: Math.min(b.y0, b.y1), x1: Math.max(b.x0, b.x1), y1: Math.max(b.y0, b.y1) }
 }
 
-function down(e) {
+function down(e: PointerEvent) {
   start = point(e)
   additive = e.ctrlKey
-  root.value.setPointerCapture(e.pointerId)
+  root.value!.setPointerCapture(e.pointerId)
 }
 
-function move(e) {
+function move(e: PointerEvent) {
   if (!start) return
   const [x, y] = point(e)
   if (band.value || Math.hypot(x - start[0], y - start[1]) > 4) {
@@ -53,9 +61,9 @@ function move(e) {
   }
 }
 
-function up(e) {
+function up(e: PointerEvent) {
   if (!start) return
-  const next = additive ? new Set(props.selection) : new Set()
+  const next = additive ? new Set(props.selection) : new Set<number>()
   if (band.value) {
     const b = norm(band.value)
     for (const k of props.layout) {
@@ -64,7 +72,7 @@ function up(e) {
     }
   } else {
     // Pointer capture retargets events to the root, so find the key under the cursor explicitly.
-    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-key]')
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-key]')
     const k = el && props.layout.find(k => k.key === Number(el.dataset.key))
     if (k?.editable) {
       if (additive && next.has(k.key)) next.delete(k.key)
@@ -89,7 +97,7 @@ function up(e) {
       :title="errors[k.key]"
     >
       <span class="label">{{ k.label }}</span>
-      <span v-if="k.editable && value(k.key) != null" class="mm">{{ value(k.key).toFixed(1) }}</span>
+      <span v-if="k.editable && value(k.key) != null" class="mm">{{ value(k.key)!.toFixed(1) }}</span>
     </div>
     <div v-if="band" class="band" :style="bandStyle"></div>
   </div>

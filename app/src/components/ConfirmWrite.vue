@@ -1,14 +1,14 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 
-const emit = defineEmits(['yes', 'no'])
+const emit = defineEmits<{ yes: [dontAsk: boolean]; no: [] }>()
 const dontAsk = ref(false)
-const no = ref(null)
-const onKey = e => e.key === 'Escape' && emit('no')
+const no = ref<HTMLButtonElement | null>(null)
+const onKey = (e: KeyboardEvent) => e.key === 'Escape' && emit('no')
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  no.value.focus()
+  no.value?.focus()
 })
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>

@@ -1,7 +1,8 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
+import type { Status } from '../types'
 
-const props = defineProps({ status: Object, progress: Array, message: String, error: String })
+const props = defineProps<{ status: Status | null; progress: [number, number] | null; message: string; error: string }>()
 
 const view = computed(() => {
   const s = props.status

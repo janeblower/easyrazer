@@ -1,22 +1,23 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { AppSettings } from '../types'
 
-const s = ref(null)
+const s = ref<AppSettings | null>(null)
 const message = ref('')
-let unlisten
+let unlisten: UnlistenFn | undefined
 let unmounted = false
 
 async function load() {
   try {
-    s.value = await invoke('app_settings')
+    s.value = await invoke<AppSettings>('app_settings')
   } catch (e) {
     message.value = String(e)
   }
 }
 
-async function set(cmd, args) {
+async function set(cmd: string, args: Record<string, unknown>) {
   message.value = ''
   try {
     await invoke(cmd, args)
@@ -25,6 +26,8 @@ async function set(cmd, args) {
   }
   await load()
 }
+
+const checked = (e: Event) => (e.target as HTMLInputElement).checked
 
 onMounted(async () => {
   unlisten = await listen('settings-changed', load)
@@ -40,17 +43,17 @@ onUnmounted(() => {
 
 <template>
   <section v-if="s" class="settings">
-    <label><input type="checkbox" :checked="s.autostart" @change="set('set_autostart', { on: $event.target.checked })" /> Запускать с Windows</label>
+    <label><input type="checkbox" :checked="s.autostart" @change="set('set_autostart', { on: checked($event) })" /> Запускать с Windows</label>
     <label>
       При закрытии окна:
-      <select :value="s.close_action" @change="set('set_close_action', { action: $event.target.value })">
+      <select :value="s.close_action" @change="set('set_close_action', { action: ($event.target as HTMLSelectElement).value })">
         <option value="ask">Спрашивать</option>
         <option value="tray">Сворачивать в трей</option>
         <option value="exit">Закрывать программу</option>
       </select>
     </label>
-    <label><input type="checkbox" :checked="s.watch_synapse" @change="set('set_watch_synapse', { on: $event.target.checked })" /> Следить за Synapse</label>
-    <label><input type="checkbox" :checked="s.confirm_write" @change="set('set_confirm_write', { on: $event.target.checked })" /> Спрашивать перед записью в память клавиатуры</label>
+    <label><input type="checkbox" :checked="s.watch_synapse" @change="set('set_watch_synapse', { on: checked($event) })" /> Следить за Synapse</label>
+    <label><input type="checkbox" :checked="s.confirm_write" @change="set('set_confirm_write', { on: checked($event) })" /> Спрашивать перед записью в память клавиатуры</label>
     <p v-if="message" class="err">{{ message }}</p>
   </section>
 </template>
