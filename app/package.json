@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "type": "module",
   "private": true,
@@ -13,10 +15,17 @@
     "vue": "^3.5.43"
   },
   "devDependencies": {
+    "@cany748/eslint-config": "^6.0.0",
     "@tauri-apps/cli": "^2.12.0",
     "@vitejs/plugin-vue": "^6.0.9",
+    "eslint": "^10.11.0",
+    "eslint-plugin-vue": "^10.11.1",
     "typescript": "^6",
+    "typescript-eslint": "^8.70.1",
     "vite": "^8.3.1",
     "vue-tsc": "^3.3.11"
+  },
+  "prettier": {
+    "printWidth": 140
   }
 }
