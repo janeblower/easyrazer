@@ -118,7 +118,7 @@ const onFocus = () => refresh(true)
 onMounted(async () => {
   layout.value = await invoke('layout')
   await refresh(true)
-  timer = setInterval(() => refresh(false), 2000)
+  timer = setInterval(() => refresh(true), 2000)
   window.addEventListener('focus', onFocus)
 })
 
