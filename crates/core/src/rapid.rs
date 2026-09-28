@@ -200,7 +200,8 @@ impl Engine {
         match self.repeat {
             Some((key, at)) if now >= at => {
                 // After a stall, repeat once and resume the cadence from now.
-                self.repeat = Some((key, (at + self.cfg.repeat_interval).max(now)));
+                let next = at + self.cfg.repeat_interval;
+                self.repeat = Some((key, if next < now { now + self.cfg.repeat_interval } else { next }));
                 vec![Output::Key { key, down: true }]
             }
             _ => Vec::new(),
@@ -328,6 +329,15 @@ mod tests {
         assert_eq!(e.feed_depth(&depth(&[]), t + Duration::from_millis(540)), [key(A, false)]);
         assert!(e.tick(t + Duration::from_secs(2)).is_empty());
         assert_eq!(e.deadline(), None);
+    }
+
+    #[test]
+    fn autorepeat_after_a_stall_repeats_once() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        assert_eq!(e.tick(t + Duration::from_millis(600)), [key(A, true)]);
+        assert!(e.tick(t + Duration::from_millis(632)).is_empty());
+        assert_eq!(e.tick(t + Duration::from_millis(633)), [key(A, true)]);
     }
 
     #[test]
