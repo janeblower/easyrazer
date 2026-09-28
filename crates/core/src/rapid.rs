@@ -2,6 +2,8 @@
 //!
 //! Depth and press points share one scale: 0..=255 over 1.5..3.6 mm, like `02:12` thresholds.
 
+use std::time::{Duration, Instant};
+
 use crate::analog::{MAX_MM, MIN_MM};
 
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
@@ -84,6 +86,144 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>) -> Option<boo
     (k.down != was).then_some(k.down)
 }
 
+const F9: u8 = 120;
+const F10: u8 = 121;
+const F11: u8 = 122;
+const F12: u8 = 123;
+const PAUSE: u8 = 126;
+const MENU: u8 = 129;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Media {
+    Prev,
+    Play,
+    Next,
+    Mute,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    Key { key: u8, down: bool },
+    Media(Media),
+    /// One brightness step down (-1) or up (+1).
+    Brightness(i8),
+    Sleep,
+}
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    /// Press point per fwID, the key's onboard `thrL`.
+    pub act: [u8; 256],
+    pub rapid: [Option<Trigger>; 256],
+    pub repeat_delay: Duration,
+    pub repeat_interval: Duration,
+}
+
+/// What the firmware's Fn layer does on V2 (Synapse defaults); an empty slice swallows the key.
+fn fn_layer(key: u8) -> Option<&'static [Output]> {
+    Some(match key {
+        F11 => &[Output::Brightness(-1)],
+        F12 => &[Output::Brightness(1)],
+        PAUSE => &[Output::Sleep],
+        F9 | F10 | MENU => &[],
+        _ => return None,
+    })
+}
+
+/// Razer report codes, taken from one capture of the keys pressed left to right.
+fn media(code: u8) -> Option<Media> {
+    Some(match code {
+        0x53 => Media::Prev,
+        0x55 => Media::Play,
+        0x54 => Media::Next,
+        0x52 => Media::Mute,
+        _ => return None,
+    })
+}
+
+pub struct Engine {
+    cfg: Config,
+    keys: [KeyState; 256],
+    /// Razer codes held now.
+    held: Vec<u8>,
+    /// Key to repeat and when; like Windows, only the newest key repeats.
+    repeat: Option<(u8, Instant)>,
+}
+
+impl Engine {
+    pub fn new(cfg: Config) -> Self {
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None }
+    }
+
+    pub fn set_config(&mut self, cfg: Config) {
+        self.cfg = cfg;
+    }
+
+    pub fn feed_depth(&mut self, depth: &[u8; 256], now: Instant) -> Vec<Output> {
+        let mut out = Vec::new();
+        for id in 1..256 {
+            if let Some(down) = step(&mut self.keys[id], depth[id], self.cfg.act[id], self.cfg.rapid[id]) {
+                self.transition(id as u8, down, now, &mut out);
+            }
+        }
+        out
+    }
+
+    fn transition(&mut self, key: u8, down: bool, now: Instant, out: &mut Vec<Output>) {
+        let k = &mut self.keys[key as usize];
+        if down
+            && self.held.contains(&RAZER_FN)
+            && let Some(action) = fn_layer(key)
+        {
+            k.fn_layer = true;
+            out.extend_from_slice(action);
+            return;
+        }
+        if !down && std::mem::take(&mut k.fn_layer) {
+            return;
+        }
+        out.push(Output::Key { key, down });
+        if down {
+            self.repeat = Some((key, now + self.cfg.repeat_delay));
+        } else if self.repeat.is_some_and(|(r, _)| r == key) {
+            self.repeat = None;
+        }
+    }
+
+    pub fn feed_razer(&mut self, codes: &[u8]) -> Vec<Output> {
+        let out = codes.iter().filter(|c| !self.held.contains(c)).filter_map(|&c| media(c)).map(Output::Media).collect();
+        self.held = codes.to_vec();
+        out
+    }
+
+    pub fn tick(&mut self, now: Instant) -> Vec<Output> {
+        match self.repeat {
+            Some((key, at)) if now >= at => {
+                // After a stall, repeat once and resume the cadence from now.
+                self.repeat = Some((key, (at + self.cfg.repeat_interval).max(now)));
+                vec![Output::Key { key, down: true }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn deadline(&self) -> Option<Instant> {
+        self.repeat.map(|(_, at)| at)
+    }
+
+    /// Lifts every key the host holds down, for when the engine stops or loses the keyboard.
+    pub fn release_all(&mut self) -> Vec<Output> {
+        let out = (1..=255u8)
+            .filter(|&id| self.keys[id as usize].down && !self.keys[id as usize].fn_layer)
+            .map(|key| Output::Key { key, down: false })
+            .collect();
+        self.keys = [KeyState::default(); 256];
+        self.held.clear();
+        self.repeat = None;
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +285,116 @@ mod tests {
         let d = parse_depth(&[0x07, 31, 100, 18, 5, 0, 0, 44, 9]).unwrap();
         assert_eq!((d[31], d[18], d[44], d[1]), (100, 5, 0, 0));
         assert!(parse_depth(&[0x04, 1]).is_none());
+    }
+
+    const A: u8 = 31;
+    const S: u8 = 32;
+
+    fn engine() -> Engine {
+        Engine::new(Config {
+            act: [100; 256],
+            rapid: [None; 256],
+            repeat_delay: Duration::from_millis(500),
+            repeat_interval: Duration::from_millis(33),
+        })
+    }
+
+    fn depth(keys: &[(u8, u8)]) -> [u8; 256] {
+        let mut d = [0; 256];
+        for &(k, v) in keys {
+            d[k as usize] = v;
+        }
+        d
+    }
+
+    fn key(key: u8, down: bool) -> Output {
+        Output::Key { key, down }
+    }
+
+    #[test]
+    fn autorepeat_after_the_delay_at_the_interval() {
+        let (mut e, t) = (engine(), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert!(e.tick(t + Duration::from_millis(499)).is_empty());
+        assert_eq!(e.tick(t + Duration::from_millis(500)), [key(A, true)]);
+        assert!(e.tick(t + Duration::from_millis(520)).is_empty());
+        assert_eq!(e.tick(t + Duration::from_millis(533)), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[]), t + Duration::from_millis(540)), [key(A, false)]);
+        assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+        assert_eq!(e.deadline(), None);
+    }
+
+    #[test]
+    fn autorepeat_follows_the_newest_key() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        e.feed_depth(&depth(&[(A, 150), (S, 150)]), t + Duration::from_millis(100));
+        assert_eq!(e.tick(t + Duration::from_millis(600)), [key(S, true)]);
+        e.feed_depth(&depth(&[(A, 150)]), t + Duration::from_millis(700));
+        assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+    }
+
+    #[test]
+    fn fn_layer_takes_brightness_keys() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(F12, 150)]), t), [Output::Brightness(1)]);
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[(F11, 150)]), t), [Output::Brightness(-1)]);
+        e.feed_depth(&depth(&[]), t);
+        assert_eq!(e.feed_depth(&depth(&[(PAUSE, 150)]), t), [Output::Sleep]);
+        e.feed_depth(&depth(&[]), t);
+        assert!(e.feed_depth(&depth(&[(F9, 150)]), t).is_empty());
+        e.feed_depth(&depth(&[]), t);
+        e.feed_razer(&[]);
+        assert_eq!(e.feed_depth(&depth(&[(F12, 150)]), t), [key(F12, true)]);
+    }
+
+    #[test]
+    fn fn_layer_keys_do_not_repeat() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        e.feed_depth(&depth(&[(F12, 150)]), t);
+        assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+    }
+
+    #[test]
+    fn fn_key_release_is_swallowed_after_fn_lifts() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        e.feed_depth(&depth(&[(F12, 150)]), t);
+        e.feed_razer(&[]);
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+    }
+
+    #[test]
+    fn media_keys_fire_once_per_press() {
+        let mut e = engine();
+        assert_eq!(e.feed_razer(&[0x55]), [Output::Media(Media::Play)]);
+        assert!(e.feed_razer(&[0x55]).is_empty());
+        assert!(e.feed_razer(&[]).is_empty());
+        assert_eq!(e.feed_razer(&[0x52, 0x53]), [Output::Media(Media::Mute), Output::Media(Media::Prev)]);
+        assert_eq!(e.feed_razer(&[0x54]), [Output::Media(Media::Next)]);
+    }
+
+    #[test]
+    fn release_all_lifts_held_keys() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        e.feed_depth(&depth(&[(A, 150), (F12, 150)]), t);
+        assert_eq!(e.release_all(), [key(A, false)]);
+        assert_eq!(e.deadline(), None);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+    }
+
+    #[test]
+    fn new_config_keeps_held_keys() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        let mut cfg = e.cfg.clone();
+        cfg.rapid[A as usize] = Some(Trigger { press: 10, release: 10 });
+        e.set_config(cfg);
+        assert_eq!(e.feed_depth(&depth(&[(A, 135)]), t), [key(A, false)]);
     }
 
     #[test]
