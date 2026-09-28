@@ -16,12 +16,19 @@
   },
   "actuation": {
     "mm": "{v} mm",
+    "title": "Actuation",
     "mixed": "mixed",
     "unconfirmed": "Not confirmed: the keyboard has {v} mm",
     "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
     "applied": "Applied until the keyboard is unplugged",
     "saved": "Saved to the keyboard",
     "unsavedKey": "Applied but not saved to the keyboard"
+  },
+  "rapid": {
+    "title": "Rapid Trigger",
+    "press": "Press",
+    "release": "Release",
+    "split": "Separate press and release"
   },
   "lighting": {
     "groups": {

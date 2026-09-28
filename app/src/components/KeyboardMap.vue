@@ -19,11 +19,23 @@ const props = withDefaults(
     errors?: KeyMap<string>;
     unsaved?: Set<number>;
     colors?: KeyMap<Rgb>;
+    /** Keys with Rapid Trigger on, and those whose Rapid Trigger is not applied yet. */
+    rapid?: Set<number>;
+    rapidEdited?: Set<number>;
     selection: Set<number>;
     /** Shrink the whole map to the container width instead of scrolling. */
     fit?: boolean;
   }>(),
-  { baseline: () => ({}), edits: () => ({}), errors: () => ({}), unsaved: () => new Set(), colors: undefined, fit: false },
+  {
+    baseline: () => ({}),
+    edits: () => ({}),
+    errors: () => ({}),
+    unsaved: () => new Set(),
+    colors: undefined,
+    rapid: () => new Set(),
+    rapidEdited: () => new Set(),
+    fit: false,
+  },
 );
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
 
@@ -195,7 +207,15 @@ function up(e: PointerEvent) {
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
-        <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span class="text-xs flex justify-between">
+          <span>{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+          <span
+            v-if="!colors && rapid.has(k.key)"
+            class="text-[10px]"
+            :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'"
+            >RT</span
+          >
+        </span>
         <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
           value(k.key)!.toFixed(1)
         }}</span>

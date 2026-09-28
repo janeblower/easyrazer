@@ -30,9 +30,16 @@ export interface WriteResult {
   unsaved: number[];
 }
 
+export interface Rapid {
+  enabled: boolean;
+  press: number;
+  release: number;
+}
+
 export interface Actuation {
   values: KeyMap<number>;
   unsaved: number[];
+  rapid: KeyMap<Rapid>;
 }
 
 export interface Effect {
