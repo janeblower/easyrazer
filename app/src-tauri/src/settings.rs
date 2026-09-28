@@ -21,6 +21,14 @@ fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<CloseAction, D::Err
     Ok(serde_json::from_value(v).unwrap_or_default())
 }
 
+/// Rapid Trigger of one key in mm; kept while off, so turning it back on brings the values back.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Rapid {
+    pub enabled: bool,
+    pub press: f32,
+    pub release: f32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -28,6 +36,8 @@ pub struct Settings {
     pub applied: Option<Look>,
     /// Press points (fwID -> mm) applied to the live profile but not saved, restored on every connect.
     pub actuation: BTreeMap<u8, f32>,
+    /// Rapid Trigger per fwID; the host engine runs while any key has it on.
+    pub rapid: BTreeMap<u8, Rapid>,
     /// Last painted custom layout, kept while another effect is applied.
     pub custom: Option<BTreeMap<u8, Rgb>>,
     /// Ask before writing the keyboard's flash.
@@ -44,7 +54,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, actuation: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
+        Self { applied: None, actuation: BTreeMap::new(), rapid: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
     }
 }
 
@@ -84,6 +94,22 @@ mod tests {
     }
 
     #[test]
+    fn file_without_rapid_trigger_keeps_the_rest() {
+        let s = parse(r#"{"confirm_write": false}"#);
+        assert!(s.rapid.is_empty());
+        assert!(!s.confirm_write);
+    }
+
+    #[test]
+    fn rapid_trigger_round_trips() {
+        let mut s = Settings::default();
+        s.rapid.insert(31, Rapid { enabled: true, press: 0.4, release: 0.2 });
+        s.rapid.insert(33, Rapid { enabled: false, press: 0.3, release: 0.3 });
+        let back = parse(&serde_json::to_string(&s).unwrap());
+        assert_eq!(back.rapid, s.rapid);
+    }
+
+    #[test]
     fn missing_fields_keep_their_defaults() {
         let s = parse("{\"confirm_write\": false}");
         assert_eq!((s.applied, s.confirm_write), (None, false));
@@ -94,6 +120,7 @@ mod tests {
         let s = Settings {
             applied: Some(Look { effect: Effect { name: "static".into(), rgb1: Some([1, 2, 3]), ..Default::default() }, brightness: 9 }),
             actuation: [(31, 2.4), (32, 3.6)].into(),
+            rapid: [(31, Rapid { enabled: true, press: 0.4, release: 0.2 })].into(),
             custom: Some([(31, [1, 2, 3]), (202, [4, 5, 6])].into()),
             confirm_write: false,
             close_action: CloseAction::Tray,
