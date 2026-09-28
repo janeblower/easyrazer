@@ -1,3 +1,5 @@
+<img src="logo.svg" width="96" alt="">
+
 # EasyRazer
 
 Лёгкая замена Razer Synapse для Razer Huntsman V2 Analog (`1532:0266`) на Windows.
