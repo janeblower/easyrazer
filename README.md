@@ -35,12 +35,15 @@ Synapse держит клавиатуру в своём режиме и пере
 ```
 cd app
 bun install
-bun tauri dev      # запуск
-bun tauri build    # target/release/easyrazer.exe
+bun tauri dev      # запуск с пересборкой при изменениях
+bun tauri build    # ..\target\release\easyrazer.exe
+elease\easyrazer.exe
 ```
 
-Тесты: `cargo test`, фронтенд: `bun run lint` (в `app`). Тест на реальной клавиатуре (Synapse закрыт):
-`cargo test -p easyrazer -- --ignored`.
+Готовый `easyrazer.exe` — один файл без установщика, его можно копировать куда угодно.
+
+Тесты (из корня репозитория): `cargo test`, фронтенд: `bun run lint` (в `app`).
+Тест на реальной клавиатуре (Synapse закрыт): `cargo test -p easyrazer -- --ignored`.
 
 ## Структура
 
