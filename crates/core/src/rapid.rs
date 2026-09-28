@@ -73,7 +73,7 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>) -> Option<boo
             }
         } else {
             k.extreme = k.extreme.min(depth);
-            if d >= u16::from(k.extreme) + u16::from(r.press) || k.extreme < act {
+            if d >= u16::from(k.extreme) + u16::from(r.press) || k.extreme <= act.saturating_sub(HYSTERESIS) {
                 k.down = true;
                 k.extreme = depth;
             }
@@ -255,6 +255,12 @@ mod tests {
     #[test]
     fn rapid_trigger_rearms_mid_travel() {
         assert_eq!(run(&[0, 110, 200, 190, 185, 195, 150, 90], 100, RT10), [true, false, true, false]);
+    }
+
+    #[test]
+    fn noise_while_lifting_through_the_point_does_not_press() {
+        let rt = Some(Trigger { press: 12, release: 12 });
+        assert_eq!(run(&[0, 140, 128, 110, 99, 100, 97, 0], 100, rt), [true, false]);
     }
 
     #[test]
