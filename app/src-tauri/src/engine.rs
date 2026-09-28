@@ -62,6 +62,7 @@ impl EngineHandle {
             std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
                 dead.store(true, Ordering::SeqCst);
+                stop.store(true, Ordering::SeqCst);
                 let out = lock(&engine).release_all();
                 emit(&out, &sink);
             })
@@ -106,6 +107,10 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
         let now = Instant::now();
         let out = {
             let mut e = lock(engine);
+            // The other reader may have released every key already.
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
             let mut out = if n > 0 { feed(&mut e, &buf[..n], now) } else { Vec::new() };
             out.extend(e.tick(now));
             out
