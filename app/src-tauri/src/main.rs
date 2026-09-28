@@ -4,18 +4,28 @@ mod autostart;
 mod commands;
 mod device;
 mod dynamic_lighting;
+mod engine;
 mod i18n;
 mod settings;
 mod tray;
 
 use std::panic::AssertUnwindSafe;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use razer_core::rapid::Output;
 use settings::CloseAction;
 use tauri::{Emitter, Manager, WindowEvent};
 
 fn main() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Only the main thread takes the process down; elsewhere panics are caught and the engine restarts.
+        if std::thread::current().name() == Some("main") {
+            device::release_keyboard();
+        }
+        default_hook(info);
+    }));
     let device = device::Device::new().expect("hidapi init");
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
@@ -26,6 +36,16 @@ fn main() {
                 tray::show(app.handle());
             }
             let handle = app.handle().clone();
+            let sink_handle = handle.clone();
+            app.state::<commands::AppState>().device().set_sink(Arc::new(move |o| {
+                let h = sink_handle.clone();
+                // Off the reader thread: the device lock can be held for seconds by a full read.
+                std::thread::spawn(move || match o {
+                    Output::Brightness(step) => h.state::<commands::AppState>().device().step_brightness(step > 0),
+                    Output::Sleep => engine::sleep(),
+                    _ => {}
+                });
+            }));
             std::thread::spawn(move || loop {
                 // One failed step must not end the watching for the rest of the session.
                 let step = std::panic::catch_unwind(AssertUnwindSafe(|| commands::poll(&handle.state::<commands::AppState>())));
@@ -74,6 +94,11 @@ fn main() {
             commands::hide_window,
             commands::quit
         ])
-        .run(tauri::generate_context!())
-        .expect("tauri run");
+        .build(tauri::generate_context!())
+        .expect("tauri build")
+        .run(|app, e| {
+            if let tauri::RunEvent::Exit = e {
+                app.state::<commands::AppState>().device().stop_engine();
+            }
+        });
 }

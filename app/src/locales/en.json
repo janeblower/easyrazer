@@ -106,7 +106,8 @@
     "noKeyboard": "No supported Razer keyboard found",
     "restoreLighting": "Could not restore the lighting: {error}",
     "restoreActuation": "Could not restore the actuation of keys: {keys}",
-    "autostart": "Autostart: {error}"
+    "autostart": "Autostart: {error}",
+    "engine": "Rapid Trigger did not start: {error}"
   },
   "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
 }

@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::device::{self, Device, LightingState, Status, Written, mm};
-use crate::settings::CloseAction;
+use crate::settings::{CloseAction, Rapid};
 use crate::{autostart, i18n, tray};
 
 pub struct AppState {
@@ -55,6 +55,8 @@ pub struct Actuation {
     values: BTreeMap<u8, f32>,
     /// Keys whose press point a replug would reset.
     unsaved: Vec<u8>,
+    /// Rapid Trigger per key, from the app's settings.
+    rapid: BTreeMap<u8, Rapid>,
 }
 
 #[derive(Serialize)]
@@ -102,15 +104,17 @@ pub fn lighting_layout() -> Vec<KeyView> {
 
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
-    let (all, unsaved) = state.device().read_all(|done, total| {
+    let mut device = state.device();
+    let (all, unsaved) = device.read_all(|done, total| {
         let _ = app.emit("read-progress", (done, total));
     })?;
-    Ok(Actuation { values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(), unsaved })
+    let rapid = device.settings().rapid.clone();
+    Ok(Actuation { values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(), unsaved, rapid })
 }
 
 #[tauri::command]
-pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<WriteResult, String> {
-    state.device().apply(&changes).map(Into::into)
+pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>, rapid: BTreeMap<u8, Rapid>) -> Result<WriteResult, String> {
+    state.device().apply(&changes, &rapid).map(Into::into)
 }
 
 #[tauri::command]

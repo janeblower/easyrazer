@@ -106,7 +106,8 @@
     "noKeyboard": "Поддерживаемая клавиатура Razer не найдена",
     "restoreLighting": "Не удалось вернуть подсветку: {error}",
     "restoreActuation": "Не удалось вернуть точки срабатывания клавиш: {keys}",
-    "autostart": "Автозапуск: {error}"
+    "autostart": "Автозапуск: {error}",
+    "engine": "Rapid Trigger не запущен: {error}"
   },
   "tray": { "open": "Открыть", "autostart": "Запускать с Windows", "quit": "Выход" }
 }

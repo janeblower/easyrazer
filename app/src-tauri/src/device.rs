@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
 use razer_core::actuation::{self, Outcome};
@@ -12,13 +12,15 @@ use razer_core::analog::{self, KeyAssignment};
 use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
+use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
 use razer_core::{control, keymap, layout};
 use serde::Serialize;
 
 use crate::dynamic_lighting;
+use crate::engine::{self, EngineHandle, Sink};
 use crate::i18n;
-use crate::settings::{self, Settings};
+use crate::settings::{self, Rapid, Settings};
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -64,6 +66,11 @@ pub struct Device {
     /// Description of the last keyboard seen, so the lighting tab can be edited while it is unplugged.
     last_spec: Option<&'static DeviceSpec>,
     restore_error: Option<String>,
+    /// Runs while some key has Rapid Trigger; the keyboard is in driver mode meanwhile.
+    engine: Option<EngineHandle>,
+    /// Live press points (`thrL`) read this connect, the engine's press points.
+    thresholds: Option<BTreeMap<u8, u8>>,
+    sink: Option<Sink>,
 }
 
 impl Device {
@@ -77,6 +84,9 @@ impl Device {
             settings: settings::load(),
             last_spec: None,
             restore_error: None,
+            engine: None,
+            thresholds: None,
+            sink: None,
         })
     }
 
@@ -84,6 +94,8 @@ impl Device {
     pub fn ensure_connected(&mut self) -> bool {
         let alive = self.control.as_ref().is_some_and(|(t, _)| control::mode(t).is_ok());
         if !alive {
+            self.engine = None;
+            self.thresholds = None;
             self.control = None;
             let _ = self.api.refresh_devices();
             self.control = hid::open_control(&self.api).ok().flatten();
@@ -142,13 +154,17 @@ impl Device {
         if should_restore(was, fresh_synapse) {
             self.restore();
         }
-        let error = self.restore_error.take();
-        let Some((t, spec)) = &self.control else {
+        if self.control.is_none() {
             let unsupported = hid::unsupported_keyboard(&self.api);
+            let error = self.restore_error.take();
             return Status { device: false, synapse, mode: None, profile: None, model: None, unsupported, error };
-        };
+        }
+        self.sync_engine();
+        let error = self.restore_error.take();
+        let running = self.engine.is_some();
+        let Some((t, spec)) = &self.control else { unreachable!() };
         let mut mode = control::mode(t).ok();
-        if should_release_driver_mode(fresh_synapse.is_some(), synapse, mode) && control::set_hardware_mode(t).is_ok() {
+        if should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok() {
             mode = control::mode(t).ok();
         }
         let profile = control::active_profile(t).ok();
@@ -163,11 +179,13 @@ impl Device {
         let (t, _) = self.keyboard()?;
         let keys = editable_keys();
         let all = actuation::read_all(t, actuation::LIVE, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())?;
+        self.thresholds = Some(all.iter().map(|a| (a.key, a.threshold_low)).collect());
         Ok((all, self.unsaved()))
     }
 
-    /// Applies press points until the next replug; the app restores them on every connect.
-    pub fn apply(&mut self, changes: &[(u8, f32)]) -> Result<Written, String> {
+    /// Applies press points until the next replug (the app restores them on every connect)
+    /// and Rapid Trigger, which lives only here.
+    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -180,7 +198,10 @@ impl Device {
             Err(_) => changes.iter().copied().filter(|(k, _)| touched.contains(k)).collect::<Vec<_>>(),
         };
         track(&mut self.settings.actuation, touched, unsaved);
+        self.note_thresholds(&results);
+        self.settings.rapid.extend(rapid.iter().map(|(&k, &r)| (k, r)));
         settings::save(&self.settings)?;
+        self.sync_engine();
         Ok(Written { results, unsaved: self.unsaved() })
     }
 
@@ -203,9 +224,11 @@ impl Device {
         }
         let results = actuation::save(t, profile, &changes);
         self.backed_up = true;
+        self.note_thresholds(&results);
         let saved = results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k);
         track(&mut self.settings.actuation, saved, []);
         settings::save(&self.settings)?;
+        self.sync_engine();
         Ok(Written { results, unsaved: self.unsaved() })
     }
 
@@ -302,6 +325,83 @@ impl Device {
         }
         Ok(())
     }
+
+    pub fn set_sink(&mut self, sink: Sink) {
+        self.sink = Some(sink);
+    }
+
+    fn note_thresholds(&mut self, results: &[(u8, Outcome)]) {
+        let Some(th) = &mut self.thresholds else { return };
+        for (k, o) in results {
+            if let Outcome::Ok(a) | Outcome::Unconfirmed(a) = o {
+                th.insert(*k, a.threshold_low);
+            }
+        }
+    }
+
+    /// Runs the engine, and driver mode with it, while some key has Rapid Trigger and Synapse is away.
+    fn sync_engine(&mut self) {
+        if self.engine.as_ref().is_some_and(|e| !e.alive()) {
+            self.engine = None;
+        }
+        if !wants_engine(self.synapse, &self.settings.rapid) || self.control.is_none() {
+            self.stop_engine();
+            return;
+        }
+        if self.thresholds.is_none() {
+            let (t, _) = self.control.as_ref().unwrap();
+            match actuation::read_all(t, actuation::LIVE, &editable_keys(), |_| {}) {
+                Ok(all) => self.thresholds = Some(all.iter().map(|a| (a.key, a.threshold_low)).collect()),
+                Err(e) => {
+                    self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e.to_string())]));
+                    return;
+                }
+            }
+        }
+        let cfg = engine_config(self.thresholds.as_ref().unwrap(), &self.settings.rapid, engine::repeat_timing());
+        if let Some(e) = &self.engine {
+            e.set_config(cfg);
+            return;
+        }
+        let Some(sink) = self.sink.clone() else { return };
+        let (t, d) = self.control.as_ref().unwrap();
+        // Readers first: if they cannot open, the keyboard never leaves hardware mode.
+        let started = EngineHandle::start(&self.api, d.pid, cfg, sink)
+            .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
+        match started {
+            Ok(h) => self.engine = Some(h),
+            Err(e) => self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e)])),
+        }
+    }
+
+    /// Stops the engine and hands typing back to the firmware, unless Synapse owns the keyboard now.
+    pub fn stop_engine(&mut self) {
+        if self.engine.take().is_some()
+            && !self.synapse
+            && let Some((t, _)) = &self.control
+        {
+            let _ = control::set_hardware_mode(t);
+        }
+    }
+
+    /// Fn+F11/F12 in driver mode; the firmware's own step is about a tenth.
+    pub fn step_brightness(&mut self, up: bool) {
+        let applied = self.settings.applied.as_ref().map(|l| l.brightness);
+        let Some((t, d)) = self.connect() else { return };
+        let current = match applied {
+            Some(b) => b,
+            None => match lighting::get_look(t, d, Store::Temporary) {
+                Ok(Some(l)) => l.brightness,
+                _ => return,
+            },
+        };
+        let value = if up { current.saturating_add(26) } else { current.saturating_sub(26) };
+        let shown = lighting::set_brightness(t, d, Store::Temporary, value).is_ok();
+        if shown && let Some(look) = &mut self.settings.applied {
+            look.brightness = value;
+            let _ = settings::save(&self.settings);
+        }
+    }
 }
 
 /// Press point in the UI's 0.1 mm steps.
@@ -347,9 +447,33 @@ fn write_backup(text: &str) -> Result<(), String> {
 
 /// Synapse leaves the keyboard in driver mode, where it types nothing on its own.
 /// Take it back only right after confirming Synapse is gone, never on a stale answer:
-/// otherwise we would fight a Synapse that has just started.
-fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>) -> bool {
-    fresh_check && !synapse && mode == Some(control::MODE_DRIVER)
+/// otherwise we would fight a Synapse that has just started. Our own engine keeps it.
+fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>, engine: bool) -> bool {
+    fresh_check && !synapse && !engine && mode == Some(control::MODE_DRIVER)
+}
+
+fn wants_engine(synapse: bool, rapid: &BTreeMap<u8, Rapid>) -> bool {
+    !synapse && rapid.values().any(|r| r.enabled)
+}
+
+fn engine_config(thresholds: &BTreeMap<u8, u8>, rapid: &BTreeMap<u8, Rapid>, (repeat_delay, repeat_interval): (Duration, Duration)) -> Config {
+    let mut c = Config { act: [0; 256], rapid: [None; 256], repeat_delay, repeat_interval };
+    for (&k, &thr) in thresholds {
+        c.act[k as usize] = thr;
+    }
+    for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
+        c.rapid[k as usize] = Some(Trigger { press: rapid::mm_to_depth(r.press), release: rapid::mm_to_depth(r.release) });
+    }
+    c
+}
+
+/// Last resort when the process is going down: a keyboard left in driver mode types nothing.
+pub fn release_keyboard() {
+    if let Ok(api) = HidApi::new()
+        && let Ok(Some((t, _))) = hid::open_control(&api)
+    {
+        let _ = control::set_hardware_mode(&t);
+    }
 }
 
 /// Synapse overwrites the temporary store; once it is gone, bring the applied look back.
@@ -410,7 +534,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, thresholds: None, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
@@ -430,10 +554,35 @@ mod tests {
 
     #[test]
     fn driver_mode_is_released_only_right_after_a_fresh_check() {
-        assert!(should_release_driver_mode(true, false, Some(control::MODE_DRIVER)));
-        assert!(!should_release_driver_mode(false, false, Some(control::MODE_DRIVER)));
-        assert!(!should_release_driver_mode(true, true, Some(control::MODE_DRIVER)));
-        assert!(!should_release_driver_mode(true, false, Some(control::MODE_HARDWARE)));
+        assert!(should_release_driver_mode(true, false, Some(control::MODE_DRIVER), false));
+        assert!(!should_release_driver_mode(false, false, Some(control::MODE_DRIVER), false));
+        assert!(!should_release_driver_mode(true, true, Some(control::MODE_DRIVER), false));
+        assert!(!should_release_driver_mode(true, false, Some(control::MODE_DRIVER), true));
+    }
+
+    #[test]
+    fn engine_runs_while_some_key_has_rapid_trigger_and_synapse_is_away() {
+        let on = BTreeMap::from([(31, Rapid { enabled: true, press: 0.4, release: 0.4 })]);
+        let off = BTreeMap::from([(31, Rapid { enabled: false, press: 0.4, release: 0.4 })]);
+        assert!(wants_engine(false, &on));
+        assert!(!wants_engine(true, &on));
+        assert!(!wants_engine(false, &off));
+        assert!(!wants_engine(false, &BTreeMap::new()));
+    }
+
+    #[test]
+    fn engine_config_from_press_points_and_rapid_trigger() {
+        let thresholds = BTreeMap::from([(31, 43), (33, 0)]);
+        let rapid = BTreeMap::from([
+            (31, Rapid { enabled: true, press: 0.4, release: 0.1 }),
+            (33, Rapid { enabled: false, press: 0.4, release: 0.4 }),
+        ]);
+        let t = (Duration::from_millis(500), Duration::from_millis(33));
+        let c = engine_config(&thresholds, &rapid, t);
+        assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
+        assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
+        assert_eq!(c.rapid[33], None);
+        assert_eq!((c.repeat_delay, c.repeat_interval), t);
     }
 
     #[test]
@@ -467,7 +616,7 @@ mod tests {
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
         assert!(!dev.settings.actuation.contains_key(&a), "A is applied in the app; save or revert it first");
-        let w = dev.apply(&[(a, 2.4)]).unwrap();
+        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new()).unwrap();
         let (t, _) = dev.connect().unwrap();
         actuation::write_key(t, &live).unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();

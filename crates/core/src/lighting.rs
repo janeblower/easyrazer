@@ -190,7 +190,11 @@ pub fn set_look(t: &impl Transport, d: &DeviceSpec, s: Store, look: &Look) -> Re
     }
     let args = [vec![store(d, s), d.lighting.led], encode(d, &look.effect)?].concat();
     exchange(t, p.set_effect, args.len() as u8, &args)?;
-    exchange(t, p.set_brightness, 3, &[store(d, s), d.lighting.led, look.brightness]).map(|_| ())
+    set_brightness(t, d, s, look.brightness)
+}
+
+pub fn set_brightness(t: &impl Transport, d: &DeviceSpec, s: Store, value: u8) -> Result<(), Error> {
+    exchange(t, d.protocol().set_brightness, 3, &[store(d, s), d.lighting.led, value]).map(|_| ())
 }
 
 /// `Ok(None)` when the keyboard holds an effect the description does not know.
@@ -220,6 +224,17 @@ mod tests {
 
     fn fx(name: &str) -> Effect {
         Effect { name: name.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn brightness_alone_keeps_the_effect() {
+        let kb = FakeKeyboard::new(&[31]);
+        let look = Look { effect: fx("spectrum"), brightness: 0x80 };
+        set_look(&kb, spec(), Store::Temporary, &look).unwrap();
+        let sent = kb.sent.borrow().len();
+        set_brightness(&kb, spec(), Store::Temporary, 0x40).unwrap();
+        assert_eq!(kb.sent.borrow().len(), sent + 1);
+        assert_eq!(kb.brightness.borrow()[&0], 0x40);
     }
 
     fn hex(s: &str) -> Vec<u8> {
