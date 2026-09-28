@@ -12,4 +12,5 @@ pub mod keymap;
 pub mod layout;
 pub mod lighting;
 pub mod packet;
+pub mod rapid;
 pub mod transport;

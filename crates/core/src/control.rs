@@ -14,10 +14,15 @@ pub fn mode(t: &impl Transport) -> Result<u8, Error> {
     Ok(exchange(t, GET_MODE, 2, &[])?.args[0])
 }
 
-/// Hands key processing back to the firmware. The only mode `core` ever sets:
-/// mode 0x01 drops the keyboard off the bus until it is replugged.
+/// Hands key processing back to the firmware.
 pub fn set_hardware_mode(t: &impl Transport) -> Result<(), Error> {
     exchange(t, SET_MODE, 2, &[MODE_HARDWARE, 0]).map(|_| ())
+}
+
+/// The keyboard stops typing and only reports depth; the host emits every key.
+/// The only other mode `core` sets: mode 0x01 drops the keyboard off the bus until replugged.
+pub fn set_driver_mode(t: &impl Transport) -> Result<(), Error> {
+    exchange(t, SET_MODE, 2, &[MODE_DRIVER, 0]).map(|_| ())
 }
 
 pub fn active_profile(t: &impl Transport) -> Result<u8, Error> {
@@ -41,5 +46,13 @@ mod tests {
         let kb = FakeKeyboard::new(&[31]);
         set_hardware_mode(&kb).unwrap();
         assert_eq!(kb.mode.get(), MODE_HARDWARE);
+    }
+
+    #[test]
+    fn switches_to_driver_mode() {
+        let kb = FakeKeyboard::new(&[31]);
+        set_hardware_mode(&kb).unwrap();
+        set_driver_mode(&kb).unwrap();
+        assert_eq!(kb.mode.get(), MODE_DRIVER);
     }
 }
