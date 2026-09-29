@@ -38,10 +38,12 @@
   },
   "keys": { "actuation": "Срабатывание", "bindings": "Назначения" },
   "bindings": {
+    "selectHint": "Выберите клавишу кликом",
     "action": "Действие",
     "types": { "key": "Клавиша", "mouse": "Мышь", "media": "Медиа", "disabled": "Отключена" },
     "factory": "По умолчанию",
     "other": "Назначено то, что EasyRazer пока не редактирует: макрос, Hypershift или служебная функция. Выберите действие, чтобы заменить.",
+    "search": "Поиск клавиши",
     "key": "Клавиша",
     "mods": "Модификаторы",
     "modNames": { "ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win" },
