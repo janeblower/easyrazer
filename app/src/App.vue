@@ -3,9 +3,12 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import type { Actuation, AppSettings, CloseAction, Status as DeviceStatus, KeyMap, KeyView, Rapid, WriteResult } from "./types";
+import type { Action, Actuation, AppSettings, CloseAction, Status as DeviceStatus, KeyMap, KeyView, Rapid, WriteResult } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
+import KeysCard from "./components/KeysCard.vue";
 import ActuationCard from "./components/ActuationCard.vue";
+import BindingCard from "./components/BindingCard.vue";
+import { common, factory, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
@@ -25,11 +28,16 @@ const rapidEdits = ref<KeyMap<Rapid>>({}); // not applied yet
 const splitOn = ref(false);
 const errors = ref<KeyMap<string>>({}); // message from the last apply
 const unsaved = ref(new Set<number>()); // applied, lost on replug unless saved
+const bindBase = ref<KeyMap<Action | null>>({}); // as last read or applied
+const bindEdits = ref<KeyMap<Action>>({}); // not applied yet
+const bindErrors = ref<KeyMap<string>>({});
+const bindUnsaved = ref(new Set<number>());
+const section = ref<"actuation" | "bindings">("actuation");
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
 const message = ref("");
-const tab = ref("actuation");
+const tab = ref("keys");
 const closing = ref(false);
 const offering = ref(false);
 const asking = ref(false);
@@ -46,12 +54,21 @@ const tabClass = (t: string) => [
     : "bg-panel text-muted border-transparent",
 ];
 
-const dirty = computed(() => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value)]).size);
+const dirty = computed(
+  () => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size,
+);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
 const driver = computed(() => !!status.value?.driver_mode);
 const canApply = computed(() => writable.value && dirty.value > 0);
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
-const canSave = computed(() => writable.value && (Object.keys(edits.value).length > 0 || unsaved.value.size > 0));
+const canSave = computed(
+  () =>
+    writable.value &&
+    (Object.keys(edits.value).length > 0 ||
+      unsaved.value.size > 0 ||
+      Object.keys(bindEdits.value).length > 0 ||
+      bindUnsaved.value.size > 0),
+);
 const selectedValue = computed(() => {
   const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
   return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
@@ -59,10 +76,6 @@ const selectedValue = computed(() => {
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
 const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;
-
-function common<T>(values: T[]): T | null {
-  return values.length > 0 && values.every((v) => v === values[0]) ? values[0] : null;
-}
 
 const selectedRapid = computed(() => {
   const r = Array.from(selection.value, rapidOf);
@@ -82,6 +95,36 @@ function setRapid(change: (r: Rapid) => Rapid) {
   rapidEdits.value = next;
 }
 
+const bindingOf = (k: number) => bindEdits.value[k] ?? bindBase.value[k] ?? null;
+const selectedActions = computed(() => Array.from(selection.value, bindingOf));
+const byKey = computed(() => new Map(layout.value.map((k) => [k.key, k])));
+
+function setBinding(change: (key: number, current: Action | null) => Action) {
+  const next = { ...bindEdits.value };
+  for (const k of selection.value) {
+    const a = change(k, bindingOf(k));
+    if (sameAction(a, bindBase.value[k])) delete next[k];
+    else next[k] = a;
+  }
+  bindEdits.value = next;
+}
+
+// What the key caps show in the open section.
+const mapValues = computed(() => {
+  const out: KeyMap<string> = {};
+  for (const { key: k } of layout.value) {
+    if (section.value === "actuation") {
+      const mm = edits.value[k] ?? baseline.value[k];
+      if (mm != null) out[k] = mm.toFixed(1);
+    } else if (k in bindBase.value || k in bindEdits.value) {
+      const a = bindingOf(k);
+      if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t);
+    }
+  }
+  return out;
+});
+const mapEdited = computed(() => new Set(Object.keys(section.value === "actuation" ? edits.value : bindEdits.value).map(Number)));
+
 function onSplit(on: boolean) {
   splitOn.value = on;
   if (!on) setRapid((r) => ({ ...r, release: r.press }));
@@ -100,7 +143,7 @@ async function load() {
   const unlisten = await listen<[number, number]>("read-progress", (e) => (progress.value = e.payload));
   try {
     const profile = status.value?.profile ?? null;
-    const { values: base, unsaved: keys, rapid } = await invoke<Actuation>("read_all");
+    const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings } = await invoke<Actuation>("read_all");
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -109,6 +152,10 @@ async function load() {
     unsaved.value = new Set(keys);
     edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[Number(k)] !== mm));
     errors.value = {};
+    bindBase.value = bindings;
+    bindEdits.value = Object.fromEntries(Object.entries(bindEdits.value).filter(([k, a]) => !sameAction(a, bindings[Number(k)])));
+    bindUnsaved.value = new Set(unsaved_bindings);
+    bindErrors.value = {};
     loadedProfile = profile;
     message.value = "";
   } catch (error) {
@@ -170,6 +217,8 @@ function revert() {
   edits.value = {};
   rapidEdits.value = {};
   errors.value = {};
+  bindEdits.value = {};
+  bindErrors.value = {};
 }
 
 async function write(command: "apply" | "save", done: string) {
@@ -178,7 +227,13 @@ async function write(command: "apply" | "save", done: string) {
   try {
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
     const rapid = command === "apply" ? rapidEdits.value : null;
-    const { results, unsaved: keys } = await invoke<WriteResult>(command, rapid ? { changes, rapid } : { changes });
+    const bindings = Object.entries(bindEdits.value).map(([k, a]) => [Number(k), a]);
+    const {
+      results,
+      unsaved: keys,
+      bindings: bound,
+      unsaved_bindings,
+    } = await invoke<WriteResult>(command, rapid ? { changes, rapid, bindings } : { changes, bindings });
     if (rapid) {
       rapidBase.value = { ...rapidBase.value, ...rapid };
       rapidEdits.value = {};
@@ -199,7 +254,23 @@ async function write(command: "apply" | "save", done: string) {
     baseline.value = base;
     edits.value = next;
     errors.value = errs;
-    const bad = Object.keys(errs).length;
+    bindUnsaved.value = new Set(unsaved_bindings);
+    const bBase = { ...bindBase.value };
+    const bNext = { ...bindEdits.value };
+    const bErrs: KeyMap<string> = {};
+    for (const r of bound) {
+      if (r.status === "error") {
+        bErrs[r.key] = r.message;
+        continue;
+      }
+      bBase[r.key] = r.action;
+      delete bNext[r.key];
+      if (r.status === "unconfirmed") bErrs[r.key] = t("bindings.unconfirmed");
+    }
+    bindBase.value = bBase;
+    bindEdits.value = bNext;
+    bindErrors.value = bErrs;
+    const bad = Object.keys(errs).length + Object.keys(bErrs).length;
     message.value = bad ? t("actuation.failed", { n: bad }) : t(done);
   } catch (error) {
     message.value = String(error);
@@ -279,7 +350,7 @@ onUnmounted(() => {
 <template>
   <main class="p-4 flex flex-col gap-4">
     <nav class="flex gap-1">
-      <button :class="tabClass('actuation')" @click="tab = 'actuation'">{{ $t("tabs.actuation") }}</button>
+      <button :class="tabClass('keys')" @click="tab = 'keys'">{{ $t("tabs.keys") }}</button>
       <button :class="tabClass('lighting')" @click="tab = 'lighting'">{{ $t("tabs.lighting") }}</button>
       <button :class="tabClass('settings')" @click="tab = 'settings'">{{ $t("tabs.settings") }}</button>
       <div class="ml-auto flex self-center" :title="$t('mode.hint')">
@@ -303,38 +374,55 @@ onUnmounted(() => {
       </div>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
-    <template v-if="tab === 'actuation'">
+    <template v-if="tab === 'keys'">
+      <span class="inline-flex self-start">
+        <button
+          v-for="s in ['actuation', 'bindings'] as const"
+          :key="s"
+          class="seg-btn"
+          :class="{ 'seg-on': section === s }"
+          @click="section = s"
+        >
+          {{ $t(`keys.${s}`) }}
+        </button>
+      </span>
       <KeyboardMap
         v-model:selection="selection"
         :layout="layout"
-        :baseline="baseline"
-        :edits="edits"
-        :errors="errors"
-        :unsaved="unsaved"
-        :rapid="driver ? rapidKeys : new Set()"
+        :values="mapValues"
+        :edited="mapEdited"
+        :errors="section === 'actuation' ? errors : bindErrors"
+        :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
+        :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
         :rapid-edited="rapidEdited"
       />
-      <ActuationCard
+      <KeysCard
         :count="selection.size"
-        :value="selectedValue"
-        :rapid="selectedRapid"
-        :split="split"
         :dirty="dirty"
         :can-apply="canApply"
         :can-save="canSave"
         :busy="busy"
-        :driver="driver"
-        @set="setValue"
-        @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
-        @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
-        @release="(v) => setRapid((r) => ({ ...r, release: v }))"
-        @split="onSplit"
         @apply="write('apply', 'actuation.applied')"
         @save="save"
         @revert="revert"
         @select-all="selectAll"
         @clear="selection = new Set()"
-      />
+      >
+        <ActuationCard
+          v-if="section === 'actuation'"
+          :count="selection.size"
+          :value="selectedValue"
+          :rapid="selectedRapid"
+          :split="split"
+          :driver="driver"
+          @set="setValue"
+          @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+          @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
+          @release="(v) => setRapid((r) => ({ ...r, release: v }))"
+          @split="onSplit"
+        />
+        <BindingCard v-else :actions="selectedActions" :layout="layout" @change="setBinding" />
+      </KeysCard>
     </template>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />

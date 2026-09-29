@@ -50,20 +50,29 @@ pub enum Outcome {
 
 /// Sets the press point of each `(key, mm)`; one failing key does not stop the rest.
 pub fn apply(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
-    changes
-        .iter()
-        .map(|&(key, mm)| (key, apply_one(t, profile, key, mm).unwrap_or_else(Outcome::Failed)))
-        .collect()
+    apply_with(t, profile, changes, set_mm)
 }
 
 /// Writes the profile and then the live copy, so the change takes effect without a replug.
 pub fn save(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
-    apply(t, profile, changes)
+    save_with(t, profile, changes, true, set_mm)
+}
+
+type Set<T, C> = fn(&T, u8, u8, &C) -> Result<Outcome, Error>;
+
+pub(crate) fn apply_with<T: Transport, C>(t: &T, profile: u8, changes: &[(u8, C)], set: Set<T, C>) -> Vec<(u8, Outcome)> {
+    changes.iter().map(|(key, c)| (*key, set(t, profile, *key, c).unwrap_or_else(Outcome::Failed))).collect()
+}
+
+/// Without `live` only the profile is written and judged.
+pub(crate) fn save_with<T: Transport, C>(t: &T, profile: u8, changes: &[(u8, C)], live: bool, set: Set<T, C>) -> Vec<(u8, Outcome)> {
+    apply_with(t, profile, changes, set)
         .into_iter()
         .zip(changes)
-        .map(|((key, saved), &(_, mm))| match saved {
+        .map(|((key, saved), (_, c))| match saved {
             Outcome::Failed(_) => (key, saved),
-            _ => match apply_one(t, LIVE, key, mm) {
+            _ if !live => (key, saved),
+            _ => match set(t, LIVE, key, c) {
                 Ok(Outcome::Ok(_)) => (key, saved),
                 Ok(live) => (key, live),
                 Err(e) => (key, Outcome::Failed(e)),
@@ -84,14 +93,19 @@ pub fn unsaved(t: &impl Transport, profile: u8, keys: &[u8]) -> Result<Vec<KeyAs
     Ok(out)
 }
 
-fn apply_one(t: &impl Transport, profile: u8, key: u8, mm: f32) -> Result<Outcome, Error> {
+fn set_mm(t: &impl Transport, profile: u8, key: u8, &mm: &f32) -> Result<Outcome, Error> {
     // The UI works in 0.1 mm steps; rounding absorbs float drift from the slider.
     let mm = (mm * 10.0).round() / 10.0;
     if !(MIN_MM..=MAX_MM).contains(&mm) {
         return Err(Error::OutOfRange(mm));
     }
-    let current = read_key(t, profile, key)?;
-    let wanted = KeyAssignment { threshold_low: analog::mm_to_threshold(mm), ..current };
+    update(t, profile, key, |a| a.threshold_low = analog::mm_to_threshold(mm))
+}
+
+/// Changes one key's assignment and reads it back to confirm.
+pub(crate) fn update(t: &impl Transport, profile: u8, key: u8, change: impl FnOnce(&mut KeyAssignment)) -> Result<Outcome, Error> {
+    let mut wanted = read_key(t, profile, key)?;
+    change(&mut wanted);
     write_key(t, &wanted)?;
     let stored = read_key(t, profile, key)?;
     Ok(if stored == wanted { Outcome::Ok(stored) } else { Outcome::Unconfirmed(stored) })

@@ -2,6 +2,7 @@
 
 pub mod actuation;
 pub mod analog;
+pub mod binding;
 pub mod control;
 pub mod devices;
 #[cfg(test)]

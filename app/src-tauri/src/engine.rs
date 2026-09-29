@@ -8,12 +8,17 @@ use std::time::{Duration, Instant};
 
 use hidapi::{HidApi, HidDevice};
 use razer_core::hid::VID;
+use razer_core::binding::Mouse;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
 use windows_sys::Win32::System::Power::SetSuspendState;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput,
-    VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_PAUSE, VK_VOLUME_MUTE,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput,
+    VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_PAUSE, VK_VOLUME_DOWN,
+    VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{WHEEL_DELTA, XBUTTON1, XBUTTON2};
 use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW};
 
 /// Actions the engine cannot perform itself: they need the control channel or the OS.
@@ -123,10 +128,29 @@ fn emit(out: &[Output], sink: &Sink) {
     for &o in out {
         match o {
             Output::Key { key, down } => send_key(key, down),
+            Output::Mouse { button, down } => send_mouse(button, down),
             Output::Media(m) => send_media(m),
             other => sink(other),
         }
     }
+}
+
+fn send_mouse(button: Mouse, down: bool) {
+    let pick = |d, u| if down { d } else { u };
+    let (flags, data) = match button {
+        Mouse::Left => (pick(MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP), 0),
+        Mouse::Right => (pick(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP), 0),
+        Mouse::Middle => (pick(MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP), 0),
+        Mouse::Back => (pick(MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP), u32::from(XBUTTON1)),
+        Mouse::Forward => (pick(MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP), u32::from(XBUTTON2)),
+        // One notch per press, like the firmware.
+        Mouse::WheelUp | Mouse::WheelDown if !down => return,
+        Mouse::WheelUp => (MOUSEEVENTF_WHEEL, WHEEL_DELTA),
+        Mouse::WheelDown => (MOUSEEVENTF_WHEEL, WHEEL_DELTA.wrapping_neg()),
+    };
+    let mi = MOUSEINPUT { dx: 0, dy: 0, mouseData: data, dwFlags: flags, time: 0, dwExtraInfo: 0 };
+    let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi } };
+    unsafe { SendInput(1, &input, size_of::<INPUT>() as i32) };
 }
 
 fn send(ki: KEYBDINPUT) {
@@ -149,7 +173,10 @@ fn send_media(m: Media) {
         Media::Prev => VK_MEDIA_PREV_TRACK,
         Media::Play => VK_MEDIA_PLAY_PAUSE,
         Media::Next => VK_MEDIA_NEXT_TRACK,
+        Media::Stop => VK_MEDIA_STOP,
         Media::Mute => VK_VOLUME_MUTE,
+        Media::VolumeUp => VK_VOLUME_UP,
+        Media::VolumeDown => VK_VOLUME_DOWN,
     };
     for flags in [KEYEVENTF_EXTENDEDKEY, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP] {
         send(KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 });

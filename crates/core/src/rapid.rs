@@ -4,7 +4,10 @@
 
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::analog::{MAX_MM, MIN_MM};
+use crate::binding::{self, Action, MODIFIERS, Mouse};
 
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
 /// without it a key resting at the point chatters on sensor noise.
@@ -49,8 +52,8 @@ struct KeyState {
     down: bool,
     /// Deepest point while down, shallowest while up, since the last transition.
     extreme: u8,
-    /// Taken by the Fn layer: its release emits nothing.
-    fn_layer: bool,
+    /// What the press did, so the release undoes that even if the binding changed meanwhile.
+    sent: Option<Action>,
 }
 
 /// One depth sample of a key; `Some(down)` on a transition.
@@ -93,17 +96,22 @@ const F12: u8 = 123;
 const PAUSE: u8 = 126;
 const MENU: u8 = 129;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Media {
     Prev,
     Play,
     Next,
+    Stop,
     Mute,
+    VolumeUp,
+    VolumeDown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
     Key { key: u8, down: bool },
+    Mouse { button: Mouse, down: bool },
     Media(Media),
     /// One brightness step down (-1) or up (+1).
     Brightness(i8),
@@ -115,6 +123,8 @@ pub struct Config {
     /// Press point per fwID, the key's onboard `thrL`.
     pub act: [u8; 256],
     pub rapid: [Option<Trigger>; 256],
+    /// `None` types the key itself.
+    pub bind: [Option<Action>; 256],
     pub repeat_delay: Duration,
     pub repeat_interval: Duration,
 }
@@ -139,6 +149,34 @@ fn media(code: u8) -> Option<Media> {
         0x52 => Media::Mute,
         _ => return None,
     })
+}
+
+fn press(a: Action, out: &mut Vec<Output>) {
+    match a {
+        Action::Disabled => {}
+        Action::Key { key, mods } => {
+            out.extend(bits(mods).map(|m| Output::Key { key: m, down: true }));
+            out.push(Output::Key { key, down: true });
+        }
+        Action::Mouse { button } => out.push(Output::Mouse { button, down: true }),
+        Action::Media { media } => out.push(Output::Media(media)),
+    }
+}
+
+fn release(a: Action, out: &mut Vec<Output>) {
+    match a {
+        Action::Key { key, mods } => {
+            out.push(Output::Key { key, down: false });
+            out.extend(bits(mods).rev().map(|m| Output::Key { key: m, down: false }));
+        }
+        Action::Mouse { button } => out.push(Output::Mouse { button, down: false }),
+        Action::Disabled | Action::Media { .. } => {}
+    }
+}
+
+/// Modifier keys set in a HID modifier byte.
+fn bits(mods: u8) -> impl DoubleEndedIterator<Item = u8> {
+    (0..8).filter(move |i| mods & (1 << i) != 0).map(|i| MODIFIERS[i])
 }
 
 pub struct Engine {
@@ -171,22 +209,27 @@ impl Engine {
 
     fn transition(&mut self, key: u8, down: bool, now: Instant, out: &mut Vec<Output>) {
         let k = &mut self.keys[key as usize];
-        if down
-            && self.held.contains(&RAZER_FN)
-            && let Some(action) = fn_layer(key)
+        if !down {
+            if let Some(a) = k.sent.take() {
+                release(a, out);
+            }
+            if self.repeat.is_some_and(|(r, _)| r == key) {
+                self.repeat = None;
+            }
+            return;
+        }
+        let action = if self.held.contains(&RAZER_FN)
+            && let Some(fn_out) = fn_layer(key)
         {
-            k.fn_layer = true;
-            out.extend_from_slice(action);
-            return;
-        }
-        if !down && std::mem::take(&mut k.fn_layer) {
-            return;
-        }
-        out.push(Output::Key { key, down });
-        if down {
+            out.extend_from_slice(fn_out);
+            Action::Disabled
+        } else {
+            self.cfg.bind[key as usize].unwrap_or(binding::factory(key))
+        };
+        k.sent = Some(action);
+        press(action, out);
+        if let Action::Key { .. } = action {
             self.repeat = Some((key, now + self.cfg.repeat_delay));
-        } else if self.repeat.is_some_and(|(r, _)| r == key) {
-            self.repeat = None;
         }
     }
 
@@ -198,11 +241,14 @@ impl Engine {
 
     pub fn tick(&mut self, now: Instant) -> Vec<Output> {
         match self.repeat {
-            Some((key, at)) if now >= at => {
+            Some((source, at)) if now >= at => {
                 // After a stall, repeat once and resume the cadence from now.
                 let next = at + self.cfg.repeat_interval;
-                self.repeat = Some((key, if next < now { now + self.cfg.repeat_interval } else { next }));
-                vec![Output::Key { key, down: true }]
+                self.repeat = Some((source, if next < now { now + self.cfg.repeat_interval } else { next }));
+                match self.keys[source as usize].sent {
+                    Some(Action::Key { key, .. }) => vec![Output::Key { key, down: true }],
+                    _ => Vec::new(),
+                }
             }
             _ => Vec::new(),
         }
@@ -214,10 +260,10 @@ impl Engine {
 
     /// Lifts every key the host holds down, for when the engine stops or loses the keyboard.
     pub fn release_all(&mut self) -> Vec<Output> {
-        let out = (1..=255u8)
-            .filter(|&id| self.keys[id as usize].down && !self.keys[id as usize].fn_layer)
-            .map(|key| Output::Key { key, down: false })
-            .collect();
+        let mut out = Vec::new();
+        for a in self.keys.iter().filter_map(|k| k.sent) {
+            release(a, &mut out);
+        }
         self.keys = [KeyState::default(); 256];
         self.held.clear();
         self.repeat = None;
@@ -301,6 +347,7 @@ mod tests {
         Engine::new(Config {
             act: [100; 256],
             rapid: [None; 256],
+            bind: [None; 256],
             repeat_delay: Duration::from_millis(500),
             repeat_interval: Duration::from_millis(33),
         })
@@ -411,6 +458,54 @@ mod tests {
         cfg.rapid[A as usize] = Some(Trigger { press: 10, release: 10 });
         e.set_config(cfg);
         assert_eq!(e.feed_depth(&depth(&[(A, 135)]), t), [key(A, false)]);
+    }
+
+    fn bound(pairs: &[(u8, Action)]) -> Engine {
+        let mut e = engine();
+        for &(k, a) in pairs {
+            e.cfg.bind[k as usize] = Some(a);
+        }
+        e
+    }
+
+    const CTRL: u8 = 58;
+    const SHIFT: u8 = 44;
+    const C: u8 = 48;
+
+    #[test]
+    fn bound_key_types_its_target_with_modifiers() {
+        let (mut e, t) = (bound(&[(A, Action::Key { key: C, mods: 0x03 })]), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(CTRL, true), key(SHIFT, true), key(C, true)]);
+        assert_eq!(e.tick(t + Duration::from_millis(500)), [key(C, true)]);
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(C, false), key(SHIFT, false), key(CTRL, false)]);
+    }
+
+    #[test]
+    fn disabled_key_types_nothing() {
+        let (mut e, t) = (bound(&[(A, Action::Disabled)]), Instant::now());
+        assert!(e.feed_depth(&depth(&[(A, 150)]), t).is_empty());
+        assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+    }
+
+    #[test]
+    fn mouse_and_media_bindings() {
+        let m = Action::Mouse { button: Mouse::Left };
+        let (mut e, t) = (bound(&[(A, m), (S, Action::Media { media: Media::VolumeUp })]), Instant::now());
+        let left = |down| Output::Mouse { button: Mouse::Left, down };
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (S, 150)]), t), [left(true), Output::Media(Media::VolumeUp)]);
+        assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[]), t), [left(false)]);
+    }
+
+    #[test]
+    fn release_follows_the_binding_of_the_press() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        let mut cfg = e.cfg.clone();
+        cfg.bind[A as usize] = Some(Action::Disabled);
+        e.set_config(cfg);
+        assert_eq!(e.release_all(), [key(A, false)]);
     }
 
     #[test]
