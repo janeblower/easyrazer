@@ -48,6 +48,7 @@ const tabClass = (t: string) => [
 
 const dirty = computed(() => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value)]).size);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
+const driver = computed(() => !!status.value?.driver_mode);
 const canApply = computed(() => writable.value && dirty.value > 0);
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
 const canSave = computed(() => writable.value && (Object.keys(edits.value).length > 0 || unsaved.value.size > 0));
@@ -137,6 +138,19 @@ async function refresh() {
   } catch (error) {
     message.value = String(error);
   }
+}
+
+async function setMode(on: boolean) {
+  if (on === driver.value) return;
+  busy.value = true;
+  try {
+    await invoke("set_driver_mode", { on });
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
+  await refresh();
 }
 
 function setValue(mm: number) {
@@ -268,6 +282,21 @@ onUnmounted(() => {
       <button :class="tabClass('actuation')" @click="tab = 'actuation'">{{ $t("tabs.actuation") }}</button>
       <button :class="tabClass('lighting')" @click="tab = 'lighting'">{{ $t("tabs.lighting") }}</button>
       <button :class="tabClass('settings')" @click="tab = 'settings'">{{ $t("tabs.settings") }}</button>
+      <div class="ml-auto flex self-center" :title="$t('mode.hint')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="px-3 py-1"
+          :class="[
+            on ? 'rounded-l-none' : 'rounded-r-none',
+            driver === on ? 'bg-accent text-[#0b0b0b] border-accent' : 'bg-panel text-muted',
+          ]"
+          :disabled="!writable"
+          @click="setMode(on)"
+        >
+          {{ $t(on ? "mode.driver" : "mode.hw") }}
+        </button>
+      </div>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'actuation'">
@@ -278,7 +307,7 @@ onUnmounted(() => {
         :edits="edits"
         :errors="errors"
         :unsaved="unsaved"
-        :rapid="rapidKeys"
+        :rapid="driver ? rapidKeys : new Set()"
         :rapid-edited="rapidEdited"
       />
       <ActuationCard
@@ -290,6 +319,7 @@ onUnmounted(() => {
         :can-apply="canApply"
         :can-save="canSave"
         :busy="busy"
+        :driver="driver"
         @set="setValue"
         @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
         @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"

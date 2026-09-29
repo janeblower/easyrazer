@@ -84,6 +84,7 @@ fn main() {
             commands::lighting_apply,
             commands::lighting_write,
             commands::set_confirm_write,
+            commands::set_driver_mode,
             commands::set_dynamic_lighting,
             commands::app_settings,
             commands::set_autostart,

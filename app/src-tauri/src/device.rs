@@ -30,6 +30,8 @@ pub struct Status {
     pub device: bool,
     pub synapse: bool,
     pub mode: Option<u8>,
+    /// Driver mode chosen in the app: the host engine types, Rapid Trigger works.
+    pub driver_mode: bool,
     pub profile: Option<u8>,
     pub model: Option<String>,
     /// PID of a Razer keyboard without a description.
@@ -66,7 +68,7 @@ pub struct Device {
     /// Description of the last keyboard seen, so the lighting tab can be edited while it is unplugged.
     last_spec: Option<&'static DeviceSpec>,
     restore_error: Option<String>,
-    /// Runs while some key has Rapid Trigger; the keyboard is in driver mode meanwhile.
+    /// Runs in driver mode; the keyboard only reports depth meanwhile.
     engine: Option<EngineHandle>,
     /// Live press points (`thrL`) read this connect, the engine's press points.
     thresholds: Option<BTreeMap<u8, u8>>,
@@ -157,7 +159,8 @@ impl Device {
         if self.control.is_none() {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
-            return Status { device: false, synapse, mode: None, profile: None, model: None, unsupported, error };
+            let driver_mode = self.settings.driver_mode;
+            return Status { device: false, synapse, mode: None, driver_mode, profile: None, model: None, unsupported, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
@@ -173,7 +176,7 @@ impl Device {
         if released {
             self.restore();
         }
-        Status { device: true, synapse, mode, profile, model, unsupported: None, error }
+        Status { device: true, synapse, mode, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
     }
 
     /// Press points the keyboard types with now, and the keys a replug would reset.
@@ -344,12 +347,26 @@ impl Device {
         }
     }
 
-    /// Runs the engine, and driver mode with it, while some key has Rapid Trigger and Synapse is away.
+    /// Switches between hardware and driver mode; stays in hardware mode if the engine cannot start.
+    pub fn set_driver_mode(&mut self, on: bool) -> Result<(), String> {
+        if self.synapse {
+            return Err(self.msg("backend.synapseRunning"));
+        }
+        self.settings.driver_mode = on;
+        self.sync_engine();
+        if on && self.engine.is_none() {
+            self.settings.driver_mode = false;
+            return Err(self.restore_error.take().unwrap_or_else(|| self.msg("backend.noKeyboard")));
+        }
+        settings::save(&self.settings)
+    }
+
+    /// Runs the engine, and driver mode with it, while the app is in driver mode and Synapse is away.
     fn sync_engine(&mut self) {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if !wants_engine(self.synapse, &self.settings.rapid) || self.control.is_none() {
+        if !wants_engine(self.synapse, self.settings.driver_mode) || self.control.is_none() {
             self.stop_engine();
             return;
         }
@@ -461,8 +478,8 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
     fresh_check && !synapse && !engine && mode == Some(control::MODE_DRIVER)
 }
 
-fn wants_engine(synapse: bool, rapid: &BTreeMap<u8, Rapid>) -> bool {
-    !synapse && rapid.values().any(|r| r.enabled)
+fn wants_engine(synapse: bool, driver_mode: bool) -> bool {
+    !synapse && driver_mode
 }
 
 fn engine_config(thresholds: &BTreeMap<u8, u8>, rapid: &BTreeMap<u8, Rapid>, (repeat_delay, repeat_interval): (Duration, Duration)) -> Config {
@@ -570,13 +587,10 @@ mod tests {
     }
 
     #[test]
-    fn engine_runs_while_some_key_has_rapid_trigger_and_synapse_is_away() {
-        let on = BTreeMap::from([(31, Rapid { enabled: true, press: 0.4, release: 0.4 })]);
-        let off = BTreeMap::from([(31, Rapid { enabled: false, press: 0.4, release: 0.4 })]);
-        assert!(wants_engine(false, &on));
-        assert!(!wants_engine(true, &on));
-        assert!(!wants_engine(false, &off));
-        assert!(!wants_engine(false, &BTreeMap::new()));
+    fn engine_runs_in_driver_mode_while_synapse_is_away() {
+        assert!(wants_engine(false, true));
+        assert!(!wants_engine(true, true));
+        assert!(!wants_engine(false, false));
     }
 
     #[test]
