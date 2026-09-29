@@ -292,7 +292,7 @@ onUnmounted(() => {
             driver !== on
               ? 'bg-panel text-muted'
               : on
-                ? 'bg-[#ce422b] text-white border-[#ce422b]'
+                ? 'bg-[#d75411] text-white border-[#d75411]'
                 : 'bg-accent text-[#0b0b0b] border-accent',
           ]"
           :disabled="!writable"
