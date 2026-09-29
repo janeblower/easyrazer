@@ -589,6 +589,10 @@ onMounted(load);
     radial-gradient(circle at 66% 25%, rgb(255 255 255 / var(--a)) 0 2px, transparent 3px),
     radial-gradient(circle at 92% 70%, rgb(68 214 44 / var(--a)) 0 2px, transparent 3px);
 }
+.g-fire::before {
+  background: linear-gradient(0deg, #f20, #f80, #fd0, transparent);
+  animation: fx-breathe 1.2s ease-in-out infinite;
+}
 @property --r {
   syntax: "<length>";
   inherits: false;

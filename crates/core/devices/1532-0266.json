@@ -11,7 +11,8 @@
       "off", "custom", "static", "breathing_one", "breathing_two", "breathing_random", "spectrum",
       "wave",
       "reactive_key_one", "reactive_key_random", "reactive_ripple_one", "reactive_ripple_random",
-      "starlight_random", "starlight_one", "starlight_two"
+      "starlight_random", "starlight_one", "starlight_two",
+      "fire"
     ]
   },
   "lamp_array": { "control_report": "06" }

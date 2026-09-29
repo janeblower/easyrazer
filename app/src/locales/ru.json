@@ -39,7 +39,8 @@
       "spectrum": "Спектр",
       "wave": "Волна",
       "reactive": "Отклик",
-      "starlight": "Звёздное небо"
+      "starlight": "Звёздное небо",
+      "fire": "Пламя"
     },
     "types": { "key": "Клавиша", "ripple": "Рябь" },
     "dirs": { "left": "← влево", "right": "вправо →" },

@@ -261,6 +261,7 @@ mod tests {
                 Effect { speed: Some(2), rgb1: Some(RED), rgb2: Some(BLUE), ..fx("starlight_two") },
                 hex("07 00 02 02 FF 00 00 00 00 FF"),
             ),
+            (fx("fire"), hex("09 00 00 00")),
         ]
     }
 
@@ -282,7 +283,7 @@ mod tests {
 
     #[test]
     fn unknown_effect_bytes_decode_to_none() {
-        assert_eq!(decode(spec(), &hex("09 00 00")), None);
+        assert_eq!(decode(spec(), &hex("0A 00 00 00")), None);
         assert_eq!(decode(spec(), &hex("01 00 00 01 FF")), None);
     }
 
@@ -324,7 +325,7 @@ mod tests {
     #[test]
     fn unknown_effect_in_the_keyboard_is_none() {
         let kb = FakeKeyboard::new(&[]);
-        kb.effects.borrow_mut().insert(0, hex("09 00 00"));
+        kb.effects.borrow_mut().insert(0, hex("0A 00 00 00"));
         assert_eq!(get_look(&kb, spec(), Store::Temporary).unwrap(), None);
     }
 
