@@ -37,6 +37,31 @@ const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value)
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
 const rtOn = computed(() => props.driver && props.rapid.enabled === true);
 const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : t("actuation.mm", { v: v.toFixed(1) }));
+
+const MIN = 1.5;
+const MAX = 3.6;
+// In hardware mode the firmware clamps the press point to thresholds 15..250.
+const HW_MIN = 1.62;
+const HW_MAX = 3.56;
+// Half of the native slider thumb: the thumb centre never reaches the track ends.
+const THUMB = 8;
+const HW_MARKS = [HW_MIN, HW_MAX];
+
+const effective = (v: number) => (props.driver ? v : Math.min(HW_MAX, Math.max(HW_MIN, v)));
+const markTop = (v: number) => `calc(${THUMB}px + ${(v - MIN) / (MAX - MIN)} * (100% - ${2 * THUMB}px))`;
+const pressLabel = computed(() => {
+  if (props.value == null) return label(null);
+  const v = effective(props.value);
+  return t("actuation.mm", { v: v === HW_MIN || v === HW_MAX ? v.toFixed(2) : v.toFixed(1) });
+});
+
+function onPress(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const v = Math.round(effective(Number(input.value)) * 10) / 10;
+  emit("set", v);
+  // The slider moves in 0.01 so the thumb can stop on the hardware marks; snap it to what was set.
+  input.value = String(effective(v));
+}
 </script>
 
 <template>
@@ -50,19 +75,30 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
       <div class="flex flex-col gap-1 items-center">
         <span class="text-sm">{{ $t("actuation.title") }}</span>
         <span class="text-xs text-muted">1.5</span>
-        <input
-          class="h-[200px] [writing-mode:vertical-lr]"
-          type="range"
-          min="1.5"
-          max="3.6"
-          step="0.1"
-          :value="value ?? 1.5"
-          :disabled="!count"
-          @input="emit('set', mm($event))"
-        />
+        <div class="relative">
+          <input
+            class="h-[200px] block [writing-mode:vertical-lr]"
+            type="range"
+            :min="MIN"
+            :max="MAX"
+            step="0.01"
+            :value="effective(value ?? MIN)"
+            :disabled="!count"
+            @input="onPress"
+          />
+          <template v-if="!driver">
+            <div
+              v-for="m in HW_MARKS"
+              :key="m"
+              class="bg-warn h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
+              :style="{ top: markTop(m) }"
+            >
+              <span class="text-xs text-warn left-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
+            </div>
+          </template>
+        </div>
         <span class="text-xs text-muted">3.6</span>
-        <span class="text-sm text-center min-w-[60px]">{{ label(value) }}</span>
-        <span v-if="!driver" class="text-xs text-muted text-center max-w-[140px]">{{ $t("actuation.hwRange") }}</span>
+        <span class="text-sm text-center min-w-[60px]">{{ pressLabel }}</span>
       </div>
       <img
         src="/switch.gif"
