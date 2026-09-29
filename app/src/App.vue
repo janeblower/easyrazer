@@ -289,7 +289,11 @@ onUnmounted(() => {
           class="px-3 py-1"
           :class="[
             on ? 'rounded-l-none' : 'rounded-r-none',
-            driver === on ? 'bg-accent text-[#0b0b0b] border-accent' : 'bg-panel text-muted',
+            driver !== on
+              ? 'bg-panel text-muted'
+              : on
+                ? 'bg-[#ce422b] text-white border-[#ce422b]'
+                : 'bg-accent text-[#0b0b0b] border-accent',
           ]"
           :disabled="!writable"
           @click="setMode(on)"
