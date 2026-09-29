@@ -20,7 +20,8 @@ pub fn set_hardware_mode(t: &impl Transport) -> Result<(), Error> {
 }
 
 /// The keyboard stops typing and only reports depth; the host emits every key.
-/// The only other mode `core` sets: mode 0x01 drops the keyboard off the bus until replugged.
+/// Any mode switch reloads profile 0 from the active profile, dropping unsaved changes.
+/// The only other mode `core` sets: mode 0x01 reboots into the bootloader (`1532:110E`).
 pub fn set_driver_mode(t: &impl Transport) -> Result<(), Error> {
     exchange(t, SET_MODE, 2, &[MODE_DRIVER, 0]).map(|_| ())
 }

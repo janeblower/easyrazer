@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use crate::analog::{self, KeyAssignment, MAX_MM, MIN_MM, Mode};
+use crate::analog::{self, KeyAssignment, MAX_MM, MIN_MM, Layer};
 use crate::keymap;
 use crate::transport::{Error, Transport, exchange};
 
@@ -15,7 +15,7 @@ pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignmen
         t,
         analog::GET_KEY_ASSIGNMENT,
         analog::KEY_ASSIGNMENT_SIZE,
-        &analog::get_args(profile, key, Mode::Normal),
+        &analog::get_args(profile, key, Layer::Normal),
     )?;
     analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
 }

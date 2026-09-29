@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
-use razer_core::analog::{self, Mode};
+use razer_core::analog::{self, Layer};
 use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
 use razer_core::packet::{self, Command, Response};
@@ -176,19 +176,19 @@ fn key_label(id: u8) -> String {
 
 fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
     let mut out = String::new();
-    for mode in [Mode::Normal, Mode::Hypershift] {
+    for layer in [Layer::Normal, Layer::Hypershift] {
         for &key in keys {
             let r = exchange(
                 dev,
                 analog::GET_KEY_ASSIGNMENT,
                 analog::KEY_ASSIGNMENT_SIZE,
-                &analog::get_args(profile, key, mode),
+                &analog::get_args(profile, key, layer),
             )?;
             let a = analog::parse(r.data()).ok_or_else(|| format!("key {key}: short reply {}", hex(r.data())))?;
             let _ = writeln!(
                 out,
                 "{:?} {} low {:3} ({:.2} mm)  high {:3} ({:.2} mm)  fn {:02X} [{}]",
-                mode,
+                layer,
                 key_label(a.key),
                 a.threshold_low,
                 analog::threshold_to_mm(a.threshold_low),
@@ -243,7 +243,7 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
             dev,
             analog::GET_KEY_ASSIGNMENT,
             analog::KEY_ASSIGNMENT_SIZE,
-            &analog::get_args(profile, key, Mode::Normal),
+            &analog::get_args(profile, key, Layer::Normal),
         )?;
         analog::parse(r.data()).ok_or_else(|| format!("short reply {}", hex(r.data())))
     };
@@ -379,9 +379,16 @@ fn raw_set(dev: &HidTransport, a: &[String]) -> Result<String> {
     let cmd = Command::new(parse_hex(&a[0])?, parse_hex(&a[1])?);
     let size = parse_hex(&a[2])?;
     let args = a[3..].iter().map(|s| parse_hex(s)).collect::<Result<Vec<_>>>()?;
-    // Mode 0x01 drops the device off the bus until replugged (re-enumerates as 1532:110E).
+    // Mode 0x01 reboots into the bootloader (re-enumerates as 1532:110E).
     if cmd == Command::new(0x00, 0x04) && !matches!(args.first(), Some(0x00 | 0x02 | 0x03)) {
         return Err("device mode other than 0, 2 or 3 is refused".into());
+    }
+    // Serial number, factory config reset and calibration live in config, which Synapse never writes.
+    if cmd == Command::new(0x00, 0x02)
+        || cmd == Command::new(0xFE, 0x28)
+        || (cmd == Command::new(0x00, 0x0B) && args.starts_with(&[0x01, 0x01]))
+    {
+        return Err(format!("{cmd} rewrites the factory config and is refused"));
     }
     let r = exchange(dev, cmd, size, &args)?;
     Ok(format!("{cmd} ok, data: {}\n", hex(r.data())))

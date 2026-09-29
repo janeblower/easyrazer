@@ -39,7 +39,8 @@
       "spectrum": "Spectrum",
       "wave": "Wave",
       "reactive": "Reactive",
-      "starlight": "Starlight"
+      "starlight": "Starlight",
+      "fire": "Fire"
     },
     "types": { "key": "Key", "ripple": "Ripple" },
     "dirs": { "left": "← left", "right": "right →" },
