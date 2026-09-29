@@ -55,18 +55,18 @@ pub trait Transport {
 }
 
 /// Sends one command and polls until the device answers it.
+/// The firmware runs the command inside `SET_REPORT`, so the first read normally has the answer.
 pub fn exchange(t: &impl Transport, cmd: Command, size: u8, args: &[u8]) -> Result<Response, Error> {
     let tid = t.tid();
     let mut tx = [0u8; packet::LEN + 1];
     tx[1..].copy_from_slice(&packet::request(tid, cmd, size, args));
     t.send_feature(&tx)?;
     for _ in 0..MAX_POLLS {
-        sleep(POLL_DELAY);
         let mut rx = [0u8; packet::LEN + 1];
         t.get_feature(&mut rx)?;
         let r = Response::parse(rx[1..].try_into().unwrap());
         match r.status {
-            Status::Busy => continue,
+            Status::Busy => sleep(POLL_DELAY),
             Status::Ok if r.cmd != cmd || r.tid != tid => {
                 return Err(Error::WrongReply { sent: cmd, got: r.cmd, tid: r.tid });
             }
