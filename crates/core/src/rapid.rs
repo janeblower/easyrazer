@@ -2,12 +2,14 @@
 //!
 //! Depth and press points share one scale: 0..=255 over 1.5..3.6 mm, like `02:12` thresholds.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::analog::{MAX_MM, MIN_MM};
-use crate::binding::{self, Action, MODIFIERS, Mouse};
+use crate::binding::{self, Action, MODIFIERS, MacroMode, Mouse};
+use crate::macros::Event;
 
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
 /// without it a key resting at the point chatters on sensor noise.
@@ -127,6 +129,8 @@ pub struct Config {
     pub bind: [Option<Action>; 256],
     pub repeat_delay: Duration,
     pub repeat_interval: Duration,
+    /// Bodies the macro bindings play, by id.
+    pub macros: BTreeMap<u16, Vec<Event>>,
 }
 
 /// What the firmware's Fn layer does on V2 (Synapse defaults); an empty slice swallows the key.
@@ -160,6 +164,8 @@ fn press(a: Action, out: &mut Vec<Output>) {
         }
         Action::Mouse { button } => out.push(Output::Mouse { button, down: true }),
         Action::Media { media } => out.push(Output::Media(media)),
+        // Started by the engine, which keeps the macro's state.
+        Action::Macro { .. } => {}
     }
 }
 
@@ -170,13 +176,67 @@ fn release(a: Action, out: &mut Vec<Output>) {
             out.extend(bits(mods).rev().map(|m| Output::Key { key: m, down: false }));
         }
         Action::Mouse { button } => out.push(Output::Mouse { button, down: false }),
-        Action::Disabled | Action::Media { .. } => {}
+        Action::Disabled | Action::Media { .. } | Action::Macro { .. } => {}
     }
 }
 
 /// Modifier keys set in a HID modifier byte.
 fn bits(mods: u8) -> impl DoubleEndedIterator<Item = u8> {
     (0..8).filter(move |i| mods & (1 << i) != 0).map(|i| MODIFIERS[i])
+}
+
+/// A macro playing for the key that started it.
+struct Play {
+    key: u8,
+    events: Vec<Event>,
+    pos: usize,
+    /// When the next event is due.
+    at: Instant,
+    /// Passes left, the current one included; `None` loops.
+    passes: Option<u8>,
+    /// Keys and buttons the macro holds down, lifted if the engine stops mid-pass.
+    held: Vec<Output>,
+}
+
+impl Play {
+    fn run(&mut self, now: Instant, out: &mut Vec<Output>) {
+        while self.passes != Some(0) && self.at <= now {
+            let Some(&e) = self.events.get(self.pos) else {
+                self.pos = 0;
+                self.passes = self.passes.map(|n| n - 1);
+                // A loop without delays would never let the reader go.
+                self.at += Duration::from_millis(1);
+                continue;
+            };
+            self.pos += 1;
+            let o = match e {
+                Event::Delay { ms } => {
+                    self.at = now + Duration::from_millis(ms.into());
+                    continue;
+                }
+                Event::Key { key, down } => Output::Key { key, down },
+                Event::Mouse { button, down } => Output::Mouse { button, down },
+            };
+            if let Some(p) = pressed(o) {
+                if o == p {
+                    self.held.push(o);
+                } else {
+                    self.held.retain(|&h| h != p);
+                }
+            }
+            out.push(o);
+        }
+    }
+}
+
+/// The press of a key or button event; wheels have no release.
+fn pressed(o: Output) -> Option<Output> {
+    match o {
+        Output::Key { key, .. } => Some(Output::Key { key, down: true }),
+        Output::Mouse { button: Mouse::WheelUp | Mouse::WheelDown, .. } => None,
+        Output::Mouse { button, .. } => Some(Output::Mouse { button, down: true }),
+        _ => None,
+    }
 }
 
 pub struct Engine {
@@ -186,11 +246,12 @@ pub struct Engine {
     held: Vec<u8>,
     /// Key to repeat and when; like Windows, only the newest key repeats.
     repeat: Option<(u8, Instant)>,
+    plays: Vec<Play>,
 }
 
 impl Engine {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None }
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new() }
     }
 
     pub fn set_config(&mut self, cfg: Config) {
@@ -212,6 +273,9 @@ impl Engine {
         if !down {
             if let Some(a) = k.sent.take() {
                 release(a, out);
+                if let Action::Macro { mode: MacroMode::Hold, .. } = a {
+                    self.finish(key);
+                }
             }
             if self.repeat.is_some_and(|(r, _)| r == key) {
                 self.repeat = None;
@@ -228,8 +292,30 @@ impl Engine {
         };
         k.sent = Some(action);
         press(action, out);
-        if let Action::Key { .. } = action {
-            self.repeat = Some((key, now + self.cfg.repeat_delay));
+        match action {
+            Action::Key { .. } => self.repeat = Some((key, now + self.cfg.repeat_delay)),
+            Action::Macro { id, mode, count } => self.start(key, id, mode, count, now),
+            _ => {}
+        }
+    }
+
+    /// Like the firmware: a press while playing `Times` is ignored, while playing `Toggle` it stops.
+    fn start(&mut self, key: u8, id: u16, mode: MacroMode, count: u8, now: Instant) {
+        if self.plays.iter().any(|p| p.key == key) {
+            if mode == MacroMode::Toggle {
+                self.finish(key);
+            }
+            return;
+        }
+        let Some(events) = self.cfg.macros.get(&id) else { return };
+        let passes = (mode == MacroMode::Times).then_some(count.max(1));
+        self.plays.push(Play { key, events: events.clone(), pos: 0, at: now, passes, held: Vec::new() });
+    }
+
+    /// Stops the key's macro looping once the current pass ends.
+    fn finish(&mut self, key: u8) {
+        for p in self.plays.iter_mut().filter(|p| p.key == key && p.passes.is_none()) {
+            p.passes = Some(1);
         }
     }
 
@@ -240,6 +326,15 @@ impl Engine {
     }
 
     pub fn tick(&mut self, now: Instant) -> Vec<Output> {
+        let mut out = self.repeat_tick(now);
+        for p in &mut self.plays {
+            p.run(now, &mut out);
+        }
+        self.plays.retain(|p| p.passes != Some(0));
+        out
+    }
+
+    fn repeat_tick(&mut self, now: Instant) -> Vec<Output> {
         match self.repeat {
             Some((source, at)) if now >= at => {
                 // After a stall, repeat once and resume the cadence from now.
@@ -255,7 +350,7 @@ impl Engine {
     }
 
     pub fn deadline(&self) -> Option<Instant> {
-        self.repeat.map(|(_, at)| at)
+        self.repeat.map(|(_, at)| at).into_iter().chain(self.plays.iter().map(|p| p.at)).min()
     }
 
     /// Lifts every key the host holds down, for when the engine stops or loses the keyboard.
@@ -263,6 +358,13 @@ impl Engine {
         let mut out = Vec::new();
         for a in self.keys.iter().filter_map(|k| k.sent) {
             release(a, &mut out);
+        }
+        for p in self.plays.drain(..) {
+            out.extend(p.held.into_iter().rev().map(|o| match o {
+                Output::Key { key, .. } => Output::Key { key, down: false },
+                Output::Mouse { button, .. } => Output::Mouse { button, down: false },
+                o => o,
+            }));
         }
         self.keys = [KeyState::default(); 256];
         self.held.clear();
@@ -350,6 +452,7 @@ mod tests {
             bind: [None; 256],
             repeat_delay: Duration::from_millis(500),
             repeat_interval: Duration::from_millis(33),
+            macros: BTreeMap::new(),
         })
     }
 
@@ -513,5 +616,93 @@ mod tests {
         assert_eq!(parse_razer(&[0x04, 0x01, 0x55, 0, 0]), Some(vec![0x01, 0x55]));
         assert_eq!(parse_razer(&[0x04, 0, 0]), Some(vec![]));
         assert_eq!(parse_razer(&[0x07, 31, 9]), None);
+    }
+
+    const M: u16 = 7;
+
+    fn with_macro(mode: MacroMode, count: u8) -> Engine {
+        let mut e = bound(&[(A, Action::Macro { id: M, mode, count })]);
+        let ms = Event::Delay { ms: 10 };
+        e.cfg.macros.insert(M, vec![Event::Key { key: C, down: true }, ms, Event::Key { key: C, down: false }, ms]);
+        e
+    }
+
+    fn at(t: Instant, ms: u64) -> Instant {
+        t + Duration::from_millis(ms)
+    }
+
+    /// Presses A (`Some(true)`), releases it or leaves it, then ticks.
+    fn step_at(e: &mut Engine, t: Instant, down: Option<bool>) -> Vec<Output> {
+        let mut out = match down {
+            Some(true) => e.feed_depth(&depth(&[(A, 150)]), t),
+            Some(false) => e.feed_depth(&depth(&[]), t),
+            None => Vec::new(),
+        };
+        out.extend(e.tick(t));
+        out
+    }
+
+    #[test]
+    fn macro_plays_its_passes_with_delays() {
+        let (mut e, t) = (with_macro(MacroMode::Times, 2), Instant::now());
+        assert_eq!(step_at(&mut e, t, Some(true)), [key(C, true)]);
+        assert_eq!(e.deadline(), Some(at(t, 10)));
+        assert!(step_at(&mut e, at(t, 5), Some(false)).is_empty());
+        assert_eq!(step_at(&mut e, at(t, 10), None), [key(C, false)]);
+        assert_eq!(step_at(&mut e, at(t, 21), None), [key(C, true)]);
+        assert_eq!(step_at(&mut e, at(t, 31), None), [key(C, false)]);
+        assert!(step_at(&mut e, at(t, 60), None).is_empty());
+        assert_eq!(e.deadline(), None);
+    }
+
+    #[test]
+    fn a_press_while_playing_times_is_ignored() {
+        let (mut e, t) = (with_macro(MacroMode::Times, 1), Instant::now());
+        step_at(&mut e, t, Some(true));
+        step_at(&mut e, at(t, 1), Some(false));
+        assert!(step_at(&mut e, at(t, 2), Some(true)).is_empty());
+        assert_eq!(step_at(&mut e, at(t, 10), None), [key(C, false)]);
+        assert!(step_at(&mut e, at(t, 30), None).is_empty());
+    }
+
+    #[test]
+    fn hold_loops_until_release_and_finishes_the_pass() {
+        let (mut e, t) = (with_macro(MacroMode::Hold, 1), Instant::now());
+        step_at(&mut e, t, Some(true));
+        step_at(&mut e, at(t, 10), None);
+        assert_eq!(step_at(&mut e, at(t, 21), None), [key(C, true)]);
+        assert!(step_at(&mut e, at(t, 25), Some(false)).is_empty());
+        assert_eq!(step_at(&mut e, at(t, 31), None), [key(C, false)]);
+        assert!(step_at(&mut e, at(t, 100), None).is_empty());
+        assert_eq!(e.deadline(), None);
+    }
+
+    #[test]
+    fn toggle_stops_on_the_next_press() {
+        let (mut e, t) = (with_macro(MacroMode::Toggle, 1), Instant::now());
+        step_at(&mut e, t, Some(true));
+        step_at(&mut e, at(t, 1), Some(false));
+        step_at(&mut e, at(t, 10), None);
+        assert_eq!(step_at(&mut e, at(t, 21), None), [key(C, true)]);
+        assert!(step_at(&mut e, at(t, 22), Some(true)).is_empty());
+        assert_eq!(step_at(&mut e, at(t, 31), None), [key(C, false)]);
+        assert!(step_at(&mut e, at(t, 100), None).is_empty());
+    }
+
+    #[test]
+    fn release_all_lifts_what_a_macro_holds() {
+        let (mut e, t) = (with_macro(MacroMode::Hold, 1), Instant::now());
+        step_at(&mut e, t, Some(true));
+        assert_eq!(e.release_all(), [key(C, false)]);
+        assert_eq!(e.deadline(), None);
+    }
+
+    #[test]
+    fn a_macro_without_delays_yields_between_passes() {
+        let mut e = bound(&[(A, Action::Macro { id: M, mode: MacroMode::Hold, count: 1 })]);
+        e.cfg.macros.insert(M, vec![Event::Key { key: C, down: true }, Event::Key { key: C, down: false }]);
+        let t = Instant::now();
+        assert_eq!(step_at(&mut e, t, Some(true)), [key(C, true), key(C, false)]);
+        assert_eq!(e.deadline(), Some(at(t, 1)));
     }
 }

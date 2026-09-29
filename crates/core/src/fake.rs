@@ -30,6 +30,8 @@ pub struct FakeKeyboard {
     pub brightness: RefCell<BTreeMap<u8, u8>>,
     /// Custom frame rows of the temporary store: RGB bytes per row.
     pub frame: RefCell<BTreeMap<u8, Vec<u8>>>,
+    /// Macro bodies by id.
+    pub macros: RefCell<BTreeMap<u16, Vec<u8>>>,
     reply: RefCell<Report>,
 }
 
@@ -66,6 +68,7 @@ impl FakeKeyboard {
             effects: RefCell::new([(0, vec![0x03, 0, 0, 0]), (1, vec![0x03, 0, 0, 0])].into()),
             brightness: RefCell::new([(0, 0xF2), (1, 0xF2)].into()),
             frame: RefCell::new(BTreeMap::new()),
+            macros: RefCell::new(BTreeMap::new()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
     }
@@ -134,6 +137,32 @@ impl FakeKeyboard {
                 Some(&b) => (OK, vec![a[0], a[1], b]),
                 None => (FAIL, Vec::new()),
             },
+            (0x06, 0x03) => match self.macros.borrow_mut().remove(&u16::from_be_bytes([a[0], a[1]])) {
+                Some(_) => (OK, a[..2].to_vec()),
+                None => (FAIL, Vec::new()),
+            },
+            (0x06, 0x08) => {
+                let size = u32::from_be_bytes(a[2..6].try_into().unwrap()) as usize;
+                self.macros.borrow_mut().insert(u16::from_be_bytes([a[0], a[1]]), vec![0; size]);
+                (OK, a[..6].to_vec())
+            }
+            (0x06, 0x09) => {
+                let (off, len) = (u32::from_be_bytes(a[2..6].try_into().unwrap()) as usize, a[6] as usize);
+                let mut store = self.macros.borrow_mut();
+                match store.get_mut(&u16::from_be_bytes([a[0], a[1]])) {
+                    Some(body) if off + len <= body.len() => {
+                        body[off..off + len].copy_from_slice(&a[7..7 + len]);
+                        (OK, a[..7].to_vec())
+                    }
+                    _ => (FAIL, Vec::new()),
+                }
+            }
+            (0x06, 0x86) => {
+                let used: usize = self.macros.borrow().values().map(|b| crate::macros::footprint(b.len())).sum();
+                let free = (0x6FA78 - used as u32).to_be_bytes();
+                let count = (self.macros.borrow().len() as u16).to_be_bytes();
+                (OK, [&count[..], &[0, 0], &free, &free].concat())
+            }
             _ => (NOT_SUPPORTED, Vec::new()),
         }
     }
