@@ -11,7 +11,8 @@ use razer_core::layout as kb_layout;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
-use crate::device::{self, Device, LightingState, Status, Written, mm};
+use crate::device::{self, Device, LightingState, MacroState, Status, Written, mm};
+use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
 use crate::settings::{CloseAction, Rapid};
 use crate::{autostart, i18n, tray};
@@ -70,7 +71,7 @@ pub struct Actuation {
     unsaved: Vec<u8>,
     /// Rapid Trigger per key, from the app's settings.
     rapid: BTreeMap<u8, Rapid>,
-    /// `null` for a binding the app cannot show, such as a macro.
+    /// `null` for a binding the app cannot show, such as Hypershift.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
 }
@@ -159,6 +160,33 @@ pub async fn apply(
 #[tauri::command]
 pub async fn save(state: State<'_, AppState>, changes: Vec<(u8, f32)>, bindings: Vec<(u8, Action)>) -> Result<WriteResult, String> {
     state.device().save(&changes, &bindings).map(Into::into)
+}
+
+#[tauri::command]
+pub async fn macros(state: State<'_, AppState>) -> Result<MacroState, String> {
+    Ok(state.device().macros())
+}
+
+/// The macro's id, new for a new macro, and the library after the change.
+#[tauri::command]
+pub async fn set_macro(state: State<'_, AppState>, id: Option<u16>, name: String, events: Vec<Event>) -> Result<(u16, MacroState), String> {
+    let mut device = state.device();
+    let id = device.set_macro(id, name, events)?;
+    Ok((id, device.macros()))
+}
+
+#[tauri::command]
+pub async fn write_macro(state: State<'_, AppState>, id: u16) -> Result<MacroState, String> {
+    let mut device = state.device();
+    device.write_macro(id)?;
+    Ok(device.macros())
+}
+
+#[tauri::command]
+pub async fn delete_macro(state: State<'_, AppState>, id: u16) -> Result<MacroState, String> {
+    let mut device = state.device();
+    device.delete_macro(id)?;
+    Ok(device.macros())
 }
 
 #[tauri::command]

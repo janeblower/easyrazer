@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import type { Action, KeyView, Media, Mouse } from "../types";
+import type { Action, KeyView, Macro, MacroMode, Media, Mouse } from "../types";
 import { MEDIA, MODS, MOUSE, factory, keyName } from "../bindings";
 
 const props = defineProps<{
@@ -9,13 +9,17 @@ const props = defineProps<{
   keyId: number | null;
   action: Action | null;
   layout: KeyView[];
+  macros: Record<number, Macro>;
 }>();
 const emit = defineEmits<{ set: [action: Action] }>();
 const { t } = useI18n();
 
-const TYPES = ["key", "mouse", "media", "disabled"] as const;
+const TYPES = ["key", "mouse", "media", "macro", "disabled"] as const;
+const MODES: MacroMode[] = ["times", "hold", "toggle"];
 const type = computed(() => props.action?.type ?? "other");
 const keyAction = computed(() => (props.action?.type === "key" ? props.action : null));
+const macroAction = computed(() => (props.action?.type === "macro" ? props.action : null));
+const macroList = computed(() => Object.entries(props.macros).map(([id, m]) => ({ id: Number(id), name: m.name })));
 const targets = computed(() => props.layout.filter((k) => k.editable).map((k) => ({ key: k.key, name: keyName(k, t) })));
 const targetName = computed(() => targets.value.find((o) => o.key === keyAction.value?.key)?.name ?? "");
 
@@ -38,6 +42,11 @@ function setType(ty: (typeof TYPES)[number]) {
       emit("set", { type: "media", media: "play" });
       break;
     }
+    case "macro": {
+      const first = macroList.value[0];
+      if (first) emit("set", { type: "macro", id: first.id, mode: "times", count: 1 });
+      break;
+    }
     default: {
       emit("set", { type: "disabled" });
     }
@@ -49,6 +58,11 @@ function pickTarget(e: Event) {
   const name = input.value.trim().toLowerCase();
   const found = targets.value.find((o) => o.name.toLowerCase() === name);
   if (found && keyAction.value) emit("set", { ...keyAction.value, key: found.key });
+}
+
+function setMacro(change: Partial<{ id: number; mode: MacroMode; count: number }>) {
+  const a = macroAction.value;
+  if (a) emit("set", { ...a, ...change });
 }
 
 function setMod(bit: number, on: boolean) {
@@ -67,7 +81,8 @@ function setMod(bit: number, on: boolean) {
           :key="ty"
           class="seg-btn"
           :class="{ 'seg-on': keyId != null && type === ty }"
-          :disabled="keyId == null"
+          :disabled="keyId == null || (ty === 'macro' && macroList.length === 0)"
+          :title="ty === 'macro' && macroList.length === 0 ? $t('bindings.noMacros') : ''"
           @click="setType(ty)"
         >
           {{ $t(`bindings.types.${ty}`) }}
@@ -109,6 +124,30 @@ function setMod(bit: number, on: boolean) {
         <option v-for="b in MOUSE" :key="b" :value="b">{{ $t(`bindings.mouse.${b}`) }}</option>
       </select>
     </div>
+    <template v-else-if="macroAction">
+      <div class="field">
+        <span class="field-label">{{ $t("bindings.macro") }}</span>
+        <select :value="macroAction.id" @change="setMacro({ id: Number(value($event)) })">
+          <option v-if="!(macroAction.id in macros)" :value="macroAction.id">#{{ macroAction.id }}</option>
+          <option v-for="m in macroList" :key="m.id" :value="m.id">{{ m.name }}</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="field-label">{{ $t("bindings.play") }}</span>
+        <select :value="macroAction.mode" @change="setMacro({ mode: value($event) as MacroMode, count: macroAction.count || 1 })">
+          <option v-for="m in MODES" :key="m" :value="m">{{ $t(`bindings.modes.${m}`) }}</option>
+        </select>
+        <input
+          v-if="macroAction.mode === 'times'"
+          type="number"
+          min="1"
+          max="255"
+          class="w-[60px]"
+          :value="macroAction.count"
+          @change="setMacro({ count: Math.min(255, Math.max(1, Math.round(Number(value($event)) || 1))) })"
+        />
+      </div>
+    </template>
     <div v-else-if="action?.type === 'media'" class="field">
       <span class="field-label">{{ $t("bindings.media") }}</span>
       <select :value="action.media" @change="emit('set', { type: 'media', media: value($event) as Media })">

@@ -9,6 +9,9 @@ use crate::transport::{Error, Transport};
 const FN_DISABLED: u8 = 0x00;
 const FN_MOUSE: u8 = 0x01;
 const FN_KEY: u8 = 0x02;
+const FN_MACRO_TIMES: u8 = 0x03;
+const FN_MACRO_HOLD: u8 = 0x04;
+const FN_MACRO_TOGGLE: u8 = 0x05;
 const FN_CONSUMER: u8 = 0x0A;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +22,17 @@ pub enum Action {
     Key { key: u8, mods: u8 },
     Mouse { button: Mouse },
     Media { media: Media },
+    /// Plays the body stored under `id`; `count` passes for `Times`.
+    Macro { id: u16, mode: MacroMode, count: u8 },
+}
+
+/// A press during `Times` is ignored; `Hold` and `Toggle` finish the pass they stop in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MacroMode {
+    Times,
+    Hold,
+    Toggle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +87,14 @@ const CONSUMER: [(Media, u16); 7] = [
     (Media::VolumeDown, 0xEA),
 ];
 
+pub(crate) fn usage(key: u8) -> Option<u8> {
+    USAGES.iter().find(|&&(k, _)| k == key).map(|&(_, u)| u)
+}
+
+pub(crate) fn mouse_code(button: Mouse) -> u8 {
+    MOUSE.iter().find(|&&(m, _)| m == button).map_or(0, |&(_, c)| c)
+}
+
 pub fn factory(key: u8) -> Action {
     Action::Key { key, mods: 0 }
 }
@@ -81,16 +103,24 @@ pub fn factory(key: u8) -> Action {
 pub fn encode(a: Action) -> Option<(u8, Vec<u8>)> {
     Some(match a {
         Action::Disabled => (FN_DISABLED, Vec::new()),
-        Action::Key { key, mods } => (FN_KEY, vec![mods, USAGES.iter().find(|&&(k, _)| k == key)?.1]),
-        Action::Mouse { button } => (FN_MOUSE, vec![MOUSE.iter().find(|&&(m, _)| m == button)?.1]),
+        Action::Key { key, mods } => (FN_KEY, vec![mods, usage(key)?]),
+        Action::Mouse { button } => (FN_MOUSE, vec![mouse_code(button)]),
         Action::Media { media } => {
             let u = CONSUMER.iter().find(|&&(m, _)| m == media)?.1;
             (FN_CONSUMER, u.to_be_bytes().to_vec())
         }
+        Action::Macro { id, mode, count } => {
+            let [hi, lo] = id.to_be_bytes();
+            match mode {
+                MacroMode::Times => (FN_MACRO_TIMES, vec![hi, lo, count]),
+                MacroMode::Hold => (FN_MACRO_HOLD, vec![hi, lo]),
+                MacroMode::Toggle => (FN_MACRO_TOGGLE, vec![hi, lo]),
+            }
+        }
     })
 }
 
-/// `None` for what the app does not edit: macros, Hypershift, profiles, service keys.
+/// `None` for what the app does not edit: Hypershift, profiles, service keys.
 pub fn decode(fn_id: u8, data: &[u8]) -> Option<Action> {
     match (fn_id, data) {
         (FN_DISABLED, _) => Some(Action::Disabled),
@@ -102,6 +132,9 @@ pub fn decode(fn_id: u8, data: &[u8]) -> Option<Action> {
             let u = u16::from_be_bytes([hi, lo]);
             CONSUMER.iter().find(|&&(_, c)| c == u).map(|&(media, _)| Action::Media { media })
         }
+        (FN_MACRO_TIMES, &[hi, lo, count]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Times, count }),
+        (FN_MACRO_HOLD, &[hi, lo]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Hold, count: 1 }),
+        (FN_MACRO_TOGGLE, &[hi, lo]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Toggle, count: 1 }),
         _ => None,
     }
 }
@@ -169,6 +202,9 @@ mod tests {
             Action::Key { key: 48, mods: 0x01 },
             Action::Mouse { button: Mouse::WheelDown },
             Action::Media { media: Media::VolumeUp },
+            Action::Macro { id: 0x8001, mode: MacroMode::Times, count: 3 },
+            Action::Macro { id: 2, mode: MacroMode::Hold, count: 1 },
+            Action::Macro { id: 2, mode: MacroMode::Toggle, count: 1 },
         ];
         for a in all {
             let (id, data) = encode(a).unwrap();
@@ -176,11 +212,13 @@ mod tests {
         }
         assert_eq!(encode(Action::Mouse { button: Mouse::Middle }), Some((FN_MOUSE, vec![0x03])));
         assert_eq!(encode(Action::Media { media: Media::Play }), Some((FN_CONSUMER, vec![0x00, 0xCD])));
+        let m = Action::Macro { id: 0x0102, mode: MacroMode::Times, count: 1 };
+        assert_eq!(encode(m), Some((FN_MACRO_TIMES, vec![0x01, 0x02, 0x01])));
     }
 
     #[test]
     fn unknown_bindings_are_not_decoded() {
-        assert_eq!(decode(0x03, &[0x00, 0x01, 0x01]), None);
+        assert_eq!(decode(0x0F, &[0x00, 0x01]), None);
         assert_eq!(decode(0x11, &[0x01]), None);
         assert_eq!(decode(FN_KEY, &[0x00, 0x68]), None);
         assert_eq!(encode(factory(200)), None);

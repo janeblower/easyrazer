@@ -31,8 +31,31 @@ export type Mouse = "left" | "right" | "middle" | "back" | "forward" | "wheel_up
 export type Media = "play" | "prev" | "next" | "stop" | "mute" | "volume_up" | "volume_down";
 
 // `key` is a fwID; `mods` is the HID modifier byte, bit 0 left Ctrl to bit 3 left Win.
+export type MacroMode = "times" | "hold" | "toggle";
+
 export type Action =
-  { type: "disabled" } | { type: "key"; key: number; mods: number } | { type: "mouse"; button: Mouse } | { type: "media"; media: Media };
+  | { type: "disabled" }
+  | { type: "key"; key: number; mods: number }
+  | { type: "mouse"; button: Mouse }
+  | { type: "media"; media: Media }
+  | { type: "macro"; id: number; mode: MacroMode; count: number };
+
+// A wheel turns on `down` and ignores the release.
+export type MacroEvent =
+  { type: "key"; key: number; down: boolean } | { type: "mouse"; button: Mouse; down: boolean } | { type: "delay"; ms: number };
+
+export interface Macro {
+  name: string;
+  events: MacroEvent[];
+  // The keyboard's flash holds these events.
+  written: boolean;
+}
+
+export interface MacroState {
+  macros: Record<number, Macro>;
+  // Free bytes in the keyboard's macro store; null without a keyboard.
+  free: number | null;
+}
 
 export type BindResult =
   { status: "ok" | "unconfirmed"; key: number; action: Action | null } | { status: "error"; key: number; message: string };
@@ -54,7 +77,7 @@ export interface Actuation {
   values: KeyMap<number>;
   unsaved: number[];
   rapid: KeyMap<Rapid>;
-  // null: a binding the app does not edit, such as a macro.
+  // null: a binding the app does not edit, such as Hypershift.
   bindings: KeyMap<Action | null>;
   unsaved_bindings: number[];
 }
