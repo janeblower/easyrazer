@@ -3,12 +3,24 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import type { Action, Actuation, AppSettings, CloseAction, Status as DeviceStatus, KeyMap, KeyView, Rapid, WriteResult } from "./types";
+import type {
+  Action,
+  Actuation,
+  AppSettings,
+  CloseAction,
+  Status as DeviceStatus,
+  KeyMap,
+  KeyView,
+  MacroState,
+  Rapid,
+  WriteResult,
+} from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
 import KeysCard from "./components/KeysCard.vue";
 import ActuationCard from "./components/ActuationCard.vue";
 import BindingCard from "./components/BindingCard.vue";
-import { common, factory, sameAction, shortLabel } from "./bindings";
+import MacroEditor from "./components/MacroEditor.vue";
+import { common, factory, keyName, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
@@ -32,7 +44,8 @@ const bindBase = ref<KeyMap<Action | null>>({}); // as last read or applied
 const bindEdits = ref<KeyMap<Action>>({}); // not applied yet
 const bindErrors = ref<KeyMap<string>>({});
 const bindUnsaved = ref(new Set<number>());
-const section = ref<"actuation" | "bindings">("actuation");
+const section = ref<"actuation" | "bindings" | "macros">("actuation");
+const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
@@ -122,12 +135,22 @@ const mapValues = computed(() => {
       if (mm != null) out[k] = mm.toFixed(1);
     } else if (k in bindBase.value || k in bindEdits.value) {
       const a = bindingOf(k);
-      if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t);
+      if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t, macroState.value?.macros);
     }
   }
   return out;
 });
 const mapEdited = computed(() => new Set(Object.keys(section.value === "actuation" ? edits.value : bindEdits.value).map(Number)));
+
+// Keys each macro is bound to, applied or not.
+const macroKeys = computed(() => {
+  const out = new Map<number, string[]>();
+  for (const k of layout.value) {
+    const a = bindingOf(k.key);
+    if (a?.type === "macro") out.set(a.id, [...(out.get(a.id) ?? []), keyName(k, t)]);
+  }
+  return out;
+});
 
 function onSplit(on: boolean) {
   splitOn.value = on;
@@ -140,6 +163,14 @@ function showError(e: unknown) {
   appError.value = String(e);
   clearTimeout(errorTimer);
   errorTimer = setTimeout(() => (appError.value = ""), 10_000);
+}
+
+async function loadMacros() {
+  try {
+    macroState.value = await invoke<MacroState>("macros");
+  } catch (error) {
+    showError(error);
+  }
 }
 
 async function load() {
@@ -162,6 +193,7 @@ async function load() {
     bindErrors.value = {};
     loadedProfile = profile;
     message.value = "";
+    await loadMacros();
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -337,6 +369,7 @@ onMounted(async () => {
     message.value = String(error);
   }
   layout.value = await invoke<KeyView[]>("layout");
+  await loadMacros();
   unlistenStatus = await listen<DeviceStatus>("status", (e) => {
     void onStatus(e.payload);
   });
@@ -381,7 +414,7 @@ onUnmounted(() => {
     <template v-if="tab === 'keys'">
       <span class="inline-flex self-start">
         <button
-          v-for="s in ['actuation', 'bindings'] as const"
+          v-for="s in ['actuation', 'bindings', 'macros'] as const"
           :key="s"
           class="seg-btn"
           :class="{ 'seg-on': section === s }"
@@ -390,7 +423,16 @@ onUnmounted(() => {
           {{ $t(`keys.${s}`) }}
         </button>
       </span>
+      <MacroEditor
+        v-if="section === 'macros'"
+        :state="macroState"
+        :layout="layout"
+        :bound="macroKeys"
+        :writable="writable"
+        @update="(s) => (macroState = s)"
+      />
       <KeyboardMap
+        v-if="section !== 'macros'"
         v-model:selection="selection"
         :layout="layout"
         :values="mapValues"
@@ -402,6 +444,7 @@ onUnmounted(() => {
         :single="section === 'bindings'"
       />
       <KeysCard
+        v-if="section !== 'macros'"
         :count="selection.size"
         :dirty="dirty"
         :can-apply="canApply"
@@ -427,7 +470,14 @@ onUnmounted(() => {
           @release="(v) => setRapid((r) => ({ ...r, release: v }))"
           @split="onSplit"
         />
-        <BindingCard v-else :key-id="bindKey" :action="bindKey == null ? null : bindingOf(bindKey)" :layout="layout" @set="setBinding" />
+        <BindingCard
+          v-else
+          :key-id="bindKey"
+          :action="bindKey == null ? null : bindingOf(bindKey)"
+          :layout="layout"
+          :macros="macroState?.macros ?? {}"
+          @set="setBinding"
+        />
       </KeysCard>
     </template>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />

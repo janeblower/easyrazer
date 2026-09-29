@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use razer_core::binding::Action;
 use razer_core::lighting::{Look, Rgb};
+use razer_core::macros::Event;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -30,6 +31,15 @@ pub struct Rapid {
     pub release: f32,
 }
 
+/// A macro of the app's library; the keyboard keeps only its body, under the library's id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Macro {
+    pub name: String,
+    pub events: Vec<Event>,
+    /// The keyboard's flash holds these events.
+    pub written: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -41,6 +51,7 @@ pub struct Settings {
     pub bindings: BTreeMap<u8, Action>,
     /// Rapid Trigger per fwID; works only in driver mode.
     pub rapid: BTreeMap<u8, Rapid>,
+    pub macros: BTreeMap<u16, Macro>,
     /// The host engine types instead of the firmware.
     pub driver_mode: bool,
     /// Last painted custom layout, kept while another effect is applied.
@@ -59,7 +70,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, actuation: BTreeMap::new(), bindings: BTreeMap::new(), rapid: BTreeMap::new(), driver_mode: false, custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
+        Self { applied: None, actuation: BTreeMap::new(), bindings: BTreeMap::new(), rapid: BTreeMap::new(), macros: BTreeMap::new(), driver_mode: false, custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
     }
 }
 
@@ -127,6 +138,7 @@ mod tests {
             actuation: [(31, 2.4), (32, 3.6)].into(),
             bindings: [(31, Action::Disabled), (32, Action::Key { key: 48, mods: 1 })].into(),
             rapid: [(31, Rapid { enabled: true, press: 0.4, release: 0.2 })].into(),
+            macros: [(0x8000, Macro { name: "ab".into(), events: vec![Event::Key { key: 31, down: true }, Event::Delay { ms: 20 }], written: true })].into(),
             driver_mode: true,
             custom: Some([(31, [1, 2, 3]), (202, [4, 5, 6])].into()),
             confirm_write: false,

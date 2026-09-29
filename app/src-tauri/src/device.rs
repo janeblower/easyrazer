@@ -15,13 +15,14 @@ use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
+use razer_core::macros::{self, Event};
 use razer_core::{control, keymap, layout};
 use serde::Serialize;
 
 use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, Sink};
 use crate::i18n;
-use crate::settings::{self, Rapid, Settings};
+use crate::settings::{self, Macro, Rapid, Settings};
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -39,6 +40,13 @@ pub struct Status {
     pub unsupported: Option<u16>,
     /// Restoring applied settings after a connect failed; reported once.
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MacroState {
+    pub macros: BTreeMap<u16, Macro>,
+    /// Free bytes in the keyboard's macro store.
+    pub free: Option<u32>,
 }
 
 /// Keys after a write, and the keys a replug would reset.
@@ -212,8 +220,21 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         let host = self.engine.is_some();
+        let unwritten = self.msg("backend.macroUnwritten");
+        let written = written_macros(&self.settings);
         let (t, _) = self.keyboard()?;
-        let bound = if host { bindings.iter().map(|&(k, a)| (k, host_bound(k, a))).collect() } else { binding::apply(t, actuation::LIVE, bindings) };
+        let bound: Vec<(u8, Outcome)> = if host {
+            bindings.iter().map(|&(k, a)| (k, host_bound(k, a))).collect()
+        } else {
+            // The firmware plays only bodies in its flash.
+            bindings
+                .iter()
+                .flat_map(|&(k, a)| match a {
+                    Action::Macro { id, .. } if !written.contains(&id) => vec![(k, Outcome::Failed(Error::BadArgument(unwritten.clone())))],
+                    _ => binding::apply(t, actuation::LIVE, &[(k, a)]),
+                })
+                .collect()
+        };
         let done: Vec<(u8, Action)> = bindings.iter().copied().filter(|(k, _)| saved(&bound).any(|s| s == *k)).collect();
         let differ = control::active_profile(t).and_then(|p| binding::unsaved(t, p, &done));
         let unsaved_bound: Vec<(u8, Action)> = match differ {
@@ -251,14 +272,24 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         let (backed_up, host) = (self.backed_up, self.engine.is_some());
+        // A key bound in the flash must find its macro there too.
+        let bodies = bodies_to_write(&self.settings, &bindings);
         let (t, _) = self.keyboard()?;
         let profile = control::active_profile(t).map_err(|e| e.to_string())?;
         if !backed_up {
             let all = actuation::read_all(t, profile, &editable_keys(), |_| {}).map_err(|e| e.to_string())?;
             write_backup(&actuation::format_backup(profile, &all))?;
         }
+        for (id, body) in &bodies {
+            macros::write(t, *id, body).map_err(|e| e.to_string())?;
+        }
         let results = actuation::save(t, profile, &changes);
         let bound = binding::save(t, profile, &bindings, !host);
+        for (id, _) in bodies {
+            if let Some(m) = self.settings.macros.get_mut(&id) {
+                m.written = true;
+            }
+        }
         self.backed_up = true;
         self.note(&results);
         self.note(&bound);
@@ -416,7 +447,8 @@ impl Device {
             }
         }
         let thresholds = self.live.iter().flatten().map(|(&k, a)| (k, a.threshold_low)).collect();
-        let cfg = engine_config(&thresholds, &self.bindings(), &self.settings.rapid, engine::repeat_timing());
+        let mut cfg = engine_config(&thresholds, &self.bindings(), &self.settings.rapid, engine::repeat_timing());
+        cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
             return;
@@ -444,6 +476,57 @@ impl Device {
         {
             self.restore();
         }
+    }
+
+    /// The library and the free flash; `None` without a keyboard to ask.
+    pub fn macros(&mut self) -> MacroState {
+        let free = match (self.synapse, self.connect()) {
+            (false, Some((t, _))) => macros::free(t).ok(),
+            _ => None,
+        };
+        MacroState { macros: self.settings.macros.clone(), free }
+    }
+
+    /// Stores a macro in the library, a new one under a fresh id; the engine plays it at once.
+    pub fn set_macro(&mut self, id: Option<u16>, name: String, events: Vec<Event>) -> Result<u16, String> {
+        if macros::encode(&events).is_none() {
+            return Err(format!("cannot encode {events:?}"));
+        }
+        let id = id.unwrap_or_else(|| next_macro_id(&self.settings.macros));
+        let written = self.settings.macros.get(&id).is_some_and(|m| m.written && m.events == events);
+        self.settings.macros.insert(id, Macro { name, events, written });
+        settings::save(&self.settings)?;
+        self.sync_engine();
+        Ok(id)
+    }
+
+    /// Puts the body into the keyboard's flash, replacing the one written before.
+    pub fn write_macro(&mut self, id: u16) -> Result<(), String> {
+        if self.check_synapse(synapse_running) {
+            return Err(self.msg("backend.synapseRunning"));
+        }
+        let body = self.settings.macros.get(&id).and_then(|m| macros::encode(&m.events)).ok_or_else(|| format!("no macro {id}"))?;
+        let (t, _) = self.keyboard()?;
+        macros::write(t, id, &body).map_err(|e| e.to_string())?;
+        if let Some(m) = self.settings.macros.get_mut(&id) {
+            m.written = true;
+        }
+        settings::save(&self.settings)
+    }
+
+    /// Removes the macro from the library and its body from the flash.
+    pub fn delete_macro(&mut self, id: u16) -> Result<(), String> {
+        if self.settings.macros.get(&id).is_some_and(|m| m.written) {
+            if self.check_synapse(synapse_running) {
+                return Err(self.msg("backend.synapseRunning"));
+            }
+            let (t, _) = self.keyboard()?;
+            macros::delete(t, id).map_err(|e| e.to_string())?;
+        }
+        self.settings.macros.remove(&id);
+        settings::save(&self.settings)?;
+        self.sync_engine();
+        Ok(())
     }
 
     /// Fn+F11/F12 in driver mode; the firmware's own step is about a tenth.
@@ -494,6 +577,25 @@ fn saved(results: &[(u8, Outcome)]) -> impl Iterator<Item = u8> + '_ {
     results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k)
 }
 
+fn written_macros(s: &Settings) -> Vec<u16> {
+    s.macros.iter().filter(|(_, m)| m.written).map(|(&id, _)| id).collect()
+}
+
+/// Library macros the bindings play that the flash does not hold yet.
+fn bodies_to_write(s: &Settings, bindings: &[(u8, Action)]) -> Vec<(u16, Vec<u8>)> {
+    let mut ids: Vec<u16> = bindings.iter().filter_map(|&(_, a)| if let Action::Macro { id, .. } = a { Some(id) } else { None }).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| s.macros.get(&id).filter(|m| !m.written).and_then(|m| Some((id, macros::encode(&m.events)?))))
+        .collect()
+}
+
+/// Ids from `0x8000` up, away from the small ones Synapse is likely to take.
+fn next_macro_id(library: &BTreeMap<u16, Macro>) -> u16 {
+    library.keys().next_back().map_or(0x8000, |&id| id.max(0x7FFF) + 1)
+}
+
 /// Driver mode: nothing goes to the keyboard, the engine takes the binding as it is.
 fn host_bound(key: u8, a: Action) -> Outcome {
     match binding::encode(a) {
@@ -540,7 +642,7 @@ fn engine_config(
     rapid: &BTreeMap<u8, Rapid>,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval };
+    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new() };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
@@ -733,6 +835,24 @@ mod tests {
         lighting::set_look(t, d, Store::Temporary, &original).unwrap();
         assert_eq!(read, Some(test));
         assert_eq!(lighting::get_look(t, d, Store::Saved).unwrap(), saved_before);
+    }
+
+    #[test]
+    fn saving_writes_the_bodies_of_bound_unwritten_macros() {
+        let m = |written| Macro { name: String::new(), events: vec![Event::Delay { ms: 5 }], written };
+        let s = Settings { macros: [(1, m(true)), (2, m(false)), (3, m(false))].into(), ..Default::default() };
+        let play = |id| Action::Macro { id, mode: binding::MacroMode::Times, count: 1 };
+        let b = [(31, play(1)), (32, play(2)), (33, play(2)), (18, play(9)), (19, Action::Disabled)];
+        assert_eq!(bodies_to_write(&s, &b), [(2, vec![0x11, 5])]);
+        assert_eq!(written_macros(&s), [1]);
+    }
+
+    #[test]
+    fn macro_ids_start_high_and_grow() {
+        let m = || Macro { name: String::new(), events: Vec::new(), written: false };
+        assert_eq!(next_macro_id(&BTreeMap::new()), 0x8000);
+        assert_eq!(next_macro_id(&[(3, m())].into()), 0x8000);
+        assert_eq!(next_macro_id(&[(3, m()), (0x8004, m())].into()), 0x8005);
     }
 
     #[test]
