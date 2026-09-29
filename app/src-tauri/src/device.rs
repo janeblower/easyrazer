@@ -109,7 +109,7 @@ impl Device {
         self.control.is_some()
     }
 
-    /// Brings back what was applied but not saved: the keyboard forgets it on unplug, Synapse overwrites it.
+    /// Brings back what was applied but not saved: the keyboard forgets it on unplug and on a mode switch, Synapse overwrites it.
     fn restore(&mut self) {
         let Some((t, d)) = &self.control else { return };
         let mut errors = Vec::new();
@@ -164,11 +164,16 @@ impl Device {
         let running = self.engine.is_some();
         let Some((t, spec)) = &self.control else { unreachable!() };
         let mut mode = control::mode(t).ok();
-        if should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok() {
+        let released = should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok();
+        if released {
             mode = control::mode(t).ok();
         }
         let profile = control::active_profile(t).ok();
-        Status { device: true, synapse, mode, profile, model: Some(spec.name.clone()), unsupported: None, error }
+        let model = Some(spec.name.clone());
+        if released {
+            self.restore();
+        }
+        Status { device: true, synapse, mode, profile, model, unsupported: None, error }
     }
 
     /// Press points the keyboard types with now, and the keys a replug would reset.
@@ -369,7 +374,10 @@ impl Device {
         let started = EngineHandle::start(&self.api, d.pid, cfg, sink)
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
-            Ok(h) => self.engine = Some(h),
+            Ok(h) => {
+                self.engine = Some(h);
+                self.restore();
+            }
             Err(e) => self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e)])),
         }
     }
@@ -379,8 +387,9 @@ impl Device {
         if self.engine.take().is_some()
             && !self.synapse
             && let Some((t, _)) = &self.control
+            && control::set_hardware_mode(t).is_ok()
         {
-            let _ = control::set_hardware_mode(t);
+            self.restore();
         }
     }
 
