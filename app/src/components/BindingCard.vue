@@ -49,8 +49,6 @@ function pickTarget(e: Event) {
   const name = input.value.trim().toLowerCase();
   const found = targets.value.find((o) => o.name.toLowerCase() === name);
   if (found && keyAction.value) emit("set", { ...keyAction.value, key: found.key });
-  // Not a key from the list: show the current one again.
-  else input.value = targetName.value;
 }
 
 function setMod(bit: number, on: boolean) {
@@ -84,9 +82,10 @@ function setMod(bit: number, on: boolean) {
         <input
           :value="targetName"
           list="bind-targets"
-          :placeholder="$t('bindings.search')"
-          @focus="($event.target as HTMLInputElement).select()"
+          :placeholder="targetName || $t('bindings.search')"
+          @focus="($event.target as HTMLInputElement).value = ''"
           @change="pickTarget"
+          @blur="($event.target as HTMLInputElement).value = targetName"
         />
         <datalist id="bind-targets">
           <option v-for="o in targets" :key="o.key" :value="o.name" />
