@@ -148,6 +148,11 @@ pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(
 }
 
 #[tauri::command]
+pub async fn set_driver_mode(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.device().set_driver_mode(on)
+}
+
+#[tauri::command]
 pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
     state.device().set_dynamic_lighting(on)
 }

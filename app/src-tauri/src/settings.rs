@@ -36,8 +36,10 @@ pub struct Settings {
     pub applied: Option<Look>,
     /// Press points (fwID -> mm) applied to the live profile but not saved, restored on every connect.
     pub actuation: BTreeMap<u8, f32>,
-    /// Rapid Trigger per fwID; the host engine runs while any key has it on.
+    /// Rapid Trigger per fwID; works only in driver mode.
     pub rapid: BTreeMap<u8, Rapid>,
+    /// The host engine types instead of the firmware.
+    pub driver_mode: bool,
     /// Last painted custom layout, kept while another effect is applied.
     pub custom: Option<BTreeMap<u8, Rgb>>,
     /// Ask before writing the keyboard's flash.
@@ -54,7 +56,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { applied: None, actuation: BTreeMap::new(), rapid: BTreeMap::new(), custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
+        Self { applied: None, actuation: BTreeMap::new(), rapid: BTreeMap::new(), driver_mode: false, custom: None, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None }
     }
 }
 
@@ -121,6 +123,7 @@ mod tests {
             applied: Some(Look { effect: Effect { name: "static".into(), rgb1: Some([1, 2, 3]), ..Default::default() }, brightness: 9 }),
             actuation: [(31, 2.4), (32, 3.6)].into(),
             rapid: [(31, Rapid { enabled: true, press: 0.4, release: 0.2 })].into(),
+            driver_mode: true,
             custom: Some([(31, [1, 2, 3]), (202, [4, 5, 6])].into()),
             confirm_write: false,
             close_action: CloseAction::Tray,

@@ -6,6 +6,7 @@ export interface Status {
   device: boolean;
   synapse: boolean;
   mode: number | null;
+  driver_mode: boolean;
   profile: number | null;
   model: string | null;
   unsupported: number | null;

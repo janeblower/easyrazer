@@ -1,6 +1,11 @@
 {
   "language": { "name": "English" },
   "tabs": { "actuation": "Actuation", "lighting": "Lighting", "settings": "Settings" },
+  "mode": {
+    "hw": "HW",
+    "driver": "Driver",
+    "hint": "HW: the keyboard types by itself. Driver: EasyRazer types for it, Rapid Trigger works; the keyboard types only while the app runs."
+  },
   "footer": "EasyRazer is an unofficial project, not affiliated with Razer Inc.",
   "common": {
     "selectAll": "Select all",
@@ -22,13 +27,15 @@
     "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
     "applied": "Applied until the keyboard is unplugged",
     "saved": "Saved to the keyboard",
-    "unsavedKey": "Applied but not saved to the keyboard"
+    "unsavedKey": "Applied but not saved to the keyboard",
+    "hwRange": "In HW mode the keyboard limits it to 1.62–3.56 mm"
   },
   "rapid": {
     "title": "Rapid Trigger",
     "press": "Press",
     "release": "Release",
-    "split": "Separate press and release"
+    "split": "Separate press and release",
+    "hwOnly": "(not available in HW mode)"
   },
   "lighting": {
     "groups": {

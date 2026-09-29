@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 
 export interface RapidView {
@@ -16,6 +17,7 @@ const props = defineProps<{
   canApply: boolean;
   canSave: boolean;
   busy: boolean;
+  driver: boolean;
 }>();
 const emit = defineEmits<{
   set: [mm: number];
@@ -33,6 +35,7 @@ const { t } = useI18n();
 
 const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10;
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
+const rtOn = computed(() => props.driver && props.rapid.enabled === true);
 const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : t("actuation.mm", { v: v.toFixed(1) }));
 </script>
 
@@ -59,6 +62,7 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
         />
         <span class="text-xs text-muted">3.6</span>
         <span class="text-sm text-center min-w-[60px]">{{ label(value) }}</span>
+        <span v-if="!driver" class="text-xs text-muted text-center max-w-[140px]">{{ $t("actuation.hwRange") }}</span>
       </div>
       <img
         src="/switch.gif"
@@ -72,10 +76,11 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
             type="checkbox"
             :checked="rapid.enabled === true"
             :indeterminate="count > 0 && rapid.enabled === null"
-            :disabled="!count"
+            :disabled="!count || !driver"
             @change="emit('rapid', checked($event))"
           />
           {{ $t("rapid.title") }}
+          <span v-if="!driver" class="text-xs text-muted">{{ $t("rapid.hwOnly") }}</span>
         </label>
         <div class="flex gap-6">
           <div class="flex flex-col gap-1 items-center">
@@ -88,7 +93,7 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
               max="1"
               step="0.1"
               :value="rapid.press ?? 0.4"
-              :disabled="rapid.enabled !== true"
+              :disabled="!rtOn"
               @input="emit('press', mm($event))"
             />
             <span class="text-xs text-muted">1.0</span>
@@ -104,7 +109,7 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
               max="1"
               step="0.1"
               :value="rapid.release ?? 0.4"
-              :disabled="rapid.enabled !== true"
+              :disabled="!rtOn"
               @input="emit('release', mm($event))"
             />
             <span class="text-xs text-muted">1.0</span>
@@ -112,7 +117,7 @@ const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mix
           </div>
         </div>
         <label class="text-xs flex gap-2 items-center">
-          <input type="checkbox" :checked="split" :disabled="rapid.enabled !== true" @change="emit('split', checked($event))" />
+          <input type="checkbox" :checked="split" :disabled="!rtOn" @change="emit('split', checked($event))" />
           {{ $t("rapid.split") }}
         </label>
       </div>
