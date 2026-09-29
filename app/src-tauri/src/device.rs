@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn restore_reports_keys_that_were_not_applied() {
-        let a = |t| KeyAssignment { profile: 0, key: 31, mode: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
+        let a = |t| KeyAssignment { profile: 0, key: 31, layer: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
         assert_eq!(restore_error("ru", &[(31, Outcome::Ok(a(0)))]), None);
         let e = restore_error("ru", &[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
         assert_eq!(e.as_deref(), Some("Не удалось вернуть точки срабатывания клавиш: S, W"));

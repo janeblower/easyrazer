@@ -2,9 +2,11 @@
 //!
 //! The newer multi-key actuation and rapid trigger commands (`02:19`/`02:1A`) answer
 //! "not supported" on this device; actuation lives inside the key assignment instead.
-//! Layout: `[profile, key, mode, thresholdL, thresholdH, fnId, fnSize, fnData..]`.
+//! Layout: `[profile, key, layer, thresholdL, thresholdH, fnId, fnSize, fnData..]`.
 //! Thresholds map 0..=255 onto 1.5..=3.6 mm
 //! (`obmEngineKeyboard.convertUIThresholdToFWThreshold`); 0 is the 1.5 mm minimum.
+//! In hardware mode the firmware clamps the press point to 15..=250 (1.62..=3.56 mm) and the
+//! release point to 5..=press−10; in driver mode the host engine uses the raw values.
 
 use crate::packet::Command;
 
@@ -26,7 +28,7 @@ pub fn threshold_to_mm(t: u8) -> f32 {
 /// Key layer: normal or Hypershift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Mode {
+pub enum Layer {
     Normal = 0,
     Hypershift = 1,
 }
@@ -35,25 +37,25 @@ pub enum Mode {
 pub struct KeyAssignment {
     pub profile: u8,
     pub key: u8,
-    pub mode: u8,
+    pub layer: u8,
     pub threshold_low: u8,
     pub threshold_high: u8,
     pub fn_id: u8,
     pub fn_data: Vec<u8>,
 }
 
-pub fn get_args(profile: u8, key: u8, mode: Mode) -> [u8; 3] {
-    [profile, key, mode as u8]
+pub fn get_args(profile: u8, key: u8, layer: Layer) -> [u8; 3] {
+    [profile, key, layer as u8]
 }
 
 pub fn parse(data: &[u8]) -> Option<KeyAssignment> {
-    let [profile, key, mode, threshold_low, threshold_high, fn_id, fn_size, rest @ ..] = data else {
+    let [profile, key, layer, threshold_low, threshold_high, fn_id, fn_size, rest @ ..] = data else {
         return None;
     };
     Some(KeyAssignment {
         profile: *profile,
         key: *key,
-        mode: *mode,
+        layer: *layer,
         threshold_low: *threshold_low,
         threshold_high: *threshold_high,
         fn_id: *fn_id,
@@ -62,7 +64,7 @@ pub fn parse(data: &[u8]) -> Option<KeyAssignment> {
 }
 
 pub fn set_args(a: &KeyAssignment) -> Vec<u8> {
-    let mut v = vec![a.profile, a.key, a.mode, a.threshold_low, a.threshold_high, a.fn_id, a.fn_data.len() as u8];
+    let mut v = vec![a.profile, a.key, a.layer, a.threshold_low, a.threshold_high, a.fn_id, a.fn_data.len() as u8];
     v.extend(&a.fn_data);
     v
 }

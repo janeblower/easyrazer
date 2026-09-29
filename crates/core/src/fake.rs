@@ -43,7 +43,7 @@ impl FakeKeyboard {
                 let a = KeyAssignment {
                     profile,
                     key: k,
-                    mode: 0,
+                    layer: 0,
                     threshold_low: 0,
                     threshold_high: 0,
                     fn_id: 2,

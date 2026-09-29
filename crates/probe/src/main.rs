@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
-use razer_core::analog::{self, Mode};
+use razer_core::analog::{self, Layer};
 use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
 use razer_core::packet::{self, Command, Response};
@@ -176,19 +176,19 @@ fn key_label(id: u8) -> String {
 
 fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
     let mut out = String::new();
-    for mode in [Mode::Normal, Mode::Hypershift] {
+    for layer in [Layer::Normal, Layer::Hypershift] {
         for &key in keys {
             let r = exchange(
                 dev,
                 analog::GET_KEY_ASSIGNMENT,
                 analog::KEY_ASSIGNMENT_SIZE,
-                &analog::get_args(profile, key, mode),
+                &analog::get_args(profile, key, layer),
             )?;
             let a = analog::parse(r.data()).ok_or_else(|| format!("key {key}: short reply {}", hex(r.data())))?;
             let _ = writeln!(
                 out,
                 "{:?} {} low {:3} ({:.2} mm)  high {:3} ({:.2} mm)  fn {:02X} [{}]",
-                mode,
+                layer,
                 key_label(a.key),
                 a.threshold_low,
                 analog::threshold_to_mm(a.threshold_low),
@@ -243,7 +243,7 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
             dev,
             analog::GET_KEY_ASSIGNMENT,
             analog::KEY_ASSIGNMENT_SIZE,
-            &analog::get_args(profile, key, Mode::Normal),
+            &analog::get_args(profile, key, Layer::Normal),
         )?;
         analog::parse(r.data()).ok_or_else(|| format!("short reply {}", hex(r.data())))
     };
