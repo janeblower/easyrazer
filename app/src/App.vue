@@ -54,6 +54,7 @@ const tab = ref("keys");
 const closing = ref(false);
 const offering = ref(false);
 const asking = ref(false);
+const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
@@ -317,6 +318,30 @@ async function write(command: "apply" | "save", done: string) {
   if (failed) await refresh();
 }
 
+// In HW mode the firmware plays only macros in its flash.
+async function apply() {
+  const ids = driver.value
+    ? []
+    : Object.values(bindEdits.value).flatMap((a) => (a.type === "macro" && !macroState.value?.macros[a.id]?.written ? [a.id] : []));
+  macrosToWrite.value = [...new Set(ids)];
+  if (macrosToWrite.value.length === 0) await write("apply", "actuation.applied");
+}
+
+async function onWriteMacros() {
+  const ids = macrosToWrite.value;
+  macrosToWrite.value = [];
+  busy.value = true;
+  try {
+    for (const id of ids) macroState.value = await invoke<MacroState>("write_macro", { id });
+  } catch (error) {
+    message.value = String(error);
+    return;
+  } finally {
+    busy.value = false;
+  }
+  await write("apply", "actuation.applied");
+}
+
 async function save() {
   try {
     const settings = await invoke<AppSettings>("app_settings");
@@ -451,7 +476,7 @@ onUnmounted(() => {
         :can-save="canSave"
         :busy="busy"
         :single="section === 'bindings'"
-        @apply="write('apply', 'actuation.applied')"
+        @apply="apply"
         @save="save"
         @revert="revert"
         @select-all="selectAll"
@@ -483,6 +508,12 @@ onUnmounted(() => {
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
+    <ConfirmWrite
+      v-if="macrosToWrite.length > 0"
+      :text="$t('bindings.writeMacros', { names: macrosToWrite.map((id) => macroState?.macros[id]?.name ?? `#${id}`).join(', ') })"
+      @yes="onWriteMacros"
+      @no="macrosToWrite = []"
+    />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
     <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
     <footer class="text-xs text-muted">{{ $t("footer") }}</footer>

@@ -44,6 +44,7 @@
     "factory": "Default",
     "other": "Bound to something EasyRazer does not edit yet: Hypershift or a service function. Pick an action to replace it.",
     "macro": "Macro",
+    "writeMacros": "The macro “{names}” is not in the keyboard yet. In HW mode the keyboard plays only macros in its memory, so the macro has to be saved there for the binding to work. Its flash memory wears out with rewrites.",
     "noMacros": "Create a macro in Macros first",
     "play": "Play",
     "modes": { "times": "Times in a row", "hold": "While the key is held", "toggle": "Until pressed again" },
