@@ -10,12 +10,13 @@ interface Band {
   y1: number;
 }
 
-// With `colors` the keys are painted instead of showing press points.
+// With `colors` the keys are painted instead of showing `values`.
 const props = withDefaults(
   defineProps<{
     layout: KeyView[];
-    baseline?: KeyMap<number>;
-    edits?: KeyMap<number>;
+    /** Text under the label, and the keys whose value is not applied yet. */
+    values?: KeyMap<string>;
+    edited?: Set<number>;
     errors?: KeyMap<string>;
     unsaved?: Set<number>;
     colors?: KeyMap<Rgb>;
@@ -27,8 +28,8 @@ const props = withDefaults(
     fit?: boolean;
   }>(),
   {
-    baseline: () => ({}),
-    edits: () => ({}),
+    values: () => ({}),
+    edited: () => new Set(),
     errors: () => ({}),
     unsaved: () => new Set(),
     colors: undefined,
@@ -126,17 +127,13 @@ function keyStyle(k: KeyView) {
 }
 
 function valueClass(key: number) {
-  if (key in props.edits) return "font-semibold text-edited";
+  if (props.edited.has(key)) return "font-semibold text-edited";
   return props.unsaved.has(key) ? "text-accent" : "text-muted";
 }
 
 function title(key: number) {
   if (key in ZONES) return t(ZONES[key]);
   return props.errors[key] ?? (props.unsaved.has(key) ? t("actuation.unsavedKey") : undefined);
-}
-
-function value(key: number): number | undefined {
-  return props.edits[key] ?? props.baseline[key];
 }
 
 function point(e: PointerEvent): [number, number] {
@@ -216,9 +213,12 @@ function up(e: PointerEvent) {
             >RT</span
           >
         </span>
-        <span v-if="!colors && k.editable && value(k.key) != null" class="text-[11px] self-end" :class="valueClass(k.key)">{{
-          value(k.key)!.toFixed(1)
-        }}</span>
+        <span
+          v-if="!colors && k.editable && values[k.key] != null"
+          class="text-[11px] max-w-full truncate self-end"
+          :class="valueClass(k.key)"
+          >{{ values[k.key] }}</span
+        >
       </div>
       <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
     </div>

@@ -4,12 +4,15 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use razer_core::actuation::Outcome;
+use razer_core::binding::{self, Action};
 use razer_core::lighting::Look;
+use razer_core::keymap;
 use razer_core::layout as kb_layout;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use crate::device::{self, Device, LightingState, Status, Written, mm};
+use razer_core::analog::KeyAssignment;
 use crate::settings::{CloseAction, Rapid};
 use crate::{autostart, i18n, tray};
 
@@ -27,6 +30,8 @@ impl AppState {
 #[derive(Serialize)]
 pub struct KeyView {
     key: u8,
+    /// Key name from `keymap`, empty for lighting zones.
+    name: &'static str,
     label: &'static str,
     x: f32,
     y: f32,
@@ -38,7 +43,7 @@ pub struct KeyView {
 
 fn key_views(keys: Vec<kb_layout::LayoutKey>) -> Vec<KeyView> {
     keys.into_iter()
-        .map(|k| KeyView { key: k.key, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, shape: k.shape })
+        .map(|k| KeyView { key: k.key, name: keymap::name(k.key).unwrap_or(""), label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, shape: k.shape })
         .collect()
 }
 
@@ -51,18 +56,31 @@ pub enum ApplyResult {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum BindResult {
+    Ok { key: u8, action: Option<Action> },
+    Unconfirmed { key: u8, action: Option<Action> },
+    Error { key: u8, message: String },
+}
+
+#[derive(Serialize)]
 pub struct Actuation {
     values: BTreeMap<u8, f32>,
     /// Keys whose press point a replug would reset.
     unsaved: Vec<u8>,
     /// Rapid Trigger per key, from the app's settings.
     rapid: BTreeMap<u8, Rapid>,
+    /// `null` for a binding the app cannot show, such as a macro.
+    bindings: BTreeMap<u8, Option<Action>>,
+    unsaved_bindings: Vec<u8>,
 }
 
 #[derive(Serialize)]
 pub struct WriteResult {
     results: Vec<ApplyResult>,
     unsaved: Vec<u8>,
+    bindings: Vec<BindResult>,
+    unsaved_bindings: Vec<u8>,
 }
 
 impl From<Written> for WriteResult {
@@ -76,7 +94,17 @@ impl From<Written> for WriteResult {
                 Outcome::Failed(e) => ApplyResult::Error { key, message: e.to_string() },
             })
             .collect();
-        Self { results, unsaved: w.unsaved }
+        let action = |a: KeyAssignment| binding::decode(a.fn_id, &a.fn_data);
+        let bindings = w
+            .bindings
+            .into_iter()
+            .map(|(key, o)| match o {
+                Outcome::Ok(a) => BindResult::Ok { key, action: action(a) },
+                Outcome::Unconfirmed(a) => BindResult::Unconfirmed { key, action: action(a) },
+                Outcome::Failed(e) => BindResult::Error { key, message: e.to_string() },
+            })
+            .collect();
+        Self { results, unsaved: w.unsaved, bindings, unsaved_bindings: w.unsaved_bindings }
     }
 }
 
@@ -105,21 +133,32 @@ pub fn lighting_layout() -> Vec<KeyView> {
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
     let mut device = state.device();
-    let (all, unsaved) = device.read_all(|done, total| {
+    let all = device.read_all(|done, total| {
         let _ = app.emit("read-progress", (done, total));
     })?;
-    let rapid = device.settings().rapid.clone();
-    Ok(Actuation { values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(), unsaved, rapid })
+    let s = device.settings();
+    Ok(Actuation {
+        values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
+        unsaved: s.actuation.keys().copied().collect(),
+        rapid: s.rapid.clone(),
+        unsaved_bindings: s.bindings.keys().copied().collect(),
+        bindings: device.bindings(),
+    })
 }
 
 #[tauri::command]
-pub async fn apply(state: State<'_, AppState>, changes: Vec<(u8, f32)>, rapid: BTreeMap<u8, Rapid>) -> Result<WriteResult, String> {
-    state.device().apply(&changes, &rapid).map(Into::into)
+pub async fn apply(
+    state: State<'_, AppState>,
+    changes: Vec<(u8, f32)>,
+    rapid: BTreeMap<u8, Rapid>,
+    bindings: Vec<(u8, Action)>,
+) -> Result<WriteResult, String> {
+    state.device().apply(&changes, &rapid, &bindings).map(Into::into)
 }
 
 #[tauri::command]
-pub async fn save(state: State<'_, AppState>, changes: Vec<(u8, f32)>) -> Result<WriteResult, String> {
-    state.device().save(&changes).map(Into::into)
+pub async fn save(state: State<'_, AppState>, changes: Vec<(u8, f32)>, bindings: Vec<(u8, Action)>) -> Result<WriteResult, String> {
+    state.device().save(&changes, &bindings).map(Into::into)
 }
 
 #[tauri::command]

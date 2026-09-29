@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use hidapi::HidApi;
 use razer_core::actuation::{self, Outcome};
 use razer_core::analog::{self, KeyAssignment};
+use razer_core::binding::{self, Action};
 use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
@@ -40,10 +41,12 @@ pub struct Status {
     pub error: Option<String>,
 }
 
-/// Press points after a write, and the keys a replug would reset.
+/// Keys after a write, and the keys a replug would reset.
 pub struct Written {
     pub results: Vec<(u8, Outcome)>,
     pub unsaved: Vec<u8>,
+    pub bindings: Vec<(u8, Outcome)>,
+    pub unsaved_bindings: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -70,8 +73,8 @@ pub struct Device {
     restore_error: Option<String>,
     /// Runs in driver mode; the keyboard only reports depth meanwhile.
     engine: Option<EngineHandle>,
-    /// Live press points (`thrL`) read this connect, the engine's press points.
-    thresholds: Option<BTreeMap<u8, u8>>,
+    /// Live assignments read this connect and updated by writes: the engine's press points and bindings.
+    live: Option<BTreeMap<u8, KeyAssignment>>,
     sink: Option<Sink>,
 }
 
@@ -87,7 +90,7 @@ impl Device {
             last_spec: None,
             restore_error: None,
             engine: None,
-            thresholds: None,
+            live: None,
             sink: None,
         })
     }
@@ -97,7 +100,7 @@ impl Device {
         let alive = self.control.as_ref().is_some_and(|(t, _)| control::mode(t).is_ok());
         if !alive {
             self.engine = None;
-            self.thresholds = None;
+            self.live = None;
             self.control = None;
             let _ = self.api.refresh_devices();
             self.control = hid::open_control(&self.api).ok().flatten();
@@ -120,8 +123,13 @@ impl Device {
         {
             errors.push(i18n::tf(self.lang(), "backend.restoreLighting", &[("error", &e.to_string())]));
         }
-        let changes: Vec<(u8, f32)> = self.settings.actuation.iter().map(|(&k, &mm)| (k, mm)).collect();
-        errors.extend(restore_error(self.lang(), &actuation::apply(t, actuation::LIVE, &changes)));
+        let changes = pairs(&self.settings.actuation);
+        errors.extend(restore_error(self.lang(), "backend.restoreActuation", &actuation::apply(t, actuation::LIVE, &changes)));
+        // In driver mode the firmware ignores bindings in the live copy; the engine applies them.
+        if self.engine.is_none() {
+            let bindings = pairs(&self.settings.bindings);
+            errors.extend(restore_error(self.lang(), "backend.restoreBindings", &binding::apply(t, actuation::LIVE, &bindings)));
+        }
         if !errors.is_empty() {
             self.restore_error = Some(errors.join("; "));
         }
@@ -179,25 +187,39 @@ impl Device {
         Status { device: true, synapse, mode, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
     }
 
-    /// Press points the keyboard types with now, and the keys a replug would reset.
-    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<(Vec<KeyAssignment>, Vec<u8>), String> {
+    /// Assignments the keyboard types with now.
+    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<Vec<KeyAssignment>, String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
         let (t, _) = self.keyboard()?;
         let keys = editable_keys();
         let all = actuation::read_all(t, actuation::LIVE, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())?;
-        self.thresholds = Some(all.iter().map(|a| (a.key, a.threshold_low)).collect());
-        Ok((all, self.unsaved()))
+        self.live = Some(all.iter().map(|a| (a.key, a.clone())).collect());
+        Ok(all)
     }
 
-    /// Applies press points until the next replug (the app restores them on every connect)
-    /// and Rapid Trigger, which lives only here.
-    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>) -> Result<Written, String> {
+    /// What each key does now: the applied binding over the live one; `None` when the app cannot show it.
+    pub fn bindings(&self) -> BTreeMap<u8, Option<Action>> {
+        let live = self.live.iter().flatten().map(|(&k, a)| (k, binding::decode(a.fn_id, &a.fn_data)));
+        live.chain(self.settings.bindings.iter().map(|(&k, &a)| (k, Some(a)))).collect()
+    }
+
+    /// Applies press points and bindings until the next replug (the app restores them on every
+    /// connect) and Rapid Trigger, which lives only here.
+    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>, bindings: &[(u8, Action)]) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
+        let host = self.engine.is_some();
         let (t, _) = self.keyboard()?;
+        let bound = if host { bindings.iter().map(|&(k, a)| (k, host_bound(k, a))).collect() } else { binding::apply(t, actuation::LIVE, bindings) };
+        let done: Vec<(u8, Action)> = bindings.iter().copied().filter(|(k, _)| saved(&bound).any(|s| s == *k)).collect();
+        let differ = control::active_profile(t).and_then(|p| binding::unsaved(t, p, &done));
+        let unsaved_bound: Vec<(u8, Action)> = match differ {
+            Ok(keys) => done.iter().copied().filter(|(k, _)| keys.contains(k)).collect(),
+            Err(_) => done.clone(),
+        };
         let results = actuation::apply(t, actuation::LIVE, changes);
         let touched: Vec<u8> = results.iter().filter(|(_, o)| !matches!(o, Outcome::Failed(_))).map(|&(k, _)| k).collect();
         // Unknown whether they match the profile: keep them all, restoring an equal value is harmless.
@@ -206,24 +228,29 @@ impl Device {
             Err(_) => changes.iter().copied().filter(|(k, _)| touched.contains(k)).collect::<Vec<_>>(),
         };
         track(&mut self.settings.actuation, touched, unsaved);
-        self.note_thresholds(&results);
+        track(&mut self.settings.bindings, done.iter().map(|&(k, _)| k), unsaved_bound);
+        if !host {
+            self.note(&bound);
+        }
+        self.note(&results);
         self.settings.rapid.extend(rapid.iter().map(|(&k, &r)| (k, r)));
         settings::save(&self.settings)?;
         self.sync_engine();
-        Ok(Written { results, unsaved: self.unsaved() })
+        Ok(self.written(results, bound))
     }
 
-    /// Writes applied press points and `edits` to the flash; checks Synapse afresh and backs up the
-    /// keyboard before the first write.
-    pub fn save(&mut self, edits: &[(u8, f32)]) -> Result<Written, String> {
+    /// Writes applied press points and bindings with the edits on top to the flash; checks Synapse
+    /// afresh and backs up the keyboard before the first write.
+    pub fn save(&mut self, edits: &[(u8, f32)], bind_edits: &[(u8, Action)]) -> Result<Written, String> {
         let changes = to_save(&self.settings.actuation, edits);
-        if changes.is_empty() {
-            return Ok(Written { results: Vec::new(), unsaved: Vec::new() });
+        let bindings = to_save(&self.settings.bindings, bind_edits);
+        if changes.is_empty() && bindings.is_empty() {
+            return Ok(self.written(Vec::new(), Vec::new()));
         }
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
-        let backed_up = self.backed_up;
+        let (backed_up, host) = (self.backed_up, self.engine.is_some());
         let (t, _) = self.keyboard()?;
         let profile = control::active_profile(t).map_err(|e| e.to_string())?;
         if !backed_up {
@@ -231,17 +258,24 @@ impl Device {
             write_backup(&actuation::format_backup(profile, &all))?;
         }
         let results = actuation::save(t, profile, &changes);
+        let bound = binding::save(t, profile, &bindings, !host);
         self.backed_up = true;
-        self.note_thresholds(&results);
-        let saved = results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k);
-        track(&mut self.settings.actuation, saved, []);
+        self.note(&results);
+        self.note(&bound);
+        track(&mut self.settings.actuation, saved(&results), []);
+        track(&mut self.settings.bindings, saved(&bound), []);
         settings::save(&self.settings)?;
         self.sync_engine();
-        Ok(Written { results, unsaved: self.unsaved() })
+        Ok(self.written(results, bound))
     }
 
-    fn unsaved(&self) -> Vec<u8> {
-        self.settings.actuation.keys().copied().collect()
+    fn written(&self, results: Vec<(u8, Outcome)>, bindings: Vec<(u8, Outcome)>) -> Written {
+        Written {
+            results,
+            unsaved: self.settings.actuation.keys().copied().collect(),
+            bindings,
+            unsaved_bindings: self.settings.bindings.keys().copied().collect(),
+        }
     }
 
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
@@ -338,11 +372,12 @@ impl Device {
         self.sink = Some(sink);
     }
 
-    fn note_thresholds(&mut self, results: &[(u8, Outcome)]) {
-        let Some(th) = &mut self.thresholds else { return };
+    /// Keeps the live map in step with what a write left in the keyboard.
+    fn note(&mut self, results: &[(u8, Outcome)]) {
+        let Some(live) = &mut self.live else { return };
         for (k, o) in results {
-            if let Outcome::Ok(a) | Outcome::Unconfirmed(a) = o {
-                th.insert(*k, a.threshold_low);
+            if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(l)) = (o, live.get_mut(k)) {
+                *l = KeyAssignment { profile: l.profile, ..a.clone() };
             }
         }
     }
@@ -370,17 +405,18 @@ impl Device {
             self.stop_engine();
             return;
         }
-        if self.thresholds.is_none() {
+        if self.live.is_none() {
             let (t, _) = self.control.as_ref().unwrap();
             match actuation::read_all(t, actuation::LIVE, &editable_keys(), |_| {}) {
-                Ok(all) => self.thresholds = Some(all.iter().map(|a| (a.key, a.threshold_low)).collect()),
+                Ok(all) => self.live = Some(all.into_iter().map(|a| (a.key, a)).collect()),
                 Err(e) => {
                     self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e.to_string())]));
                     return;
                 }
             }
         }
-        let cfg = engine_config(self.thresholds.as_ref().unwrap(), &self.settings.rapid, engine::repeat_timing());
+        let thresholds = self.live.iter().flatten().map(|(&k, a)| (k, a.threshold_low)).collect();
+        let cfg = engine_config(&thresholds, &self.bindings(), &self.settings.rapid, engine::repeat_timing());
         if let Some(e) = &self.engine {
             e.set_config(cfg);
             return;
@@ -436,7 +472,7 @@ pub fn mm(threshold: u8) -> f32 {
 }
 
 /// The `touched` keys are now unsaved exactly as `unsaved` says.
-fn track(overrides: &mut BTreeMap<u8, f32>, touched: impl IntoIterator<Item = u8>, unsaved: impl IntoIterator<Item = (u8, f32)>) {
+fn track<V>(overrides: &mut BTreeMap<u8, V>, touched: impl IntoIterator<Item = u8>, unsaved: impl IntoIterator<Item = (u8, V)>) {
     for k in touched {
         overrides.remove(&k);
     }
@@ -444,19 +480,35 @@ fn track(overrides: &mut BTreeMap<u8, f32>, touched: impl IntoIterator<Item = u8
 }
 
 /// Saving makes permanent what the keyboard types with now, plus the pending edits.
-fn to_save(overrides: &BTreeMap<u8, f32>, edits: &[(u8, f32)]) -> Vec<(u8, f32)> {
+fn to_save<V: Copy>(overrides: &BTreeMap<u8, V>, edits: &[(u8, V)]) -> Vec<(u8, V)> {
     let mut all = overrides.clone();
     all.extend(edits.iter().copied());
     all.into_iter().collect()
 }
 
-fn restore_error(lang: &str, results: &[(u8, Outcome)]) -> Option<String> {
+fn pairs<V: Copy>(m: &BTreeMap<u8, V>) -> Vec<(u8, V)> {
+    m.iter().map(|(&k, &v)| (k, v)).collect()
+}
+
+fn saved(results: &[(u8, Outcome)]) -> impl Iterator<Item = u8> + '_ {
+    results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k)
+}
+
+/// Driver mode: nothing goes to the keyboard, the engine takes the binding as it is.
+fn host_bound(key: u8, a: Action) -> Outcome {
+    match binding::encode(a) {
+        Some((fn_id, fn_data)) => Outcome::Ok(KeyAssignment { profile: actuation::LIVE, key, layer: 0, threshold_low: 0, threshold_high: 0, fn_id, fn_data }),
+        None => Outcome::Failed(Error::BadArgument(format!("cannot bind {a:?}"))),
+    }
+}
+
+fn restore_error(lang: &str, message: &str, results: &[(u8, Outcome)]) -> Option<String> {
     let bad: Vec<&str> = results
         .iter()
         .filter(|(_, o)| !matches!(o, Outcome::Ok(_)))
         .map(|&(k, _)| keymap::name(k).unwrap_or("?"))
         .collect();
-    (!bad.is_empty()).then(|| i18n::tf(lang, "backend.restoreActuation", &[("keys", &bad.join(", "))]))
+    (!bad.is_empty()).then(|| i18n::tf(lang, message, &[("keys", &bad.join(", "))]))
 }
 
 fn editable_keys() -> Vec<u8> {
@@ -482,10 +534,18 @@ fn wants_engine(synapse: bool, driver_mode: bool) -> bool {
     !synapse && driver_mode
 }
 
-fn engine_config(thresholds: &BTreeMap<u8, u8>, rapid: &BTreeMap<u8, Rapid>, (repeat_delay, repeat_interval): (Duration, Duration)) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], repeat_delay, repeat_interval };
+fn engine_config(
+    thresholds: &BTreeMap<u8, u8>,
+    bindings: &BTreeMap<u8, Option<Action>>,
+    rapid: &BTreeMap<u8, Rapid>,
+    (repeat_delay, repeat_interval): (Duration, Duration),
+) -> Config {
+    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
+    }
+    for (&k, &a) in bindings {
+        c.bind[k as usize] = a;
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
         c.rapid[k as usize] = Some(Trigger { press: rapid::mm_to_depth(r.press), release: rapid::mm_to_depth(r.release) });
@@ -560,7 +620,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, thresholds: None, sink: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, live: None, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
@@ -601,8 +661,10 @@ mod tests {
             (33, Rapid { enabled: false, press: 0.4, release: 0.4 }),
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
-        let c = engine_config(&thresholds, &rapid, t);
+        let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
+        let c = engine_config(&thresholds, &bindings, &rapid, t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
+        assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
         assert_eq!(c.rapid[33], None);
         assert_eq!((c.repeat_delay, c.repeat_interval), t);
@@ -639,7 +701,7 @@ mod tests {
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
         assert!(!dev.settings.actuation.contains_key(&a), "A is applied in the app; save or revert it first");
-        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new()).unwrap();
+        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), &[]).unwrap();
         let (t, _) = dev.connect().unwrap();
         actuation::write_key(t, &live).unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
@@ -689,8 +751,9 @@ mod tests {
     #[test]
     fn restore_reports_keys_that_were_not_applied() {
         let a = |t| KeyAssignment { profile: 0, key: 31, layer: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
-        assert_eq!(restore_error("ru", &[(31, Outcome::Ok(a(0)))]), None);
-        let e = restore_error("ru", &[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
+        let key = "backend.restoreActuation";
+        assert_eq!(restore_error("ru", key, &[(31, Outcome::Ok(a(0)))]), None);
+        let e = restore_error("ru", key, &[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
         assert_eq!(e.as_deref(), Some("Не удалось вернуть точки срабатывания клавиш: S, W"));
     }
 }

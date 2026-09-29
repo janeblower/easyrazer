@@ -1,6 +1,6 @@
 {
   "language": { "name": "Русский" },
-  "tabs": { "actuation": "Срабатывание", "lighting": "Подсветка", "settings": "Настройки" },
+  "tabs": { "keys": "Клавиши", "lighting": "Подсветка", "settings": "Настройки" },
   "mode": {
     "hw": "HW",
     "driver": "Драйвер",
@@ -35,6 +35,42 @@
     "release": "Отпускание",
     "split": "Раздельно для нажатия и отпускания",
     "hwOnly": "(недоступно в HW режиме)"
+  },
+  "keys": { "actuation": "Срабатывание", "bindings": "Назначения" },
+  "bindings": {
+    "action": "Действие",
+    "types": { "key": "Клавиша", "mouse": "Мышь", "media": "Медиа", "disabled": "Отключена" },
+    "factory": "По умолчанию",
+    "other": "Назначено то, что EasyRazer пока не редактирует: макрос, Hypershift или служебная функция. Выберите действие, чтобы заменить.",
+    "key": "Клавиша",
+    "mods": "Модификаторы",
+    "modNames": { "ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win" },
+    "button": "Кнопка",
+    "mouse": {
+      "left": "Левая кнопка",
+      "right": "Правая кнопка",
+      "middle": "Средняя кнопка",
+      "back": "Назад",
+      "forward": "Вперёд",
+      "wheel_up": "Колесо вверх",
+      "wheel_down": "Колесо вниз"
+    },
+    "mouseShort": { "left": "ЛКМ", "right": "ПКМ", "middle": "СКМ", "back": "M4", "forward": "M5", "wheel_up": "W↑", "wheel_down": "W↓" },
+    "media": "Медиа",
+    "mediaNames": {
+      "play": "Пуск / пауза",
+      "prev": "Предыдущий трек",
+      "next": "Следующий трек",
+      "stop": "Стоп",
+      "mute": "Без звука",
+      "volume_up": "Громче",
+      "volume_down": "Тише"
+    },
+    "mediaShort": { "play": "⏯", "prev": "⏮", "next": "⏭", "stop": "⏹", "mute": "🔇", "volume_up": "Vol+", "volume_down": "Vol−" },
+    "space": "Пробел",
+    "left": "Левый {k}",
+    "right": "Правый {k}",
+    "unconfirmed": "Не подтверждено: в клавиатуре осталось другое назначение"
   },
   "lighting": {
     "groups": {
@@ -120,6 +156,7 @@
     "noKeyboard": "Поддерживаемая клавиатура Razer не найдена",
     "restoreLighting": "Не удалось вернуть подсветку: {error}",
     "restoreActuation": "Не удалось вернуть точки срабатывания клавиш: {keys}",
+    "restoreBindings": "Не удалось вернуть назначения клавиш: {keys}",
     "autostart": "Автозапуск: {error}",
     "engine": "Rapid Trigger не запущен: {error}"
   },

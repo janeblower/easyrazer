@@ -1,6 +1,6 @@
 {
   "language": { "name": "English" },
-  "tabs": { "actuation": "Actuation", "lighting": "Lighting", "settings": "Settings" },
+  "tabs": { "keys": "Keys", "lighting": "Lighting", "settings": "Settings" },
   "mode": {
     "hw": "HW",
     "driver": "Driver",
@@ -35,6 +35,42 @@
     "release": "Release",
     "split": "Separate press and release",
     "hwOnly": "(not available in HW mode)"
+  },
+  "keys": { "actuation": "Actuation", "bindings": "Bindings" },
+  "bindings": {
+    "action": "Action",
+    "types": { "key": "Key", "mouse": "Mouse", "media": "Media", "disabled": "Disabled" },
+    "factory": "Default",
+    "other": "Bound to something EasyRazer does not edit yet: a macro, Hypershift or a service function. Pick an action to replace it.",
+    "key": "Key",
+    "mods": "Modifiers",
+    "modNames": { "ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win" },
+    "button": "Button",
+    "mouse": {
+      "left": "Left button",
+      "right": "Right button",
+      "middle": "Middle button",
+      "back": "Back",
+      "forward": "Forward",
+      "wheel_up": "Wheel up",
+      "wheel_down": "Wheel down"
+    },
+    "mouseShort": { "left": "LMB", "right": "RMB", "middle": "MMB", "back": "M4", "forward": "M5", "wheel_up": "W↑", "wheel_down": "W↓" },
+    "media": "Media",
+    "mediaNames": {
+      "play": "Play / pause",
+      "prev": "Previous track",
+      "next": "Next track",
+      "stop": "Stop",
+      "mute": "Mute",
+      "volume_up": "Volume up",
+      "volume_down": "Volume down"
+    },
+    "mediaShort": { "play": "⏯", "prev": "⏮", "next": "⏭", "stop": "⏹", "mute": "🔇", "volume_up": "Vol+", "volume_down": "Vol−" },
+    "space": "Space",
+    "left": "Left {k}",
+    "right": "Right {k}",
+    "unconfirmed": "Not confirmed: the keyboard kept another binding"
   },
   "lighting": {
     "groups": {
@@ -120,6 +156,7 @@
     "noKeyboard": "No supported Razer keyboard found",
     "restoreLighting": "Could not restore the lighting: {error}",
     "restoreActuation": "Could not restore the actuation of keys: {keys}",
+    "restoreBindings": "Could not restore the bindings of keys: {keys}",
     "autostart": "Autostart: {error}",
     "engine": "Rapid Trigger did not start: {error}"
   },
