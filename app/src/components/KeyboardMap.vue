@@ -26,6 +26,8 @@ const props = withDefaults(
     selection: Set<number>;
     /** Shrink the whole map to the container width instead of scrolling. */
     fit?: boolean;
+    /** One key at a time: no Ctrl+click and no box. */
+    single?: boolean;
   }>(),
   {
     values: () => ({}),
@@ -36,6 +38,7 @@ const props = withDefaults(
     rapid: () => new Set(),
     rapidEdited: () => new Set(),
     fit: false,
+    single: false,
   },
 );
 const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
@@ -144,12 +147,12 @@ function point(e: PointerEvent): [number, number] {
 
 function down(e: PointerEvent) {
   start = point(e);
-  additive = e.ctrlKey;
+  additive = e.ctrlKey && !props.single;
   root.value!.setPointerCapture(e.pointerId);
 }
 
 function move(e: PointerEvent) {
-  if (!start) return;
+  if (!start || props.single) return;
   const [x, y] = point(e);
   if (band.value || Math.hypot(x - start[0], y - start[1]) > 4) {
     band.value = { x0: start[0], y0: start[1], x1: x, y1: y };

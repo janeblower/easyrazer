@@ -38,10 +38,12 @@
   },
   "keys": { "actuation": "Actuation", "bindings": "Bindings" },
   "bindings": {
+    "selectHint": "Click a key to pick it",
     "action": "Action",
     "types": { "key": "Key", "mouse": "Mouse", "media": "Media", "disabled": "Disabled" },
     "factory": "Default",
     "other": "Bound to something EasyRazer does not edit yet: a macro, Hypershift or a service function. Pick an action to replace it.",
+    "search": "Search a key",
     "key": "Key",
     "mods": "Modifiers",
     "modNames": { "ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win" },

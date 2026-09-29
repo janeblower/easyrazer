@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
@@ -96,16 +96,20 @@ function setRapid(change: (r: Rapid) => Rapid) {
 }
 
 const bindingOf = (k: number) => bindEdits.value[k] ?? bindBase.value[k] ?? null;
-const selectedActions = computed(() => Array.from(selection.value, bindingOf));
+// Bindings are edited one key at a time.
+const bindKey = computed(() => (selection.value.size === 1 ? [...selection.value][0] : null));
 const byKey = computed(() => new Map(layout.value.map((k) => [k.key, k])));
 
-function setBinding(change: (key: number, current: Action | null) => Action) {
+watch(section, (s) => {
+  if (s === "bindings" && selection.value.size > 1) selection.value = new Set();
+});
+
+function setBinding(a: Action) {
+  const k = bindKey.value;
+  if (k == null) return;
   const next = { ...bindEdits.value };
-  for (const k of selection.value) {
-    const a = change(k, bindingOf(k));
-    if (sameAction(a, bindBase.value[k])) delete next[k];
-    else next[k] = a;
-  }
+  if (sameAction(a, bindBase.value[k])) delete next[k];
+  else next[k] = a;
   bindEdits.value = next;
 }
 
@@ -395,6 +399,7 @@ onUnmounted(() => {
         :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
         :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
         :rapid-edited="rapidEdited"
+        :single="section === 'bindings'"
       />
       <KeysCard
         :count="selection.size"
@@ -402,6 +407,7 @@ onUnmounted(() => {
         :can-apply="canApply"
         :can-save="canSave"
         :busy="busy"
+        :single="section === 'bindings'"
         @apply="write('apply', 'actuation.applied')"
         @save="save"
         @revert="revert"
@@ -421,7 +427,7 @@ onUnmounted(() => {
           @release="(v) => setRapid((r) => ({ ...r, release: v }))"
           @split="onSplit"
         />
-        <BindingCard v-else :actions="selectedActions" :layout="layout" @change="setBinding" />
+        <BindingCard v-else :key-id="bindKey" :action="bindKey == null ? null : bindingOf(bindKey)" :layout="layout" @set="setBinding" />
       </KeysCard>
     </template>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
