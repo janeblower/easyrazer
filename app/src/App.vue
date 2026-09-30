@@ -411,7 +411,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1160px]">
+  <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]">
     <nav class="flex gap-1">
       <button
         v-for="name in TABS"

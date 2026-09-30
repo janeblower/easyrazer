@@ -47,6 +47,8 @@ const { t } = useI18n();
 // Zones are named by the window; key caps keep the labels from the layout.
 const ZONES: Record<number, string> = { 200: "zones.media", 201: "zones.dial", 202: "zones.edge", 203: "zones.wrist" };
 const U = 50;
+// Space between key caps; the map ends at the last cap, not at the space after it.
+const GAP = 4;
 const box = useTemplateRef<HTMLElement>("box");
 const root = useTemplateRef<HTMLElement>("root");
 const scale = ref(1);
@@ -55,10 +57,10 @@ const band = ref<Band | null>(null);
 let start: [number, number] | null = null;
 let additive = false;
 
-const width = computed(() => Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U);
+const width = computed(() => Math.max(0, Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U - GAP));
 const size = computed(() => ({
   width: `${width.value}px`,
-  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U}px`,
+  height: `${Math.max(0, Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U - GAP)}px`,
   zoom: scale.value,
 }));
 
@@ -117,7 +119,7 @@ function keyClass(k: KeyView) {
 
 // Painted keys keep their label readable on light and dark colors.
 function keyStyle(k: KeyView) {
-  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - 4}px`, height: `${k.h * U - 4}px` };
+  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - GAP}px`, height: `${k.h * U - GAP}px` };
   if (!props.colors) return box;
   const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
   const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
