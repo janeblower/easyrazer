@@ -174,9 +174,9 @@
     }
   },
   "settings": {
-    "language": "Language:",
+    "language": "Language",
     "autostart": "Start with Windows",
-    "onClose": "When the window is closed:",
+    "onClose": "On window close",
     "ask": "Ask",
     "tray": "Minimize to tray",
     "exit": "Quit",

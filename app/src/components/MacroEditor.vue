@@ -5,6 +5,8 @@ import { useI18n } from "vue-i18n";
 import type { AppSettings, KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
 import ConfirmWrite from "./ConfirmWrite.vue";
+import ActionBar from "./ActionBar.vue";
+import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
   state: MacroState | null;
@@ -212,11 +214,15 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
               </select>
             </template>
             <span class="ml-auto flex gap-1">
-              <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">↑</button>
-              <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
-                ↓
+              <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">
+                <AppIcon name="up" />
               </button>
-              <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">×</button>
+              <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
+                <AppIcon name="down" />
+              </button>
+              <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">
+                <AppIcon name="remove" />
+              </button>
             </span>
           </span>
         </li>
@@ -240,7 +246,16 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
       <p class="hint m-0">
         {{ state?.free == null ? $t("macros.size", { n: size }) : $t("macros.sizeFree", { n: size, free: state.free }) }}
       </p>
-      <div class="flex gap-3 items-center justify-end">
+      <ActionBar
+        :pending="dirty ? $t('common.notApplied') : ''"
+        :can-revert="dirty && !busy"
+        :can-apply="dirty && !busy"
+        :can-write="writable && !busy && (dirty || !saved?.written)"
+        :write-title="$t('macros.write')"
+        @revert="revert"
+        @apply="apply"
+        @write="write"
+      >
         <span v-if="message" class="text-xs text-muted mr-auto">{{ message }}</span>
         <button
           v-if="selected != null"
@@ -250,46 +265,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         >
           {{ $t(armed ? "macros.confirmDelete" : "macros.delete") }}
         </button>
-        <span v-if="dirty" class="text-xs text-edited">{{ $t("common.notApplied") }}</span>
-        <button class="icon-btn" :title="$t('common.revert')" :aria-label="$t('common.revert')" :disabled="!dirty || busy" @click="revert">
-          <svg
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M9 14 4 9l5-5" />
-            <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
-          </svg>
-        </button>
-        <button class="primary" :disabled="!dirty || busy" @click="apply">{{ $t("common.apply") }}</button>
-        <button
-          class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
-          :title="$t('macros.write')"
-          :aria-label="$t('macros.write')"
-          :disabled="!writable || busy || (!dirty && !!saved?.written)"
-          @click="write"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
-            <path d="M7 3v5h8V3" />
-            <path d="M7 21v-7h10v7" />
-          </svg>
-        </button>
-      </div>
+      </ActionBar>
     </div>
     <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />

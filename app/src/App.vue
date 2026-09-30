@@ -50,7 +50,8 @@ const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
 const message = ref("");
-const tab = ref("keys");
+const TABS = ["keys", "lighting", "settings"] as const;
+const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
 const offering = ref(false);
 const asking = ref(false);
@@ -60,13 +61,6 @@ let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
-
-const tabClass = (t: string) => [
-  "rounded-b-none",
-  tab.value === t
-    ? "border-x-transparent border-t-transparent border-b-2 border-b-accent bg-key text-text"
-    : "bg-panel text-muted border-transparent",
-];
 
 const dirty = computed(
   () => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size,
@@ -412,28 +406,30 @@ onUnmounted(() => {
 <template>
   <main class="p-4 flex flex-col gap-4">
     <nav class="flex gap-1">
-      <button :class="tabClass('keys')" @click="tab = 'keys'">{{ $t("tabs.keys") }}</button>
-      <button :class="tabClass('lighting')" @click="tab = 'lighting'">{{ $t("tabs.lighting") }}</button>
-      <button :class="tabClass('settings')" @click="tab = 'settings'">{{ $t("tabs.settings") }}</button>
-      <div class="ml-auto flex self-center" :title="$t('mode.hint')">
+      <button
+        v-for="name in TABS"
+        :key="name"
+        class="rounded-b-none"
+        :class="
+          tab === name ? 'border-x-transparent border-t-transparent border-b-2 border-b-accent' : 'bg-panel text-muted border-transparent'
+        "
+        :aria-current="tab === name ? 'page' : undefined"
+        @click="tab = name"
+      >
+        {{ $t(`tabs.${name}`) }}
+      </button>
+      <span class="ml-auto inline-flex self-center" :title="$t('mode.hint')">
         <button
           v-for="on in [false, true]"
           :key="String(on)"
-          class="px-3 py-1"
-          :class="[
-            on ? 'rounded-l-none' : 'rounded-r-none',
-            driver !== on
-              ? 'bg-panel text-muted'
-              : on
-                ? 'bg-[#d75411] text-white border-[#d75411]'
-                : 'bg-accent text-[#0b0b0b] border-accent',
-          ]"
+          class="px-3 py-1 seg-btn"
+          :class="driver === on && (on ? 'border-driver bg-driver text-white' : 'seg-on')"
           :disabled="!writable"
           @click="setMode(on)"
         >
           {{ $t(on ? "mode.driver" : "mode.hw") }}
         </button>
-      </div>
+      </span>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
     <template v-if="tab === 'keys'">
