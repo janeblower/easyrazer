@@ -3,11 +3,18 @@
   --panel: #1c1c1c;
   --key: #2a2a2a;
   --key-off: #1a1a1a;
+  --line: #3a3a3a;
   --text: #e8e8e8;
   --muted: #8a8a8a;
+  --ink: #0b0b0b;
   --accent: #44d62c;
+  --driver: #d75411;
   --edited: #d6a02c;
   --error: #e0443c;
+  --warn: #ffcf7a;
+  --warn-bg: #3a2a10;
+  --write: #ffb070;
+  --write-line: #8a5a20;
   color-scheme: dark;
 }
 
@@ -26,26 +33,99 @@ body {
   user-select: none;
 }
 
-button {
+button,
+input:not([type="checkbox"], [type="range"], [type="color"]),
+select {
   background: var(--key);
   color: var(--text);
-  border: 1px solid #3a3a3a;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 12px;
   font: inherit;
+}
+
+button {
   cursor: pointer;
 }
 
-button:disabled {
+input:not([type="checkbox"], [type="range"], [type="color"]),
+select {
+  padding: 5px 8px;
+}
+
+:is(button, input, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+:is(button, select, input:not([type="range"])):disabled {
   opacity: 0.4;
   cursor: default;
 }
+
 button.primary:not(:disabled) {
   background: var(--accent);
-  color: #0b0b0b;
+  color: var(--ink);
   border-color: var(--accent);
 }
 
-input[type="range"] {
+input[type="range"],
+input[type="checkbox"] {
   accent-color: var(--accent);
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch input {
+  appearance: none;
+  flex: none;
+  margin: 0;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+}
+
+.switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: left 0.15s;
+}
+
+.switch input:checked {
+  background: var(--accent);
+}
+
+.switch input:checked::after {
+  left: 18px;
+}
+
+/* Some of the selected keys are on, some off. */
+.switch input:indeterminate::after {
+  left: 10px;
+}
+
+dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  max-width: 380px;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
 }

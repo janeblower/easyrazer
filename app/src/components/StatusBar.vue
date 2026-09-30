@@ -30,5 +30,8 @@ const view = computed(() => {
 </script>
 
 <template>
-  <div class="px-4 py-2 rounded-md" :class="KIND[view.kind]">{{ view.text }}</div>
+  <div class="px-4 py-2 rounded-md flex gap-3 min-h-[50px] items-center" :class="KIND[view.kind]">
+    <span class="mr-auto">{{ view.text }}</span>
+    <div id="status-actions" class="text-text"></div>
+  </div>
 </template>

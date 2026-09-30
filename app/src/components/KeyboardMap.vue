@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import type { KeyMap, KeyView, Rgb } from "../types";
 
@@ -10,6 +10,7 @@ interface Band {
   y1: number;
 }
 
+const selection = defineModel<Set<number>>("selection", { required: true });
 // With `colors` the keys are painted instead of showing `values`.
 const props = withDefaults(
   defineProps<{
@@ -23,7 +24,6 @@ const props = withDefaults(
     /** Keys with Rapid Trigger on, and those whose Rapid Trigger is not applied yet. */
     rapid?: Set<number>;
     rapidEdited?: Set<number>;
-    selection: Set<number>;
     /** Shrink the whole map to the container width instead of scrolling. */
     fit?: boolean;
     /** One key at a time: no Ctrl+click and no box. */
@@ -41,26 +41,26 @@ const props = withDefaults(
     single: false,
   },
 );
-const emit = defineEmits<{ "update:selection": [selection: Set<number>] }>();
-
 // Width of a ring's frame, in key units.
 const RING = 0.3;
 const { t } = useI18n();
 // Zones are named by the window; key caps keep the labels from the layout.
 const ZONES: Record<number, string> = { 200: "zones.media", 201: "zones.dial", 202: "zones.edge", 203: "zones.wrist" };
 const U = 50;
-const box = ref<HTMLElement | null>(null);
-const root = ref<HTMLElement | null>(null);
+// Space between key caps; the map ends at the last cap, not at the space after it.
+const GAP = 4;
+const box = useTemplateRef<HTMLElement>("box");
+const root = useTemplateRef<HTMLElement>("root");
 const scale = ref(1);
 let observer: ResizeObserver | undefined;
 const band = ref<Band | null>(null);
 let start: [number, number] | null = null;
 let additive = false;
 
-const width = computed(() => Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U);
+const width = computed(() => Math.max(0, Math.max(0, ...props.layout.map((k) => k.x + k.w)) * U - GAP));
 const size = computed(() => ({
   width: `${width.value}px`,
-  height: `${Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U}px`,
+  height: `${Math.max(0, Math.max(0, ...props.layout.map((k) => k.y + k.h)) * U - GAP)}px`,
   zoom: scale.value,
 }));
 
@@ -86,30 +86,28 @@ const keys = computed(() => props.layout.filter((k) => k.shape !== "ring"));
 const rings = computed(() => props.layout.filter((k) => k.shape === "ring"));
 
 function ringStyle(k: KeyView) {
-  const [r, g, b] = props.colors?.[k.key] ?? [0x3a, 0x3a, 0x3a];
-  const u = U;
+  const c = props.colors?.[k.key];
   return {
-    left: `${k.x * u}px`,
-    top: `${k.y * u}px`,
-    width: `${k.w * u}px`,
-    height: `${k.h * u}px`,
-    borderWidth: `${RING * u}px`,
-    borderColor: `rgb(${r} ${g} ${b})`,
+    left: `${k.x * U}px`,
+    top: `${k.y * U}px`,
+    width: `${k.w * U}px`,
+    height: `${k.h * U}px`,
+    borderWidth: `${RING * U}px`,
+    borderColor: c ? `rgb(${c.join(" ")})` : "var(--line)",
   };
 }
 
 // A ring is hit on its frame only; the keys inside stay reachable.
 function onRing(k: KeyView, x0: number, y0: number, x1: number, y1: number) {
-  const u = U;
-  const t = RING * u;
-  const [l, t0, r, b] = [k.x * u, k.y * u, (k.x + k.w) * u, (k.y + k.h) * u];
-  const overlaps = l < x1 && r > x0 && t0 < y1 && b > y0;
-  const inside = x0 >= l + t && x1 <= r - t && y0 >= t0 + t && y1 <= b - t;
+  const f = RING * U;
+  const [l, t, r, b] = [k.x * U, k.y * U, (k.x + k.w) * U, (k.y + k.h) * U];
+  const overlaps = l < x1 && r > x0 && t < y1 && b > y0;
+  const inside = x0 >= l + f && x1 <= r - f && y0 >= t + f && y1 <= b - f;
   return overlaps && !inside;
 }
 
 function keyClass(k: KeyView) {
-  const selected = props.selection.has(k.key);
+  const selected = selection.value.has(k.key);
   const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
   const look = props.colors
     ? ["cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
@@ -121,8 +119,7 @@ function keyClass(k: KeyView) {
 
 // Painted keys keep their label readable on light and dark colors.
 function keyStyle(k: KeyView) {
-  const u = U;
-  const box = { left: `${k.x * u}px`, top: `${k.y * u}px`, width: `${k.w * u - 4}px`, height: `${k.h * u - 4}px` };
+  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - GAP}px`, height: `${k.h * U - GAP}px` };
   if (!props.colors) return box;
   const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
   const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
@@ -161,15 +158,14 @@ function move(e: PointerEvent) {
 
 function up(e: PointerEvent) {
   if (!start) return;
-  const next = additive ? new Set(props.selection) : new Set<number>();
+  const next = additive ? new Set(selection.value) : new Set<number>();
   if (band.value) {
     const b = norm(band.value);
-    const u = U;
     for (const k of props.layout) {
       const hit =
         k.shape === "ring"
           ? onRing(k, b.x0, b.y0, b.x1, b.y1)
-          : k.x * u < b.x1 && (k.x + k.w) * u > b.x0 && k.y * u < b.y1 && (k.y + k.h) * u > b.y0;
+          : k.x * U < b.x1 && (k.x + k.w) * U > b.x0 && k.y * U < b.y1 && (k.y + k.h) * U > b.y0;
       if (k.editable && hit) next.add(k.key);
     }
   } else {
@@ -184,7 +180,7 @@ function up(e: PointerEvent) {
   }
   start = null;
   band.value = null;
-  emit("update:selection", next);
+  selection.value = next;
 }
 </script>
 
@@ -207,21 +203,11 @@ function up(e: PointerEvent) {
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
-        <span class="text-xs flex justify-between">
-          <span>{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
-          <span
-            v-if="!colors && rapid.has(k.key)"
-            class="text-[10px]"
-            :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'"
-            >RT</span
-          >
+        <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span v-if="!colors" class="text-[11px] flex gap-1 items-baseline">
+          <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
+          <span v-if="k.editable && values[k.key] != null" class="ml-auto truncate" :class="valueClass(k.key)">{{ values[k.key] }}</span>
         </span>
-        <span
-          v-if="!colors && k.editable && values[k.key] != null"
-          class="text-[11px] max-w-full truncate self-end"
-          :class="valueClass(k.key)"
-          >{{ values[k.key] }}</span
-        >
       </div>
       <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
     </div>

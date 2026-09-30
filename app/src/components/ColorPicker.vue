@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from "vue";
+import { onUnmounted, ref, useTemplateRef, watch } from "vue";
 import type { Rgb } from "../types";
 
-const props = defineProps<{ modelValue: Rgb | null; disabled: boolean }>();
-const emit = defineEmits<{ "update:modelValue": [rgb: Rgb | null] }>();
-
+const model = defineModel<Rgb | null>({ required: true });
+const props = defineProps<{ disabled: boolean }>();
 const PRESETS = [
   "#ff0000",
   "#ff8000",
@@ -21,23 +20,16 @@ const PRESETS = [
 ];
 
 const open = ref(false);
-const root = ref<HTMLElement | null>(null);
+const root = useTemplateRef<HTMLElement>("root");
 // Colour to come back to after "no colour" is switched off again.
-const last = ref<Rgb>(props.modelValue ?? [0x44, 0xd6, 0x2c]);
-watch(
-  () => props.modelValue,
-  (v) => v && (last.value = v),
-);
+const last = ref<Rgb>(model.value ?? [0x44, 0xd6, 0x2c]);
+watch(model, (v) => v && (last.value = v));
 
 const hex = (rgb: Rgb) => `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 const rgbOf = (h: string) => [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16)) as Rgb;
 
-const pick = (h: string) => {
-  emit("update:modelValue", rgbOf(h));
-};
-const toggleNone = () => {
-  emit("update:modelValue", props.modelValue ? null : last.value);
-};
+const pick = (h: string) => (model.value = rgbOf(h));
+const toggleNone = () => (model.value = model.value ? null : last.value);
 
 const onOutside = (e: MouseEvent) => root.value && !root.value.contains(e.target as Node) && (open.value = false);
 watch(open, (o) => {
@@ -55,12 +47,12 @@ onUnmounted(() => {
 <template>
   <span ref="root" class="inline-flex relative">
     <button
-      class="p-0 border-[#555] rounded-md h-[30px] w-9 relative overflow-hidden"
-      :class="{ empty: !modelValue }"
+      class="p-0 border-line rounded-md h-[30px] w-9 relative overflow-hidden"
+      :class="{ empty: !model }"
       :style="{ background: hex(last) }"
       :disabled="disabled"
-      :title="modelValue ? $t('picker.color') : $t('picker.none')"
-      :aria-label="modelValue ? $t('picker.colorHex', { hex: hex(modelValue) }) : $t('picker.none')"
+      :title="model ? $t('picker.color') : $t('picker.none')"
+      :aria-label="model ? $t('picker.colorHex', { hex: hex(model) }) : $t('picker.none')"
       @click="open = !open"
     ></button>
     <div
@@ -74,7 +66,7 @@ onUnmounted(() => {
         <button
           v-for="c in PRESETS"
           :key="c"
-          class="p-0 border-[#555] rounded-[5px] size-[26px]"
+          class="p-0 border-line rounded-[5px] size-[26px]"
           :style="{ background: c }"
           :aria-label="c"
           @click="pick(c)"
@@ -92,8 +84,8 @@ onUnmounted(() => {
         </label>
         <button
           class="text-xs px-2 py-1"
-          :class="{ 'border-error bg-error text-white': !modelValue }"
-          :aria-pressed="!modelValue"
+          :class="{ 'border-error bg-error text-white': !model }"
+          :aria-pressed="!model"
           @click="toggleNone"
         >
           {{ $t("picker.noColor") }}

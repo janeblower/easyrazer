@@ -6,6 +6,8 @@ import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Sta
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
+import ActionBar from "./ActionBar.vue";
+import AppIcon from "./AppIcon.vue";
 
 interface Ui {
   group: string;
@@ -362,7 +364,7 @@ onMounted(load);
           <span>{{ g.label }}</span>
         </li>
       </ul>
-      <div class="px-3.5 py-2.5 card flex-1 min-w-0">
+      <div class="px-4 py-3 card flex-1 min-w-0">
         <div v-if="currentGroup?.types.length" class="field">
           <span class="field-label">{{ $t("lighting.type") }}</span>
           <span class="inline-flex">
@@ -397,22 +399,7 @@ onMounted(load);
             :disabled="blocked"
             @click="setUi('random', !ui.random)"
           >
-            <svg
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
-              <path d="m18 2 4 4-4 4" />
-              <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
-              <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
-              <path d="m18 14 4 4-4 4" />
-            </svg>
+            <AppIcon name="random" />
           </button>
         </div>
         <div v-if="dirInfo" class="field">
@@ -449,7 +436,9 @@ onMounted(load);
           <div class="field">
             <span class="field-label">{{ $t("lighting.color") }}</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
-            <span class="hint">{{ selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint") }}</span>
+            <span class="hint" :title="$t('common.selectHow')">{{
+              selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint")
+            }}</span>
             <button @click="selectAll">{{ $t("common.selectAll") }}</button>
             <button :disabled="selection.size === 0" @click="selection = new Set()">{{ $t("common.clearSelection") }}</button>
           </div>
@@ -465,59 +454,22 @@ onMounted(load);
         </div>
       </div>
     </div>
-    <div class="px-4 py-3 card flex gap-2 items-center">
+    <div class="px-4 py-3 card">
       <label class="switch">
         <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
         {{ $t("lighting.dynamic") }}
       </label>
-      <span class="flex-1"></span>
-      <span v-if="dirty" class="text-xs text-edited">{{ $t("common.notApplied") }}</span>
-      <button
-        class="icon-btn"
-        :title="$t('common.revert')"
-        :aria-label="$t('common.revert')"
-        :disabled="!dirty || busy || blocked"
-        @click="revert"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M9 14 4 9l5-5" />
-          <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
-        </svg>
-      </button>
-      <button class="primary" :disabled="!dirty || busy || blocked" @click="apply">{{ $t("common.apply") }}</button>
-      <button
-        v-if="!isCustom"
-        class="text-[#ffb070] icon-btn border-[#8a5a20] bg-transparent"
-        :title="$t('common.write')"
-        :aria-label="$t('common.write')"
-        :disabled="!canSave"
-        @click="save"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
-          <path d="M7 3v5h8V3" />
-          <path d="M7 21v-7h10v7" />
-        </svg>
-      </button>
     </div>
+    <ActionBar
+      :pending="dirty ? $t('common.notApplied') : ''"
+      :can-revert="dirty && !busy && !blocked"
+      :can-apply="dirty && !busy && !blocked"
+      :can-write="canSave"
+      :apply-only="isCustom"
+      @revert="revert"
+      @apply="apply"
+      @write="save"
+    />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </section>
 </template>
@@ -644,36 +596,5 @@ onMounted(load);
   .fx::after {
     animation: none;
   }
-}
-.switch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.switch input {
-  appearance: none;
-  width: 34px;
-  height: 18px;
-  border-radius: 9px;
-  background: #3a3a3a;
-  position: relative;
-  cursor: pointer;
-}
-.switch input::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  transition: left 0.15s;
-}
-.switch input:checked {
-  background: var(--accent);
-}
-.switch input:checked::after {
-  left: 18px;
 }
 </style>

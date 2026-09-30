@@ -35,6 +35,11 @@ async function pickLanguage(e: Event) {
 }
 
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
+const TOGGLES = [
+  { key: "autostart", cmd: "set_autostart", label: "settings.autostart" },
+  { key: "watch_synapse", cmd: "set_watch_synapse", label: "settings.watchSynapse" },
+  { key: "confirm_write", cmd: "set_confirm_write", label: "settings.confirmWrite" },
+] as const;
 
 onMounted(async () => {
   unlisten = await listen("settings-changed", () => {
@@ -54,33 +59,25 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section v-if="s" class="p-4 rounded-lg bg-panel flex flex-col gap-3">
-    <label>
-      {{ $t("settings.language") }}
+  <section v-if="s" class="px-4 py-3 card">
+    <label class="field">
+      <span class="field-label min-w-[160px]">{{ $t("settings.language") }}</span>
       <select :value="s.language ?? $i18n.locale" @change="pickLanguage">
         <option v-for="(m, code) in messages" :key="code" :value="code">{{ m.language.name }}</option>
       </select>
     </label>
-    <label
-      ><input type="checkbox" :checked="s.autostart" @change="set('set_autostart', { on: checked($event) })" />
-      {{ $t("settings.autostart") }}</label
-    >
-    <label>
-      {{ $t("settings.onClose") }}
+    <label class="field">
+      <span class="field-label min-w-[160px]">{{ $t("settings.onClose") }}</span>
       <select :value="s.close_action" @change="set('set_close_action', { action: ($event.target as HTMLSelectElement).value })">
         <option value="ask">{{ $t("settings.ask") }}</option>
         <option value="tray">{{ $t("settings.tray") }}</option>
         <option value="exit">{{ $t("settings.exit") }}</option>
       </select>
     </label>
-    <label
-      ><input type="checkbox" :checked="s.watch_synapse" @change="set('set_watch_synapse', { on: checked($event) })" />
-      {{ $t("settings.watchSynapse") }}</label
-    >
-    <label
-      ><input type="checkbox" :checked="s.confirm_write" @change="set('set_confirm_write', { on: checked($event) })" />
-      {{ $t("settings.confirmWrite") }}</label
-    >
+    <label v-for="o in TOGGLES" :key="o.cmd" class="switch my-2.5">
+      <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
+      {{ $t(o.label) }}
+    </label>
     <p v-if="message" class="text-error m-0">{{ message }}</p>
   </section>
 </template>

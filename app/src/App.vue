@@ -16,7 +16,8 @@ import type {
   WriteResult,
 } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
-import KeysCard from "./components/KeysCard.vue";
+import SelectionBar from "./components/SelectionBar.vue";
+import ActionBar from "./components/ActionBar.vue";
 import ActuationCard from "./components/ActuationCard.vue";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
@@ -50,7 +51,8 @@ const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
 const message = ref("");
-const tab = ref("keys");
+const TABS = ["keys", "lighting", "settings"] as const;
+const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
 const offering = ref(false);
 const asking = ref(false);
@@ -60,13 +62,6 @@ let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
-
-const tabClass = (t: string) => [
-  "rounded-b-none",
-  tab.value === t
-    ? "border-x-transparent border-t-transparent border-b-2 border-b-accent bg-key text-text"
-    : "bg-panel text-muted border-transparent",
-];
 
 const dirty = computed(
   () => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size,
@@ -83,6 +78,12 @@ const canSave = computed(
       Object.keys(bindEdits.value).length > 0 ||
       bindUnsaved.value.size > 0),
 );
+const actions = computed(() => ({
+  pending: dirty.value ? t("common.notAppliedN", { n: dirty.value }) : "",
+  canRevert: dirty.value > 0 && !busy.value,
+  canApply: canApply.value,
+  canWrite: canSave.value,
+}));
 const selectedValue = computed(() => {
   const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
   return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
@@ -410,44 +411,57 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="p-4 flex flex-col gap-4">
+  <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]">
     <nav class="flex gap-1">
-      <button :class="tabClass('keys')" @click="tab = 'keys'">{{ $t("tabs.keys") }}</button>
-      <button :class="tabClass('lighting')" @click="tab = 'lighting'">{{ $t("tabs.lighting") }}</button>
-      <button :class="tabClass('settings')" @click="tab = 'settings'">{{ $t("tabs.settings") }}</button>
-      <div class="ml-auto flex self-center" :title="$t('mode.hint')">
+      <button
+        v-for="name in TABS"
+        :key="name"
+        class="rounded-b-none"
+        :class="
+          tab === name ? 'border-x-transparent border-t-transparent border-b-2 border-b-accent' : 'bg-panel text-muted border-transparent'
+        "
+        :aria-current="tab === name ? 'page' : undefined"
+        @click="tab = name"
+      >
+        {{ $t(`tabs.${name}`) }}
+      </button>
+      <span class="ml-auto inline-flex self-center" :title="$t('mode.hint')">
         <button
           v-for="on in [false, true]"
           :key="String(on)"
-          class="px-3 py-1"
-          :class="[
-            on ? 'rounded-l-none' : 'rounded-r-none',
-            driver !== on
-              ? 'bg-panel text-muted'
-              : on
-                ? 'bg-[#d75411] text-white border-[#d75411]'
-                : 'bg-accent text-[#0b0b0b] border-accent',
-          ]"
+          class="px-3 py-1 seg-btn"
+          :class="driver === on && (on ? 'border-driver bg-driver text-white' : 'seg-on')"
           :disabled="!writable"
           @click="setMode(on)"
         >
           {{ $t(on ? "mode.driver" : "mode.hw") }}
         </button>
-      </div>
+      </span>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
-    <template v-if="tab === 'keys'">
-      <span class="inline-flex self-start">
-        <button
-          v-for="s in ['actuation', 'bindings', 'macros'] as const"
-          :key="s"
-          class="seg-btn"
-          :class="{ 'seg-on': section === s }"
-          @click="section = s"
-        >
-          {{ $t(`keys.${s}`) }}
-        </button>
-      </span>
+    <!-- With the map shown, the tab takes its width, not the window's. -->
+    <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'self-start': section !== 'macros' }">
+      <div class="flex gap-3 items-center">
+        <span class="inline-flex">
+          <button
+            v-for="s in ['actuation', 'bindings', 'macros'] as const"
+            :key="s"
+            class="seg-btn"
+            :class="{ 'seg-on': section === s }"
+            @click="section = s"
+          >
+            {{ $t(`keys.${s}`) }}
+          </button>
+        </span>
+        <SelectionBar
+          v-if="section !== 'macros'"
+          class="ml-auto"
+          :count="selection.size"
+          :single="section === 'bindings'"
+          @select-all="selectAll"
+          @clear="selection = new Set()"
+        />
+      </div>
       <MacroEditor
         v-if="section === 'macros'"
         :state="macroState"
@@ -456,55 +470,47 @@ onUnmounted(() => {
         :writable="writable"
         @update="(s) => (macroState = s)"
       />
-      <KeyboardMap
-        v-if="section !== 'macros'"
-        v-model:selection="selection"
-        :layout="layout"
-        :values="mapValues"
-        :edited="mapEdited"
-        :errors="section === 'actuation' ? errors : bindErrors"
-        :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-        :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
-        :rapid-edited="rapidEdited"
-        :single="section === 'bindings'"
-      />
-      <KeysCard
-        v-if="section !== 'macros'"
-        :count="selection.size"
-        :dirty="dirty"
-        :can-apply="canApply"
-        :can-save="canSave"
-        :busy="busy"
-        :single="section === 'bindings'"
-        @apply="apply"
-        @save="save"
-        @revert="revert"
-        @select-all="selectAll"
-        @clear="selection = new Set()"
-      >
-        <ActuationCard
-          v-if="section === 'actuation'"
-          :count="selection.size"
-          :value="selectedValue"
-          :rapid="selectedRapid"
-          :split="split"
-          :driver="driver"
-          @set="setValue"
-          @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
-          @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
-          @release="(v) => setRapid((r) => ({ ...r, release: v }))"
-          @split="onSplit"
-        />
-        <BindingCard
-          v-else
-          :key-id="bindKey"
-          :action="bindKey == null ? null : bindingOf(bindKey)"
+      <template v-else>
+        <KeyboardMap
+          v-model:selection="selection"
           :layout="layout"
-          :macros="macroState?.macros ?? {}"
-          @set="setBinding"
+          :values="mapValues"
+          :edited="mapEdited"
+          :errors="section === 'actuation' ? errors : bindErrors"
+          :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
+          :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
+          :rapid-edited="rapidEdited"
+          :single="section === 'bindings'"
         />
-      </KeysCard>
-    </template>
+        <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
+          <div class="px-4 py-3 card flex flex-col gap-3">
+            <ActuationCard
+              v-if="section === 'actuation'"
+              :count="selection.size"
+              :value="selectedValue"
+              :rapid="selectedRapid"
+              :split="split"
+              :driver="driver"
+              @set="setValue"
+              @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+              @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
+              @release="(v) => setRapid((r) => ({ ...r, release: v }))"
+              @split="onSplit"
+            />
+            <BindingCard
+              v-else
+              :key-id="bindKey"
+              :action="bindKey == null ? null : bindingOf(bindKey)"
+              :layout="layout"
+              :macros="macroState?.macros ?? {}"
+              @set="setBinding"
+            />
+          </div>
+          <div v-if="section === 'actuation'" class="card"></div>
+        </div>
+        <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+      </template>
+    </div>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
