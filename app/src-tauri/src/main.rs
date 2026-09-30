@@ -41,12 +41,12 @@ fn main() {
             let handle = app.handle().clone();
             let sink_handle = handle.clone();
             app.state::<commands::AppState>().device().set_sink(Arc::new(move |o| {
-                if let Output::Depth(d) = o {
+                if let Output::Depth { depth, travel, down } = o {
                     // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
                     if let Some(w) = sink_handle.get_webview_window("main")
-                        && (d == 0 || w.is_visible().unwrap_or(false))
+                        && (depth == 0 || w.is_visible().unwrap_or(false))
                     {
-                        let _ = w.emit("key-depth", d);
+                        let _ = w.emit("key-depth", (depth, travel, down));
                     }
                     return;
                 }

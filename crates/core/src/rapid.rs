@@ -120,8 +120,9 @@ pub enum Output {
     /// One brightness step down (-1) or up (+1).
     Brightness(i8),
     Sleep,
-    /// Depth of the first key still pressed, for the UI; 0 when none is.
-    Depth(u8),
+    /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
+    /// since its last extreme — what Rapid Trigger measures — and whether it is down.
+    Depth { depth: u8, travel: u8, down: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -253,12 +254,12 @@ pub struct Engine {
     plays: Vec<Play>,
     /// Key whose depth the UI shows.
     lead: Option<u8>,
-    shown: u8,
+    shown: (u8, bool),
 }
 
 impl Engine {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: 0 }
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: (0, false) }
     }
 
     pub fn set_config(&mut self, cfg: Config) {
@@ -275,16 +276,18 @@ impl Engine {
         out
     }
 
-    /// Depth of the first key pressed and still down, when it moved enough since last shown.
-    pub fn lead_depth(&mut self, depth: &[u8; 256]) -> Option<u8> {
+    /// `Output::Depth` for the depth report just fed, unless the lead key barely moved.
+    pub fn lead(&mut self, depth: &[u8; 256]) -> Option<Output> {
         if self.lead.is_none_or(|k| depth[k as usize] == 0) {
             self.lead = (1..256).find(|&k| depth[k] != 0).map(|k| k as u8);
         }
-        let d = self.lead.map_or(0, |k| depth[k as usize]);
-        (d.abs_diff(self.shown) >= DEPTH_STEP || (d == 0) != (self.shown == 0)).then(|| {
-            self.shown = d;
-            d
-        })
+        let (d, k) = self.lead.map_or((0, KeyState::default()), |k| (depth[k as usize], self.keys[k as usize]));
+        let (shown, down) = self.shown;
+        if d.abs_diff(shown) < DEPTH_STEP && (d == 0) == (shown == 0) && k.down == down {
+            return None;
+        }
+        self.shown = (d, k.down);
+        Some(Output::Depth { depth: d, travel: d.abs_diff(k.extreme), down: k.down })
     }
 
     fn transition(&mut self, key: u8, down: bool, now: Instant, out: &mut Vec<Output>) {
@@ -488,14 +491,23 @@ mod tests {
     }
 
     #[test]
-    fn lead_depth_follows_the_first_key_held() {
-        let mut e = engine();
-        assert_eq!(e.lead_depth(&depth(&[(S, 50)])), Some(50));
-        assert_eq!(e.lead_depth(&depth(&[(A, 200), (S, 52)])), None);
-        assert_eq!(e.lead_depth(&depth(&[(A, 200), (S, 90)])), Some(90));
-        assert_eq!(e.lead_depth(&depth(&[(A, 200)])), Some(200));
-        assert_eq!(e.lead_depth(&depth(&[])), Some(0));
-        assert_eq!(e.lead_depth(&depth(&[])), None);
+    fn lead_follows_the_first_key_held() {
+        let (mut e, t) = (engine(), Instant::now());
+        let mut feed = |keys: &[(u8, u8)]| {
+            let d = depth(keys);
+            e.feed_depth(&d, t);
+            e.lead(&d).map(|o| match o {
+                Output::Depth { depth, travel, down } => (depth, travel, down),
+                _ => unreachable!(),
+            })
+        };
+        assert_eq!(feed(&[(S, 50)]), Some((50, 0, false)));
+        assert_eq!(feed(&[(A, 200), (S, 52)]), None);
+        assert_eq!(feed(&[(A, 200), (S, 150)]), Some((150, 0, true)));
+        assert_eq!(feed(&[(A, 200), (S, 120)]), Some((120, 30, true)));
+        assert_eq!(feed(&[(A, 200)]), Some((200, 0, true)));
+        assert_eq!(feed(&[]), Some((0, 0, false)));
+        assert_eq!(feed(&[]), None);
     }
 
     #[test]

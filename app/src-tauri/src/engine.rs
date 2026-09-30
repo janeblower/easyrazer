@@ -98,7 +98,7 @@ impl Drop for EngineHandle {
 fn feed_depth(e: &mut Engine, report: &[u8], now: Instant) -> Vec<Output> {
     let Some(d) = rapid::parse_depth(report) else { return Vec::new() };
     let mut out = e.feed_depth(&d, now);
-    out.extend(e.lead_depth(&d).map(Output::Depth));
+    out.extend(e.lead(&d));
     out
 }
 
