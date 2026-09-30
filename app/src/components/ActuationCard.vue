@@ -53,12 +53,24 @@ let unlisten: UnlistenFn | undefined;
 onMounted(async () => (unlisten = await listen<[number, number, boolean]>("key-depth", (e) => (lead.value = e.payload))));
 onUnmounted(() => unlisten?.());
 const units = (mm: number) => (mm / (MAX - MIN)) * 255;
-const fill = computed(() => (props.driver && lead.value[0] ? at(lead.value[0] / 255) : "0px"));
-const rtFill = (show: boolean) =>
-  rtOn.value && show && lead.value[1] ? at((lead.value[1] - units(RT_MIN)) / units(RT_MAX - RT_MIN)) : "0px";
-// Split: press fills while the key is up and heading for the next press, release while it is down.
-const pressFill = computed(() => rtFill(!props.split || !lead.value[2]));
-const releaseFill = computed(() => rtFill(lead.value[2]));
+const NONE = { "--from": "0px", "--to": "0px" };
+const span = (from: number, to: number) => ({ "--from": at(from), "--to": at(to) });
+const fill = computed(() => (props.driver && lead.value[0] ? span(0, lead.value[0] / 255) : NONE));
+// Next move of the key: up to release once it is down, down to press otherwise.
+const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "up" : "down") : null));
+// Press grows down from the top and meets the thumb as the key goes down; release grows up
+// from the thumb and reaches the top as the key lets go.
+function rtFill(mm: number | null, down: boolean) {
+  const [, travel, isDown] = lead.value;
+  if (!rtOn.value || !travel || isDown !== down) return NONE;
+  if (!down) return span(0, (travel - units(RT_MIN)) / units(RT_MAX - RT_MIN));
+  const v = mm ?? 0.4;
+  const thumb = (v - RT_MIN) / (RT_MAX - RT_MIN);
+  return span(thumb * (1 - Math.min(1, travel / units(v))), thumb);
+}
+// Unsplit, the one slider stands for both.
+const pressFill = computed(() => rtFill(props.rapid.press, props.split ? false : lead.value[2]));
+const releaseFill = computed(() => rtFill(props.rapid.release, true));
 </script>
 
 <template>
@@ -75,9 +87,19 @@ const releaseFill = computed(() => rtFill(lead.value[2]));
           step="0.1"
           :value="value ?? MIN"
           :disabled="!count"
-          :style="{ '--fill': fill }"
+          :style="fill"
           @input="emit('set', mm($event))"
         />
+        <svg
+          v-if="arrow"
+          class="text-accent pointer-events-none right-[calc(100%+4px)] absolute -translate-y-1/2"
+          :style="{ top: fill['--to'] }"
+          viewBox="0 0 10 10"
+          width="10"
+          height="10"
+        >
+          <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
+        </svg>
         <template v-if="!driver">
           <div
             v-for="m in [HW_MIN, HW_MAX]"
@@ -118,7 +140,7 @@ const releaseFill = computed(() => rtFill(lead.value[2]));
             step="0.1"
             :value="rapid.press ?? 0.4"
             :disabled="!rtOn"
-            :style="{ '--fill': pressFill }"
+            :style="pressFill"
             @input="emit('press', mm($event))"
           />
           <span class="text-xs text-muted">1.0</span>
@@ -135,7 +157,7 @@ const releaseFill = computed(() => rtFill(lead.value[2]));
             step="0.1"
             :value="rapid.release ?? 0.4"
             :disabled="!rtOn"
-            :style="{ '--fill': releaseFill }"
+            :style="releaseFill"
             @input="emit('release', mm($event))"
           />
           <span class="text-xs text-muted">1.0</span>
@@ -162,9 +184,11 @@ const releaseFill = computed(() => rtFill(lead.value[2]));
   background: linear-gradient(
     to bottom,
     transparent 8px,
-    var(--accent) 8px,
-    var(--accent) var(--fill),
-    var(--key) var(--fill),
+    var(--key) 8px,
+    var(--key) var(--from),
+    var(--accent) var(--from),
+    var(--accent) var(--to),
+    var(--key) var(--to),
     var(--key) calc(100% - 8px),
     transparent calc(100% - 8px)
   );
