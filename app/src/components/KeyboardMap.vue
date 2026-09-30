@@ -214,7 +214,7 @@ function up(e: PointerEvent) {
         :title="title(k.key)"
       >
         <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
-        <span v-if="!colors" class="text-[11px] flex gap-1 items-baseline">
+        <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-baseline">
           <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
           <span v-if="k.editable && values[k.key] != null" class="ml-auto truncate" :class="valueClass(k.key)">{{ values[k.key] }}</span>
         </span>

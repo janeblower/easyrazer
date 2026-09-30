@@ -189,13 +189,13 @@ impl Device {
     }
 
     /// Assignments the keyboard types with now.
-    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize)) -> Result<Vec<KeyAssignment>, String> {
+    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<Vec<KeyAssignment>, String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
         let (t, _) = self.keyboard()?;
         let keys = editable_keys();
-        let all = actuation::read_all(t, actuation::LIVE, &keys, |n| progress(n, keys.len())).map_err(|e| e.to_string())?;
+        let all = actuation::read_all(t, actuation::LIVE, &keys, |n, a| progress(n, keys.len(), a)).map_err(|e| e.to_string())?;
         self.live = Some(all.iter().map(|a| (a.key, a.clone())).collect());
         Ok(all)
     }
@@ -270,7 +270,7 @@ impl Device {
         let (t, _) = self.keyboard()?;
         let profile = control::active_profile(t).map_err(|e| e.to_string())?;
         if !backed_up {
-            let all = actuation::read_all(t, profile, &editable_keys(), |_| {}).map_err(|e| e.to_string())?;
+            let all = actuation::read_all(t, profile, &editable_keys(), |_, _| {}).map_err(|e| e.to_string())?;
             write_backup(&actuation::format_backup(profile, &all))?;
         }
         for (id, body) in &bodies {
@@ -426,7 +426,7 @@ impl Device {
         }
         if self.live.is_none() {
             let (t, _) = self.control.as_ref().unwrap();
-            match actuation::read_all(t, actuation::LIVE, &editable_keys(), |_| {}) {
+            match actuation::read_all(t, actuation::LIVE, &editable_keys(), |_, _| {}) {
                 Ok(all) => self.live = Some(all.into_iter().map(|a| (a.key, a)).collect()),
                 Err(e) => {
                     self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e.to_string())]));
