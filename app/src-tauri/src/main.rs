@@ -14,6 +14,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use razer_core::control::{LED_GAME, LED_MACRO};
 use razer_core::rapid::Output;
 use settings::CloseAction;
 use tauri::{Emitter, Manager, WindowEvent};
@@ -56,6 +57,12 @@ fn main() {
                 std::thread::spawn(move || match o {
                     Output::Brightness(step) => h.state::<commands::AppState>().device().step_brightness(step > 0),
                     Output::Sleep => engine::sleep(),
+                    Output::MacroLed => {
+                        h.state::<commands::AppState>().device().set_led(LED_MACRO, true, true);
+                        std::thread::sleep(Duration::from_secs(1));
+                        h.state::<commands::AppState>().device().set_led(LED_MACRO, false, false);
+                    }
+                    Output::GameMode(on) => h.state::<commands::AppState>().device().set_led(LED_GAME, on, false),
                     _ => {}
                 });
             }));
