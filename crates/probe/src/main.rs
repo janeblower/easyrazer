@@ -5,7 +5,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
+use razer_core::actuation;
 use razer_core::analog::{self, Layer};
+use razer_core::control;
+use razer_core::devices;
 use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
 use razer_core::packet::{self, Command, Response};
@@ -57,8 +60,11 @@ fn run(args: &[String]) -> Result<()> {
     if cmd == "lamps" {
         return lamps(&api);
     }
-    if cmd == "lampauto" || cmd == "lampfill" {
-        return lamp_write(&api, cmd, rest);
+    if cmd == "lampauto" {
+        return lamp_auto(&api, rest);
+    }
+    if cmd == "lampfill" {
+        return lamp_fill(&api, rest);
     }
     warn_if_synapse_running();
     let dev = open(&api)?;
@@ -119,7 +125,7 @@ fn info(dev: &HidTransport) -> Result<String> {
     let fw = exchange(dev, Command::new(0x00, 0x81), 2, &[])?;
     let serial = exchange(dev, Command::new(0x00, 0x82), 0x16, &[])?;
     let mode = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
-    let active = exchange(dev, Command::new(0x05, 0x84), 1, &[])?;
+    let active = control::active_profile(dev).map_err(|e| e.to_string())?;
     let sn: String = serial.data().iter().take_while(|&&b| b != 0).map(|&b| b as char).collect();
     Ok(format!(
         "firmware {}.{}\nserial   {sn}\nmode     {}\nprofiles {:?} (active {})\n",
@@ -127,7 +133,7 @@ fn info(dev: &HidTransport) -> Result<String> {
         fw.args[1],
         hex(&mode.args[..2]),
         profiles(dev)?,
-        active.args[0]
+        active
     ))
 }
 
@@ -218,12 +224,12 @@ fn dump(dev: &HidTransport, a: &[String]) -> Result<()> {
 }
 
 fn set_mode(dev: &HidTransport, a: &[String]) -> Result<String> {
-    let m: u8 = match a.first().map(String::as_str) {
-        Some("0") => 0x00,
-        Some("3") => 0x03,
+    match a.first().map(String::as_str) {
+        Some("0") => control::set_hardware_mode(dev),
+        Some("3") => control::set_driver_mode(dev),
         _ => return Err(USAGE.into()),
-    };
-    exchange(dev, Command::new(0x00, 0x04), 2, &[m, 0])?;
+    }
+    .map_err(|e| e.to_string())?;
     let r = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
     Ok(format!("mode {}\n", hex(&r.args[..2])))
 }
@@ -238,18 +244,10 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
     let low: u8 = low.parse().map_err(|_| "low must be 0..=255")?;
     let high: u8 = high.parse().map_err(|_| "high must be 0..=255")?;
 
-    let read = |dev: &HidTransport| -> Result<analog::KeyAssignment> {
-        let r = exchange(
-            dev,
-            analog::GET_KEY_ASSIGNMENT,
-            analog::KEY_ASSIGNMENT_SIZE,
-            &analog::get_args(profile, key, Layer::Normal),
-        )?;
-        analog::parse(r.data()).ok_or_else(|| format!("short reply {}", hex(r.data())))
-    };
+    let read = |dev: &HidTransport| actuation::read_key(dev, profile, key).map_err(|e| e.to_string());
     let before = read(dev)?;
     let after = analog::KeyAssignment { threshold_low: low, threshold_high: high, ..before.clone() };
-    exchange(dev, analog::SET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &analog::set_args(&after))?;
+    actuation::write_key(dev, &after).map_err(|e| e.to_string())?;
     let now = read(dev)?;
     Ok(format!(
         "before {}\nafter  {}\n",
@@ -267,17 +265,27 @@ fn open_lamps(api: &HidApi) -> Result<HidDevice> {
     info.open_device(api).map_err(|e| e.to_string())
 }
 
-fn lamp_write(api: &HidApi, cmd: &str, a: &[String]) -> Result<()> {
-    let bytes: Vec<u8> = a.iter().map(|s| s.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+fn lamp_bytes(a: &[String]) -> Result<Vec<u8>> {
+    a.iter().map(|s| s.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())
+}
+
+fn lamp_auto(api: &HidApi, a: &[String]) -> Result<()> {
+    let &[on @ (0 | 1)] = lamp_bytes(a)?.as_slice() else {
+        return Err(USAGE.into());
+    };
+    let spec = devices::by_pid(PID).ok_or("device description missing")?;
+    hid::set_autonomous(api, spec, on == 1).map_err(|e| e.to_string())
+}
+
+fn lamp_fill(api: &HidApi, a: &[String]) -> Result<()> {
+    let bytes = lamp_bytes(a)?;
     let dev = open_lamps(api)?;
     let [last_lo, last_hi] = (lamp_count(&dev)? - 1).to_le_bytes();
-    let report = match (cmd, bytes.as_slice()) {
-        ("lampauto", &[on @ (0 | 1)]) => vec![6, on],
-        // LampRangeUpdateReport: flags (1 = update complete), first and last lamp id, RGB.
-        ("lampfill", &[r, g, b]) => vec![5, 1, 0, 0, last_lo, last_hi, r, g, b],
-        _ => return Err(USAGE.into()),
+    // LampRangeUpdateReport: flags (1 = update complete), first and last lamp id, RGB.
+    let &[r, g, b] = bytes.as_slice() else {
+        return Err(USAGE.into());
     };
-    dev.send_feature_report(&report).map_err(|e| e.to_string())
+    dev.send_feature_report(&[5, 1, 0, 0, last_lo, last_hi, r, g, b]).map_err(|e| e.to_string())
 }
 
 fn lamp_count(dev: &HidDevice) -> Result<u16> {
