@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
 import KeysCard from "./components/KeysCard.vue";
+import ActionBar from "./components/ActionBar.vue";
 import ActuationCard from "./components/ActuationCard.vue";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
@@ -77,6 +78,12 @@ const canSave = computed(
       Object.keys(bindEdits.value).length > 0 ||
       bindUnsaved.value.size > 0),
 );
+const actions = computed(() => ({
+  pending: dirty.value ? t("common.notAppliedN", { n: dirty.value }) : "",
+  canRevert: dirty.value > 0 && !busy.value,
+  canApply: canApply.value,
+  canWrite: canSave.value,
+}));
 const selectedValue = computed(() => {
   const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
   return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
@@ -466,19 +473,7 @@ onUnmounted(() => {
           :single="section === 'bindings'"
         />
         <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
-          <KeysCard
-            :count="selection.size"
-            :dirty="dirty"
-            :can-apply="canApply"
-            :can-save="canSave"
-            :busy="busy"
-            :single="section === 'bindings'"
-            @apply="apply"
-            @save="save"
-            @revert="revert"
-            @select-all="selectAll"
-            @clear="selection = new Set()"
-          >
+          <KeysCard :count="selection.size" :single="section === 'bindings'" @select-all="selectAll" @clear="selection = new Set()">
             <ActuationCard
               v-if="section === 'actuation'"
               :count="selection.size"
@@ -500,8 +495,11 @@ onUnmounted(() => {
               :macros="macroState?.macros ?? {}"
               @set="setBinding"
             />
+            <ActionBar v-if="section === 'bindings'" v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </KeysCard>
-          <div v-if="section === 'actuation'" class="card"></div>
+          <div v-if="section === 'actuation'" class="px-4 py-3 card flex flex-col justify-end">
+            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+          </div>
         </div>
       </div>
     </template>

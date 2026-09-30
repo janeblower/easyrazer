@@ -75,21 +75,49 @@ function rtFill(mm: number | null, down: boolean) {
 // Unsplit, the one slider stands for both.
 const pressFill = computed(() => rtFill(props.rapid.press, props.split ? false : lead.value[2]));
 const releaseFill = computed(() => rtFill(props.rapid.release, true));
+
+const shown = computed(() => mid(MIN, MAX, props.value, MIN));
+const rtSliders = computed(
+  () =>
+    [
+      {
+        kind: "press",
+        value: props.rapid.press,
+        shown: mid(RT_MIN, RT_MAX, props.rapid.press, 0.4),
+        fill: pressFill.value,
+        hidden: false,
+        input: (v: number) => {
+          emit("press", v);
+        },
+      },
+      {
+        kind: "release",
+        value: props.rapid.release,
+        shown: mid(RT_MIN, RT_MAX, props.rapid.release, 0.4),
+        fill: releaseFill.value,
+        hidden: !props.split,
+        input: (v: number) => {
+          emit("release", v);
+        },
+      },
+    ] as const,
+);
 </script>
 
 <template>
-  <div class="flex gap-8 justify-center">
+  <div class="flex gap-8 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
-      <span class="text-sm">{{ $t("actuation.title") }}</span>
+      <span class="text-sm h-5">{{ $t("actuation.title") }}</span>
       <span class="text-xs text-muted">1.5</span>
-      <div class="relative">
+      <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
+      <div class="mx-10 relative">
         <input
           class="depth h-[200px] block [writing-mode:vertical-lr]"
           type="range"
           :min="MIN"
           :max="MAX"
           :step="step"
-          :value="mid(MIN, MAX, value, MIN)"
+          :value="shown"
           :disabled="!count"
           :style="fill"
           @input="emit('set', mm($event))"
@@ -112,18 +140,19 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
             :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
             :style="{ top: markTop(m) }"
           >
-            <span class="text-xs left-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
+            <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
           </div>
         </template>
+        <span class="thumb-value" :style="{ top: at((shown - MIN) / (MAX - MIN)) }">{{ label(value) }}</span>
       </div>
       <span class="text-xs text-muted">3.6</span>
-      <span class="text-sm text-center min-w-[60px]">{{ label(value) }}</span>
     </div>
-    <img src="/switch.gif" alt="" class="h-[240px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
+    <img src="/switch.gif" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
     <div class="flex flex-col gap-1 items-center">
-      <label class="text-sm flex gap-2 whitespace-nowrap items-center">
+      <label class="switch text-sm h-5 whitespace-nowrap">
         <input
           type="checkbox"
+          role="switch"
           :checked="rapid.enabled === true"
           :indeterminate="count > 0 && rapid.enabled === null"
           :disabled="!count || !driver"
@@ -131,47 +160,33 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
         />
         {{ $t("rapid.title") }}
       </label>
-      <span v-if="!driver" class="text-xs text-muted">{{ $t("rapid.hwOnly") }}</span>
-      <div class="flex gap-6">
-        <div class="flex flex-col gap-1 items-center">
-          <span v-if="split" class="text-xs text-muted">{{ $t("rapid.press") }}</span>
+      <div class="flex">
+        <!-- The release slider keeps its place while hidden, so splitting moves nothing. -->
+        <div v-for="s in rtSliders" :key="s.kind" class="flex flex-col gap-1 items-center" :class="{ invisible: s.hidden }">
           <span class="text-xs text-muted">0.1</span>
-          <input
-            class="depth h-[160px] [writing-mode:vertical-lr]"
-            type="range"
-            :min="RT_MIN"
-            :max="RT_MAX"
-            :step="step"
-            :value="mid(RT_MIN, RT_MAX, rapid.press, 0.4)"
-            :disabled="!rtOn"
-            :style="pressFill"
-            @input="emit('press', mm($event))"
-          />
+          <div class="mx-10 relative">
+            <input
+              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              type="range"
+              :min="RT_MIN"
+              :max="RT_MAX"
+              :step="step"
+              :value="s.shown"
+              :disabled="!rtOn"
+              :style="s.fill"
+              @input="s.input(mm($event))"
+            />
+            <span class="thumb-value" :style="{ top: at((s.shown - RT_MIN) / (RT_MAX - RT_MIN)) }">{{ label(s.value) }}</span>
+          </div>
           <span class="text-xs text-muted">1.0</span>
-          <span class="text-sm text-center min-w-[60px]">{{ label(rapid.press) }}</span>
-        </div>
-        <div v-if="split" class="flex flex-col gap-1 items-center">
-          <span class="text-xs text-muted">{{ $t("rapid.release") }}</span>
-          <span class="text-xs text-muted">0.1</span>
-          <input
-            class="depth h-[160px] [writing-mode:vertical-lr]"
-            type="range"
-            :min="RT_MIN"
-            :max="RT_MAX"
-            :step="step"
-            :value="mid(RT_MIN, RT_MAX, rapid.release, 0.4)"
-            :disabled="!rtOn"
-            :style="releaseFill"
-            @input="emit('release', mm($event))"
-          />
-          <span class="text-xs text-muted">1.0</span>
-          <span class="text-sm text-center min-w-[60px]">{{ label(rapid.release) }}</span>
+          <span class="text-xs text-muted" :class="{ invisible: !split }">{{ $t(`rapid.${s.kind}`) }}</span>
         </div>
       </div>
-      <label class="text-xs flex gap-2 items-center">
-        <input type="checkbox" :checked="split" :disabled="!rtOn" @change="emit('split', checked($event))" />
+      <label class="switch text-xs">
+        <input type="checkbox" role="switch" :checked="split" :disabled="!rtOn" @change="emit('split', checked($event))" />
         {{ $t("rapid.split") }}
       </label>
+      <span class="text-xs text-muted" :class="{ invisible: driver }">{{ $t("rapid.hwOnly") }}</span>
     </div>
   </div>
 </template>
@@ -204,6 +219,14 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
   margin-left: -5px;
   border-radius: 50%;
   background: var(--text);
+}
+.thumb-value {
+  position: absolute;
+  left: calc(100% + 6px);
+  translate: 0 -50%;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .depth:disabled::-webkit-slider-thumb {
   background: var(--muted);

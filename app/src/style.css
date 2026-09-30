@@ -112,6 +112,11 @@ input[type="checkbox"] {
   left: 18px;
 }
 
+/* Some of the selected keys are on, some off. */
+.switch input:indeterminate::after {
+  left: 10px;
+}
+
 dialog {
   padding: 0;
   border: 1px solid var(--line);
