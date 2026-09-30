@@ -3,7 +3,7 @@
 use crate::packet::Command;
 use crate::transport::{Error, Transport, exchange};
 
-pub const MODE_HARDWARE: u8 = 0x00;
+const MODE_HARDWARE: u8 = 0x00;
 pub const MODE_DRIVER: u8 = 0x03;
 
 const GET_MODE: Command = Command::new(0x00, 0x84);

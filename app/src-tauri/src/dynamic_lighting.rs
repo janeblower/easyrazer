@@ -1,64 +1,32 @@
 //! Windows Dynamic Lighting on/off: the per-user switch the Settings app writes.
 
-use std::os::windows::process::CommandExt;
-use std::process::{Command, Output};
+use std::ptr::null_mut;
 
-use crate::device::CREATE_NO_WINDOW;
+use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD, RegGetValueW, RegSetKeyValueW};
 
-const KEY: &str = r"HKCU\Software\Microsoft\Lighting";
+const KEY: &str = r"Software\Microsoft\Lighting";
 const VALUE: &str = "AmbientLightingEnabled";
 
-pub fn enabled() -> bool {
-    parse(Command::new("reg").args(["query", KEY, "/v", VALUE]).creation_flags(CREATE_NO_WINDOW).output().ok())
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(Some(0)).collect()
 }
 
-/// Anything but a clear `0x0` counts as enabled: a false warning beats an effect that silently stays hidden.
-fn parse(out: Option<Output>) -> bool {
-    let Some(o) = out.filter(|o| o.status.success()) else {
-        return true;
-    };
-    let text = String::from_utf8_lossy(&o.stdout);
-    let value = text.lines().find(|l| l.contains(VALUE)).and_then(|l| l.split_whitespace().last());
-    value != Some("0x0")
+/// Anything but a clear `0` counts as enabled: a false warning beats an effect that silently stays hidden.
+pub fn enabled() -> bool {
+    let mut data = 1u32;
+    let mut size = 4u32;
+    let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, wide(KEY).as_ptr(), wide(VALUE).as_ptr(), RRF_RT_REG_DWORD, null_mut(), (&mut data as *mut u32).cast(), &mut size) };
+    status != ERROR_SUCCESS || data != 0
 }
 
 /// The Lighting service watches this value and switches at once.
 pub fn set(on: bool) -> Result<(), String> {
-    let data = if on { "1" } else { "0" };
-    let out = Command::new("reg")
-        .args(["add", KEY, "/v", VALUE, "/t", "REG_DWORD", "/d", data, "/f"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if out.status.success() {
+    let data = on as u32;
+    let status = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, wide(KEY).as_ptr(), wide(VALUE).as_ptr(), REG_DWORD, (&data as *const u32).cast(), 4) };
+    if status == ERROR_SUCCESS {
         Ok(())
     } else {
-        Err(format!("reg add: {}", String::from_utf8_lossy(&out.stderr).trim()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::windows::process::ExitStatusExt;
-    use std::process::ExitStatus;
-
-    fn reg(code: u32, stdout: &str) -> Option<Output> {
-        Some(Output { status: ExitStatus::from_raw(code), stdout: stdout.as_bytes().to_vec(), stderr: Vec::new() })
-    }
-
-    const LINE: &str = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Lighting\r\n    AmbientLightingEnabled    REG_DWORD    ";
-
-    #[test]
-    fn reads_the_switch() {
-        assert!(!parse(reg(0, &format!("{LINE}0x0\r\n"))));
-        assert!(parse(reg(0, &format!("{LINE}0x1\r\n"))));
-    }
-
-    #[test]
-    fn anything_unclear_counts_as_enabled() {
-        assert!(parse(None));
-        assert!(parse(reg(1, "")));
-        assert!(parse(reg(0, "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Lighting\r\n")));
+        Err(format!("registry: {}", std::io::Error::from_raw_os_error(status as i32)))
     }
 }

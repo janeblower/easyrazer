@@ -5,10 +5,13 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice};
+use razer_core::actuation;
 use razer_core::analog::{self, Layer};
+use razer_core::control;
+use razer_core::devices;
 use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
-use razer_core::packet::{self, Command, Response};
+use razer_core::packet::{self, Command};
 use razer_core::transport;
 
 const USAGE: &str = "\
@@ -26,7 +29,7 @@ usage: razer-probe <command>
   lampfill <r> <g> <b>          WRITE every LampArray lamp to one color
   set <cls> <id> <size> [hex..] WRITE raw command";
 
-type Result<T> = std::result::Result<T, String>;
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// The probe explores one model; the app finds models through `razer_core::devices`.
 const PID: u16 = 0x0266;
@@ -47,7 +50,7 @@ fn run(args: &[String]) -> Result<()> {
         return Err(USAGE.into());
     };
     let rest = &args[1..];
-    let api = HidApi::new().map_err(|e| e.to_string())?;
+    let api = HidApi::new()?;
     if cmd == "stream" {
         return stream(&api, rest);
     }
@@ -57,8 +60,11 @@ fn run(args: &[String]) -> Result<()> {
     if cmd == "lamps" {
         return lamps(&api);
     }
-    if cmd == "lampauto" || cmd == "lampfill" {
-        return lamp_write(&api, cmd, rest);
+    if cmd == "lampauto" {
+        return lamp_auto(&api, rest);
+    }
+    if cmd == "lampfill" {
+        return lamp_fill(&api, rest);
     }
     warn_if_synapse_running();
     let dev = open(&api)?;
@@ -90,8 +96,7 @@ fn list(api: &HidApi) -> Result<()> {
 }
 
 fn open(api: &HidApi) -> Result<HidTransport> {
-    hid::open_control(api)
-        .map_err(|e| e.to_string())?
+    hid::open_control(api)?
         .map(|(t, _)| t)
         .ok_or_else(|| "control interface MI_03 not found".into())
 }
@@ -107,19 +112,15 @@ fn warn_if_synapse_running() {
     }
 }
 
-fn exchange(dev: &HidTransport, cmd: Command, size: u8, args: &[u8]) -> Result<Response> {
-    transport::exchange(dev, cmd, size, args).map_err(|e| e.to_string())
-}
-
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02X}")).collect::<Vec<_>>().join(" ")
 }
 
 fn info(dev: &HidTransport) -> Result<String> {
-    let fw = exchange(dev, Command::new(0x00, 0x81), 2, &[])?;
-    let serial = exchange(dev, Command::new(0x00, 0x82), 0x16, &[])?;
-    let mode = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
-    let active = exchange(dev, Command::new(0x05, 0x84), 1, &[])?;
+    let fw = transport::exchange(dev, Command::new(0x00, 0x81), 2, &[])?;
+    let serial = transport::exchange(dev, Command::new(0x00, 0x82), 0x16, &[])?;
+    let mode = transport::exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
+    let active = control::active_profile(dev)?;
     let sn: String = serial.data().iter().take_while(|&&b| b != 0).map(|&b| b as char).collect();
     Ok(format!(
         "firmware {}.{}\nserial   {sn}\nmode     {}\nprofiles {:?} (active {})\n",
@@ -127,19 +128,19 @@ fn info(dev: &HidTransport) -> Result<String> {
         fw.args[1],
         hex(&mode.args[..2]),
         profiles(dev)?,
-        active.args[0]
+        active
     ))
 }
 
 /// Profile ids stored on the device (`05:81`: count, then ids).
 fn profiles(dev: &HidTransport) -> Result<Vec<u8>> {
-    let r = exchange(dev, Command::new(0x05, 0x81), 80, &[])?;
+    let r = transport::exchange(dev, Command::new(0x05, 0x81), 80, &[])?;
     let n = (r.args[0] as usize).min(packet::ARGS_LEN - 1);
     Ok(r.args[1..=n].to_vec())
 }
 
 fn parse_hex(s: &str) -> Result<u8> {
-    u8::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|_| format!("bad hex byte: {s}"))
+    u8::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|_| format!("bad hex byte: {s}").into())
 }
 
 fn raw_get(dev: &HidTransport, a: &[String]) -> Result<String> {
@@ -148,11 +149,11 @@ fn raw_get(dev: &HidTransport, a: &[String]) -> Result<String> {
     }
     let cmd = Command::new(parse_hex(&a[0])?, parse_hex(&a[1])?);
     if !cmd.is_get() {
-        return Err(format!("{cmd} is not a getter; writes are not allowed here"));
+        return Err(format!("{cmd} is not a getter; writes are not allowed here").into());
     }
     let size = parse_hex(&a[2])?;
     let args = a[3..].iter().map(|s| parse_hex(s)).collect::<Result<Vec<_>>>()?;
-    let r = exchange(dev, cmd, size, &args)?;
+    let r = transport::exchange(dev, cmd, size, &args)?;
     Ok(format!("{cmd} size={} data: {}\n", r.size, hex(r.data())))
 }
 
@@ -165,7 +166,7 @@ fn keys_arg(a: &[String]) -> Result<Vec<u8>> {
         return Ok(keymap::KEYS.iter().map(|&(_, id)| id).collect());
     }
     a.iter()
-        .map(|s| keymap::by_name(s).or_else(|| s.parse().ok()).ok_or(format!("unknown key: {s}")))
+        .map(|s| keymap::by_name(s).or_else(|| s.parse().ok()).ok_or_else(|| format!("unknown key: {s}").into()))
         .collect()
 }
 
@@ -178,11 +179,11 @@ fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
     let mut out = String::new();
     for layer in [Layer::Normal, Layer::Hypershift] {
         for &key in keys {
-            let r = exchange(
+            let r = transport::exchange(
                 dev,
                 analog::GET_KEY_ASSIGNMENT,
                 analog::KEY_ASSIGNMENT_SIZE,
-                &analog::get_args(profile, key, layer),
+                &[profile, key, layer as u8],
             )?;
             let a = analog::parse(r.data()).ok_or_else(|| format!("key {key}: short reply {}", hex(r.data())))?;
             let _ = writeln!(
@@ -218,13 +219,12 @@ fn dump(dev: &HidTransport, a: &[String]) -> Result<()> {
 }
 
 fn set_mode(dev: &HidTransport, a: &[String]) -> Result<String> {
-    let m: u8 = match a.first().map(String::as_str) {
-        Some("0") => 0x00,
-        Some("3") => 0x03,
+    match a.first().map(String::as_str) {
+        Some("0") => control::set_hardware_mode(dev),
+        Some("3") => control::set_driver_mode(dev),
         _ => return Err(USAGE.into()),
-    };
-    exchange(dev, Command::new(0x00, 0x04), 2, &[m, 0])?;
-    let r = exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
+    }?;
+    let r = transport::exchange(dev, Command::new(0x00, 0x84), 2, &[])?;
     Ok(format!("mode {}\n", hex(&r.args[..2])))
 }
 
@@ -238,18 +238,10 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
     let low: u8 = low.parse().map_err(|_| "low must be 0..=255")?;
     let high: u8 = high.parse().map_err(|_| "high must be 0..=255")?;
 
-    let read = |dev: &HidTransport| -> Result<analog::KeyAssignment> {
-        let r = exchange(
-            dev,
-            analog::GET_KEY_ASSIGNMENT,
-            analog::KEY_ASSIGNMENT_SIZE,
-            &analog::get_args(profile, key, Layer::Normal),
-        )?;
-        analog::parse(r.data()).ok_or_else(|| format!("short reply {}", hex(r.data())))
-    };
+    let read = |dev: &HidTransport| actuation::read_key(dev, profile, key);
     let before = read(dev)?;
     let after = analog::KeyAssignment { threshold_low: low, threshold_high: high, ..before.clone() };
-    exchange(dev, analog::SET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &analog::set_args(&after))?;
+    actuation::write_key(dev, &after)?;
     let now = read(dev)?;
     Ok(format!(
         "before {}\nafter  {}\n",
@@ -264,33 +256,43 @@ fn open_lamps(api: &HidApi) -> Result<HidDevice> {
         .device_list()
         .find(|d| d.vendor_id() == VID && d.product_id() == PID && d.usage_page() == 0x59)
         .ok_or("LampArray collection not found")?;
-    info.open_device(api).map_err(|e| e.to_string())
+    Ok(info.open_device(api)?)
 }
 
-fn lamp_write(api: &HidApi, cmd: &str, a: &[String]) -> Result<()> {
-    let bytes: Vec<u8> = a.iter().map(|s| s.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+fn lamp_bytes(a: &[String]) -> Result<Vec<u8>> {
+    Ok(a.iter().map(|s| s.parse::<u8>()).collect::<std::result::Result<_, _>>()?)
+}
+
+fn lamp_auto(api: &HidApi, a: &[String]) -> Result<()> {
+    let &[on @ (0 | 1)] = lamp_bytes(a)?.as_slice() else {
+        return Err(USAGE.into());
+    };
+    let spec = devices::by_pid(PID).ok_or("device description missing")?;
+    Ok(hid::set_autonomous(api, spec, on == 1)?)
+}
+
+fn lamp_fill(api: &HidApi, a: &[String]) -> Result<()> {
+    let bytes = lamp_bytes(a)?;
     let dev = open_lamps(api)?;
     let [last_lo, last_hi] = (lamp_count(&dev)? - 1).to_le_bytes();
-    let report = match (cmd, bytes.as_slice()) {
-        ("lampauto", &[on @ (0 | 1)]) => vec![6, on],
-        // LampRangeUpdateReport: flags (1 = update complete), first and last lamp id, RGB.
-        ("lampfill", &[r, g, b]) => vec![5, 1, 0, 0, last_lo, last_hi, r, g, b],
-        _ => return Err(USAGE.into()),
+    // LampRangeUpdateReport: flags (1 = update complete), first and last lamp id, RGB.
+    let &[r, g, b] = bytes.as_slice() else {
+        return Err(USAGE.into());
     };
-    dev.send_feature_report(&report).map_err(|e| e.to_string())
+    Ok(dev.send_feature_report(&[5, 1, 0, 0, last_lo, last_hi, r, g, b])?)
 }
 
 fn lamp_count(dev: &HidDevice) -> Result<u16> {
     let mut r = [0u8; 23];
     r[0] = 1;
-    dev.get_feature_report(&mut r).map_err(|e| e.to_string())?;
+    dev.get_feature_report(&mut r)?;
     Ok(u16::from_le_bytes([r[1], r[2]]))
 }
 
 fn lamps(api: &HidApi) -> Result<()> {
     let dev = open_lamps(api)?;
     let mut buf = [0u8; 4096];
-    let n = dev.get_report_descriptor(&mut buf).map_err(|e| e.to_string())?;
+    let n = dev.get_report_descriptor(&mut buf)?;
     println!("descriptor ({n} bytes)");
     for line in buf[..n].chunks(16) {
         println!("{}", hex(line));
@@ -388,8 +390,8 @@ fn raw_set(dev: &HidTransport, a: &[String]) -> Result<String> {
         || cmd == Command::new(0xFE, 0x28)
         || (cmd == Command::new(0x00, 0x0B) && args.starts_with(&[0x01, 0x01]))
     {
-        return Err(format!("{cmd} rewrites the factory config and is refused"));
+        return Err(format!("{cmd} rewrites the factory config and is refused").into());
     }
-    let r = exchange(dev, cmd, size, &args)?;
+    let r = transport::exchange(dev, cmd, size, &args)?;
     Ok(format!("{cmd} ok, data: {}\n", hex(r.data())))
 }

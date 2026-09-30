@@ -26,8 +26,9 @@ import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
-import AutostartOffer from "./components/AutostartOffer.vue";
+import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
+import { useConfirmWrite } from "./confirmWrite";
 import { setLanguage, systemLanguage } from "./i18n";
 
 const { t } = useI18n();
@@ -55,7 +56,6 @@ const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
 const offering = ref(false);
-const asking = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
@@ -84,10 +84,7 @@ const actions = computed(() => ({
   canApply: canApply.value,
   canWrite: canSave.value,
 }));
-const selectedValue = computed(() => {
-  const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
-  return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
-});
+const selectedValue = computed(() => common(Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k])) ?? null);
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
 const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;
@@ -214,7 +211,7 @@ async function onStatus(s: DeviceStatus) {
     loadedProfile = null;
     return;
   }
-  if (loadedProfile !== s.profile && !busy.value) await load();
+  if (loadedProfile !== s.profile) await load();
 }
 
 async function refresh() {
@@ -259,6 +256,30 @@ function revert() {
   bindErrors.value = {};
 }
 
+type Written = { status: "ok" | "unconfirmed"; key: number };
+type Failed = { status: "error"; key: number; message: string };
+
+// Confirmed and unconfirmed keys take the device value and leave the edits; only failed ones keep them.
+function merge<O extends Written, V, E>(
+  results: (O | Failed)[],
+  base: KeyMap<V>,
+  edits: KeyMap<E>,
+  value: (r: O) => V,
+  unconfirmed: (r: O) => string,
+) {
+  const next = { base: { ...base }, edits: { ...edits }, errors: {} as KeyMap<string> };
+  for (const r of results) {
+    if (r.status === "error") {
+      next.errors[r.key] = r.message;
+      continue;
+    }
+    next.base[r.key] = value(r);
+    delete next.edits[r.key];
+    if (r.status === "unconfirmed") next.errors[r.key] = unconfirmed(r);
+  }
+  return next;
+}
+
 async function write(command: "apply" | "save", done: string) {
   busy.value = true;
   let failed = false;
@@ -277,38 +298,28 @@ async function write(command: "apply" | "save", done: string) {
       rapidEdits.value = {};
     }
     unsaved.value = new Set(keys);
-    const base = { ...baseline.value };
-    const next = { ...edits.value };
-    const errs: KeyMap<string> = {};
-    for (const r of results) {
-      if (r.status === "error") {
-        errs[r.key] = r.message;
-        continue;
-      }
-      base[r.key] = r.mm;
-      delete next[r.key];
-      if (r.status === "unconfirmed") errs[r.key] = t("actuation.unconfirmed", { v: r.mm.toFixed(1) });
-    }
-    baseline.value = base;
-    edits.value = next;
-    errors.value = errs;
+    const applied = merge(
+      results,
+      baseline.value,
+      edits.value,
+      (r) => r.mm,
+      (r) => t("actuation.unconfirmed", { v: r.mm.toFixed(1) }),
+    );
+    baseline.value = applied.base;
+    edits.value = applied.edits;
+    errors.value = applied.errors;
     bindUnsaved.value = new Set(unsaved_bindings);
-    const bBase = { ...bindBase.value };
-    const bNext = { ...bindEdits.value };
-    const bErrs: KeyMap<string> = {};
-    for (const r of bound) {
-      if (r.status === "error") {
-        bErrs[r.key] = r.message;
-        continue;
-      }
-      bBase[r.key] = r.action;
-      delete bNext[r.key];
-      if (r.status === "unconfirmed") bErrs[r.key] = t("bindings.unconfirmed");
-    }
-    bindBase.value = bBase;
-    bindEdits.value = bNext;
-    bindErrors.value = bErrs;
-    const bad = Object.keys(errs).length + Object.keys(bErrs).length;
+    const binds = merge(
+      bound,
+      bindBase.value,
+      bindEdits.value,
+      (r) => r.action,
+      () => t("bindings.unconfirmed"),
+    );
+    bindBase.value = binds.base;
+    bindEdits.value = binds.edits;
+    bindErrors.value = binds.errors;
+    const bad = Object.keys(applied.errors).length + Object.keys(binds.errors).length;
     message.value = bad ? t("actuation.failed", { n: bad }) : t(done);
   } catch (error) {
     message.value = String(error);
@@ -343,25 +354,14 @@ async function onWriteMacros() {
   await write("apply", "actuation.applied");
 }
 
-async function save() {
-  try {
-    const settings = await invoke<AppSettings>("app_settings");
-    if (settings.confirm_write) {
-      asking.value = true;
-      return;
-    }
-  } catch (error) {
-    message.value = String(error);
-    return;
-  }
-  await write("save", "actuation.saved");
-}
-
-async function onConfirm(dontAsk: boolean) {
-  asking.value = false;
-  if (dontAsk) await invoke("set_confirm_write", { on: false }).catch(showError);
-  await write("save", "actuation.saved");
-}
+const {
+  asking,
+  write: save,
+  onConfirm,
+} = useConfirmWrite(
+  async () => write("save", "actuation.saved"),
+  (error) => (message.value = String(error)),
+);
 
 async function onClose(action: CloseAction, remember: boolean) {
   closing.value = false;
@@ -521,7 +521,13 @@ onUnmounted(() => {
       @no="macrosToWrite = []"
     />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
-    <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
+    <ModalDialog v-if="offering && !closing" :title="$t('dialogs.autostart.title')" @cancel="offering = false">
+      <p>{{ $t("dialogs.autostart.text") }}</p>
+      <template #actions>
+        <button @click="onOffer(false)">{{ $t("dialogs.autostart.no") }}</button>
+        <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
+      </template>
+    </ModalDialog>
     <footer class="text-xs text-muted">{{ $t("footer") }}</footer>
   </main>
 </template>

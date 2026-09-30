@@ -69,7 +69,7 @@ pub fn request(tid: u8, cmd: Command, size: u8, args: &[u8]) -> [u8; LEN] {
     r
 }
 
-pub fn crc(r: &[u8; LEN]) -> u8 {
+fn crc(r: &[u8; LEN]) -> u8 {
     r[2..CRC].iter().fold(0, |a, b| a ^ b)
 }
 

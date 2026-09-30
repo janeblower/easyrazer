@@ -15,7 +15,7 @@ pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignmen
         t,
         analog::GET_KEY_ASSIGNMENT,
         analog::KEY_ASSIGNMENT_SIZE,
-        &analog::get_args(profile, key, Layer::Normal),
+        &[profile, key, Layer::Normal as u8],
     )?;
     analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
 }
@@ -97,7 +97,7 @@ fn set_mm(t: &impl Transport, profile: u8, key: u8, &mm: &f32) -> Result<Outcome
     // The UI works in 0.1 mm steps; rounding absorbs float drift from the slider.
     let mm = (mm * 10.0).round() / 10.0;
     if !(MIN_MM..=MAX_MM).contains(&mm) {
-        return Err(Error::OutOfRange(mm));
+        return Err(Error::BadArgument(format!("{mm} mm is outside {MIN_MM}..={MAX_MM}")));
     }
     update(t, profile, key, |a| a.threshold_low = analog::mm_to_threshold(mm))
 }
@@ -181,7 +181,7 @@ mod tests {
     fn out_of_range_is_rejected_without_touching_the_device() {
         let kb = FakeKeyboard::new(&[A]);
         let r = apply(&kb, 1, &[(A, 3.7), (A, 1.44), (A, f32::NAN)]);
-        assert!(r.iter().all(|(_, o)| matches!(o, Outcome::Failed(Error::OutOfRange(_)))), "{r:?}");
+        assert!(r.iter().all(|(_, o)| matches!(o, Outcome::Failed(Error::BadArgument(_)))), "{r:?}");
         assert!(kb.sent.borrow().is_empty());
     }
 

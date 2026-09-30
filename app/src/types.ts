@@ -5,7 +5,6 @@ export type Rgb = [number, number, number];
 export interface Status {
   device: boolean;
   synapse: boolean;
-  mode: number | null;
   driver_mode: boolean;
   profile: number | null;
   model: string | null;
@@ -109,7 +108,6 @@ export interface LightingState {
   applied: Look | null;
   saved: Look | null;
   dynamic_lighting: boolean;
-  confirm_write: boolean;
   custom: KeyMap<Rgb> | null;
 }
 

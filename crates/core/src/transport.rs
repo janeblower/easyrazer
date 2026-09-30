@@ -22,7 +22,6 @@ pub enum Error {
     WrongReply { sent: Command, got: Command, tid: u8 },
     Crc(Command),
     ShortReply(Command),
-    OutOfRange(f32),
     BadArgument(String),
 }
 
@@ -35,7 +34,6 @@ impl fmt::Display for Error {
             Error::WrongReply { sent, got, tid } => write!(f, "{sent}: reply is for {got} tid {tid:02X}"),
             Error::Crc(c) => write!(f, "{c}: reply crc mismatch"),
             Error::ShortReply(c) => write!(f, "{c}: reply too short"),
-            Error::OutOfRange(mm) => write!(f, "{mm} mm is outside 1.5..=3.6"),
             Error::BadArgument(m) => write!(f, "{m}"),
         }
     }

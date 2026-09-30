@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::keymap;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct LayoutKey {
     pub key: u8,
     pub label: &'static str,

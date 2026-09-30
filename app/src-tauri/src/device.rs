@@ -1,9 +1,7 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::collections::BTreeMap;
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -18,20 +16,18 @@ use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
 use razer_core::{control, keymap, layout};
 use serde::Serialize;
+use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 
 use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, Sink};
 use crate::i18n;
 use crate::settings::{self, Macro, Rapid, Settings};
 
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
     pub device: bool,
     pub synapse: bool,
-    pub mode: Option<u8>,
     /// Driver mode chosen in the app: the host engine types, Rapid Trigger works.
     pub driver_mode: bool,
     pub profile: Option<u8>,
@@ -64,7 +60,6 @@ pub struct LightingState {
     /// What the keyboard's flash holds; `None` when unknown or unreadable.
     pub saved: Option<Look>,
     pub dynamic_lighting: bool,
-    pub confirm_write: bool,
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -169,30 +164,28 @@ impl Device {
         }
         let synapse = self.synapse;
         self.ensure_connected();
-        if should_restore(was, fresh_synapse) {
+        // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
+        if was && fresh_synapse == Some(false) {
             self.restore();
         }
         if self.control.is_none() {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
             let driver_mode = self.settings.driver_mode;
-            return Status { device: false, synapse, mode: None, driver_mode, profile: None, model: None, unsupported, error };
+            return Status { device: false, synapse, driver_mode, profile: None, model: None, unsupported, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
         let running = self.engine.is_some();
         let Some((t, spec)) = &self.control else { unreachable!() };
-        let mut mode = control::mode(t).ok();
+        let mode = control::mode(t).ok();
         let released = should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok();
-        if released {
-            mode = control::mode(t).ok();
-        }
         let profile = control::active_profile(t).ok();
         let model = Some(spec.name.clone());
         if released {
             self.restore();
         }
-        Status { device: true, synapse, mode, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
+        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
     }
 
     /// Assignments the keyboard types with now.
@@ -324,7 +317,6 @@ impl Device {
             },
             saved,
             dynamic_lighting,
-            confirm_write: self.settings.confirm_write,
             custom: self.settings.custom.clone(),
         })
     }
@@ -362,10 +354,6 @@ impl Device {
         lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         self.settings.applied = Some(look);
         settings::save(&self.settings)
-    }
-
-    pub fn set_confirm_write(&mut self, on: bool) -> Result<(), String> {
-        self.update_settings(|s| s.confirm_write = on)
     }
 
     /// Fresh check before a write, honouring `watch_synapse`.
@@ -432,7 +420,7 @@ impl Device {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if !wants_engine(self.synapse, self.settings.driver_mode) || self.control.is_none() {
+        if self.synapse || !self.settings.driver_mode || self.control.is_none() {
             self.stop_engine();
             return;
         }
@@ -632,10 +620,6 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
     fresh_check && !synapse && !engine && mode == Some(control::MODE_DRIVER)
 }
 
-fn wants_engine(synapse: bool, driver_mode: bool) -> bool {
-    !synapse && driver_mode
-}
-
 fn engine_config(
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
@@ -664,11 +648,6 @@ pub fn release_keyboard() {
     }
 }
 
-/// Synapse overwrites the temporary store; once it is gone, bring the applied look back.
-fn should_restore(was_running: bool, fresh_synapse: Option<bool>) -> bool {
-    was_running && fresh_synapse == Some(false)
-}
-
 /// Settings from an older description may name effects that no longer exist.
 fn usable(d: &DeviceSpec, look: Option<Look>) -> Option<Look> {
     look.filter(|l| lighting::encode(d, &l.effect).is_ok())
@@ -679,33 +658,31 @@ pub fn synapse_check(watch: bool, running: impl FnOnce() -> bool) -> bool {
     watch && running()
 }
 
+/// A failed snapshot counts as "running": writing while Synapse is alive gets overwritten.
 pub fn synapse_running() -> bool {
-    let out = Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq RazerAppEngine.exe", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    synapse_in(out.ok())
-}
-
-/// A failed check counts as "running": writing while Synapse is alive gets overwritten.
-/// With no match tasklist still prints a (localized) notice and exits 0, so empty output is a failure too.
-fn synapse_in(tasklist: Option<Output>) -> bool {
-    tasklist.filter(|o| o.status.success() && !o.stdout.is_empty()).is_none_or(|o| {
-        String::from_utf8_lossy(&o.stdout).contains("RazerAppEngine")
-    })
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return true;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut entry);
+        while ok != 0 && !found {
+            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            found = String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case("RazerAppEngine.exe");
+            ok = Process32NextW(snap, &mut entry);
+        }
+        CloseHandle(snap);
+        found
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use razer_core::lighting::Effect;
     use super::*;
-
-    use std::os::windows::process::ExitStatusExt;
-    use std::process::ExitStatus;
-
-    fn tasklist(code: u32, stdout: &[u8]) -> Option<Output> {
-        Some(Output { status: ExitStatus::from_raw(code), stdout: stdout.to_vec(), stderr: Vec::new() })
-    }
 
     #[test]
     fn synapse_is_not_checked_when_watching_is_off() {
@@ -728,31 +705,11 @@ mod tests {
     }
 
     #[test]
-    fn tasklist_failure_counts_as_synapse_running() {
-        assert!(synapse_in(None));
-        assert!(synapse_in(tasklist(1, b"")));
-        assert!(synapse_in(tasklist(0, b"")));
-    }
-
-    #[test]
-    fn detects_synapse_in_tasklist_output() {
-        assert!(synapse_in(tasklist(0, b"RazerAppEngine.exe  1234 Console  1  80 000 K")));
-        assert!(!synapse_in(tasklist(0, b"INFO: No tasks are running which match the specified criteria.")));
-    }
-
-    #[test]
     fn driver_mode_is_released_only_right_after_a_fresh_check() {
         assert!(should_release_driver_mode(true, false, Some(control::MODE_DRIVER), false));
         assert!(!should_release_driver_mode(false, false, Some(control::MODE_DRIVER), false));
         assert!(!should_release_driver_mode(true, true, Some(control::MODE_DRIVER), false));
         assert!(!should_release_driver_mode(true, false, Some(control::MODE_DRIVER), true));
-    }
-
-    #[test]
-    fn engine_runs_in_driver_mode_while_synapse_is_away() {
-        assert!(wants_engine(false, true));
-        assert!(!wants_engine(true, true));
-        assert!(!wants_engine(false, false));
     }
 
     #[test]
@@ -770,14 +727,6 @@ mod tests {
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
         assert_eq!(c.rapid[33], None);
         assert_eq!((c.repeat_delay, c.repeat_interval), t);
-    }
-
-    #[test]
-    fn applied_look_is_restored_once_synapse_is_gone() {
-        assert!(should_restore(true, Some(false)));
-        assert!(!should_restore(true, Some(true)));
-        assert!(!should_restore(false, Some(false)));
-        assert!(!should_restore(true, None));
     }
 
     #[test]

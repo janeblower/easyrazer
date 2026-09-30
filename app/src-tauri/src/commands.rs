@@ -30,22 +30,14 @@ impl AppState {
 
 #[derive(Serialize)]
 pub struct KeyView {
-    key: u8,
     /// Key name from `keymap`, empty for lighting zones.
     name: &'static str,
-    label: &'static str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    editable: bool,
-    shape: kb_layout::Shape,
+    #[serde(flatten)]
+    key: kb_layout::LayoutKey,
 }
 
 fn key_views(keys: Vec<kb_layout::LayoutKey>) -> Vec<KeyView> {
-    keys.into_iter()
-        .map(|k| KeyView { key: k.key, name: keymap::name(k.key).unwrap_or(""), label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, shape: k.shape })
-        .collect()
+    keys.into_iter().map(|key| KeyView { name: keymap::name(key.key).unwrap_or(""), key }).collect()
 }
 
 #[derive(Serialize)]
@@ -211,7 +203,7 @@ pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<()
 
 #[tauri::command]
 pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().set_confirm_write(on)
+    state.device().update_settings(|s| s.confirm_write = on)
 }
 
 #[tauri::command]
@@ -258,9 +250,7 @@ pub async fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
 #[tauri::command]
 pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
     if on {
-        let r = autostart::set(true);
-        tray::sync_autostart(&app);
-        r?;
+        set_autostart(app, true).await?;
     }
     state.device().update_settings(|s| s.autostart_offered = true)
 }
