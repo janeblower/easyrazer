@@ -78,7 +78,7 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
 </script>
 
 <template>
-  <div class="flex gap-10 justify-center">
+  <div class="flex gap-8 justify-center">
     <div class="flex flex-col gap-1 items-center">
       <span class="text-sm">{{ $t("actuation.title") }}</span>
       <span class="text-xs text-muted">1.5</span>
@@ -121,7 +121,7 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
     </div>
     <img src="/switch.gif" alt="" class="h-[240px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
     <div class="flex flex-col gap-1 items-center">
-      <label class="text-sm flex gap-2 items-center">
+      <label class="text-sm flex gap-2 whitespace-nowrap items-center">
         <input
           type="checkbox"
           :checked="rapid.enabled === true"
@@ -130,8 +130,8 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
           @change="emit('rapid', checked($event))"
         />
         {{ $t("rapid.title") }}
-        <span v-if="!driver" class="text-xs text-muted">{{ $t("rapid.hwOnly") }}</span>
       </label>
+      <span v-if="!driver" class="text-xs text-muted">{{ $t("rapid.hwOnly") }}</span>
       <div class="flex gap-6">
         <div class="flex flex-col gap-1 items-center">
           <span v-if="split" class="text-xs text-muted">{{ $t("rapid.press") }}</span>

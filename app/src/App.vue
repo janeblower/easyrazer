@@ -452,54 +452,58 @@ onUnmounted(() => {
         :writable="writable"
         @update="(s) => (macroState = s)"
       />
-      <KeyboardMap
-        v-if="section !== 'macros'"
-        v-model:selection="selection"
-        :layout="layout"
-        :values="mapValues"
-        :edited="mapEdited"
-        :errors="section === 'actuation' ? errors : bindErrors"
-        :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-        :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
-        :rapid-edited="rapidEdited"
-        :single="section === 'bindings'"
-      />
-      <KeysCard
-        v-if="section !== 'macros'"
-        :count="selection.size"
-        :dirty="dirty"
-        :can-apply="canApply"
-        :can-save="canSave"
-        :busy="busy"
-        :single="section === 'bindings'"
-        @apply="apply"
-        @save="save"
-        @revert="revert"
-        @select-all="selectAll"
-        @clear="selection = new Set()"
-      >
-        <ActuationCard
-          v-if="section === 'actuation'"
-          :count="selection.size"
-          :value="selectedValue"
-          :rapid="selectedRapid"
-          :split="split"
-          :driver="driver"
-          @set="setValue"
-          @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
-          @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
-          @release="(v) => setRapid((r) => ({ ...r, release: v }))"
-          @split="onSplit"
-        />
-        <BindingCard
-          v-else
-          :key-id="bindKey"
-          :action="bindKey == null ? null : bindingOf(bindKey)"
+      <!-- The cards below take the width of the map, not of the window. -->
+      <div v-else class="flex flex-col gap-4 self-start">
+        <KeyboardMap
+          v-model:selection="selection"
           :layout="layout"
-          :macros="macroState?.macros ?? {}"
-          @set="setBinding"
+          :values="mapValues"
+          :edited="mapEdited"
+          :errors="section === 'actuation' ? errors : bindErrors"
+          :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
+          :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
+          :rapid-edited="rapidEdited"
+          :single="section === 'bindings'"
         />
-      </KeysCard>
+        <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
+          <KeysCard
+            :count="selection.size"
+            :dirty="dirty"
+            :can-apply="canApply"
+            :can-save="canSave"
+            :busy="busy"
+            :single="section === 'bindings'"
+            @apply="apply"
+            @save="save"
+            @revert="revert"
+            @select-all="selectAll"
+            @clear="selection = new Set()"
+          >
+            <ActuationCard
+              v-if="section === 'actuation'"
+              :count="selection.size"
+              :value="selectedValue"
+              :rapid="selectedRapid"
+              :split="split"
+              :driver="driver"
+              @set="setValue"
+              @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+              @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
+              @release="(v) => setRapid((r) => ({ ...r, release: v }))"
+              @split="onSplit"
+            />
+            <BindingCard
+              v-else
+              :key-id="bindKey"
+              :action="bindKey == null ? null : bindingOf(bindKey)"
+              :layout="layout"
+              :macros="macroState?.macros ?? {}"
+              @set="setBinding"
+            />
+          </KeysCard>
+          <div v-if="section === 'actuation'" class="card"></div>
+        </div>
+      </div>
     </template>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />
