@@ -1,0 +1,40 @@
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ["[0-9]*"]
+
+permissions:
+  contents: write
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: bun install --frozen-lockfile
+        working-directory: app
+      - run: bun tauri build
+        working-directory: app
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mv target/release/easyrazer.exe EasyRazer.exe
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            gh release create "$GITHUB_REF_NAME" EasyRazer.exe --title "$GITHUB_REF_NAME" --generate-notes
+          else
+            # Recreated on every merge so the pre-release stays at the top of the list.
+            gh release delete nightly --cleanup-tag --yes || true
+            gh release create nightly EasyRazer.exe --prerelease --target "$GITHUB_SHA" \
+              --title "Nightly ${GITHUB_SHA::7}" --generate-notes
+          fi
