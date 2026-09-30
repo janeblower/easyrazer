@@ -214,7 +214,7 @@ async function onStatus(s: DeviceStatus) {
     loadedProfile = null;
     return;
   }
-  if (loadedProfile !== s.profile && !busy.value) await load();
+  if (loadedProfile !== s.profile) await load();
 }
 
 async function refresh() {
