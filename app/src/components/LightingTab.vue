@@ -280,14 +280,15 @@ function revert() {
   ui.value = stateFrom(applied.value ?? saved.value);
 }
 
-async function apply() {
+async function send(command: "lighting_apply" | "lighting_write", done: string) {
   busy.value = true;
   try {
     const look = norm(draft.value);
-    await invoke("lighting_apply", { look });
+    await invoke(command, { look });
     applied.value = look;
-    if (look?.effect.colors) custom.value = look.effect.colors;
-    message.value = t("lighting.applied");
+    if (command === "lighting_write") saved.value = look;
+    else if (look?.effect.colors) custom.value = look.effect.colors;
+    message.value = t(done);
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -295,22 +296,14 @@ async function apply() {
   }
 }
 
-async function write() {
-  busy.value = true;
-  try {
-    const look = norm(draft.value);
-    await invoke("lighting_write", { look });
-    applied.value = look;
-    saved.value = look;
-    message.value = t("lighting.saved");
-  } catch (error) {
-    message.value = String(error);
-  } finally {
-    busy.value = false;
-  }
-}
-
-const { asking, write: save, onConfirm } = useConfirmWrite(write, (error) => (message.value = String(error)));
+const {
+  asking,
+  write: save,
+  onConfirm,
+} = useConfirmWrite(
+  async () => send("lighting_write", "lighting.saved"),
+  (error) => (message.value = String(error)),
+);
 
 async function toggleDynamic() {
   const on = !dynamicLighting.value;
@@ -449,7 +442,7 @@ onMounted(load);
       :can-write="canSave"
       :apply-only="isCustom"
       @revert="revert"
-      @apply="apply"
+      @apply="send('lighting_apply', 'lighting.applied')"
       @write="save"
     />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
