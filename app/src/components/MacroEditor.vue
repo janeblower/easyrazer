@@ -246,16 +246,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
       <p class="hint m-0">
         {{ state?.free == null ? $t("macros.size", { n: size }) : $t("macros.sizeFree", { n: size, free: state.free }) }}
       </p>
-      <ActionBar
-        :pending="dirty ? $t('common.notApplied') : ''"
-        :can-revert="dirty && !busy"
-        :can-apply="dirty && !busy"
-        :can-write="writable && !busy && (dirty || !saved?.written)"
-        :write-title="$t('macros.write')"
-        @revert="revert"
-        @apply="apply"
-        @write="write"
-      >
+      <div class="flex gap-3 items-center justify-end">
         <span v-if="message" class="text-xs text-muted mr-auto">{{ message }}</span>
         <button
           v-if="selected != null"
@@ -265,7 +256,17 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         >
           {{ $t(armed ? "macros.confirmDelete" : "macros.delete") }}
         </button>
-      </ActionBar>
+      </div>
+      <ActionBar
+        :pending="dirty ? $t('common.notApplied') : ''"
+        :can-revert="dirty && !busy"
+        :can-apply="dirty && !busy"
+        :can-write="writable && !busy && (dirty || !saved?.written)"
+        :write-title="$t('macros.write')"
+        @revert="revert"
+        @apply="apply"
+        @write="write"
+      />
     </div>
     <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />

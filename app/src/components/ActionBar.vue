@@ -16,22 +16,30 @@ const emit = defineEmits<{ revert: []; apply: []; write: [] }>();
 </script>
 
 <template>
-  <div class="flex gap-3 items-center justify-end">
-    <slot />
-    <span v-if="pending" class="text-xs text-edited">{{ pending }}</span>
-    <button class="icon-btn" :title="$t('common.revert')" :aria-label="$t('common.revert')" :disabled="!canRevert" @click="emit('revert')">
-      <AppIcon name="revert" />
-    </button>
-    <button class="primary" :disabled="!canApply" @click="emit('apply')">{{ $t("common.apply") }}</button>
-    <button
-      v-if="!applyOnly"
-      class="write-btn"
-      :title="writeTitle ?? $t('common.write')"
-      :aria-label="writeTitle ?? $t('common.write')"
-      :disabled="!canWrite"
-      @click="emit('write')"
-    >
-      <AppIcon name="write" />
-    </button>
-  </div>
+  <!-- Every tab's buttons sit in the status bar; `defer` waits for it to be in the page. -->
+  <Teleport defer to="#status-actions">
+    <div class="flex gap-3 items-center">
+      <span v-if="pending" class="text-xs text-edited">{{ pending }}</span>
+      <button
+        class="icon-btn"
+        :title="$t('common.revert')"
+        :aria-label="$t('common.revert')"
+        :disabled="!canRevert"
+        @click="emit('revert')"
+      >
+        <AppIcon name="revert" />
+      </button>
+      <button class="primary" :disabled="!canApply" @click="emit('apply')">{{ $t("common.apply") }}</button>
+      <button
+        v-if="!applyOnly"
+        class="write-btn"
+        :title="writeTitle ?? $t('common.write')"
+        :aria-label="writeTitle ?? $t('common.write')"
+        :disabled="!canWrite"
+        @click="emit('write')"
+      >
+        <AppIcon name="write" />
+      </button>
+    </div>
+  </Teleport>
 </template>

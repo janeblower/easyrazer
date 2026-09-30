@@ -497,21 +497,18 @@ onUnmounted(() => {
               @release="(v) => setRapid((r) => ({ ...r, release: v }))"
               @split="onSplit"
             />
-            <template v-else>
-              <BindingCard
-                :key-id="bindKey"
-                :action="bindKey == null ? null : bindingOf(bindKey)"
-                :layout="layout"
-                :macros="macroState?.macros ?? {}"
-                @set="setBinding"
-              />
-              <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
-            </template>
+            <BindingCard
+              v-else
+              :key-id="bindKey"
+              :action="bindKey == null ? null : bindingOf(bindKey)"
+              :layout="layout"
+              :macros="macroState?.macros ?? {}"
+              @set="setBinding"
+            />
           </div>
-          <div v-if="section === 'actuation'" class="px-4 py-3 card flex flex-col justify-end">
-            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
-          </div>
+          <div v-if="section === 'actuation'" class="card"></div>
         </div>
+        <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
       </template>
     </div>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />

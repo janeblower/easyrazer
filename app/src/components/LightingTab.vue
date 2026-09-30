@@ -454,8 +454,13 @@ onMounted(load);
         </div>
       </div>
     </div>
+    <div class="px-4 py-3 card">
+      <label class="switch">
+        <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
+        {{ $t("lighting.dynamic") }}
+      </label>
+    </div>
     <ActionBar
-      class="px-4 py-3 card"
       :pending="dirty ? $t('common.notApplied') : ''"
       :can-revert="dirty && !busy && !blocked"
       :can-apply="dirty && !busy && !blocked"
@@ -464,12 +469,7 @@ onMounted(load);
       @revert="revert"
       @apply="apply"
       @write="save"
-    >
-      <label class="switch mr-auto">
-        <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
-        {{ $t("lighting.dynamic") }}
-      </label>
-    </ActionBar>
+    />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </section>
 </template>
