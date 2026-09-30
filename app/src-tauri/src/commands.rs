@@ -211,7 +211,7 @@ pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<()
 
 #[tauri::command]
 pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().set_confirm_write(on)
+    state.device().update_settings(|s| s.confirm_write = on)
 }
 
 #[tauri::command]
@@ -258,9 +258,7 @@ pub async fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
 #[tauri::command]
 pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
     if on {
-        let r = autostart::set(true);
-        tray::sync_autostart(&app);
-        r?;
+        set_autostart(app, true).await?;
     }
     state.device().update_settings(|s| s.autostart_offered = true)
 }

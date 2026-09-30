@@ -44,10 +44,6 @@ pub struct KeyAssignment {
     pub fn_data: Vec<u8>,
 }
 
-pub fn get_args(profile: u8, key: u8, layer: Layer) -> [u8; 3] {
-    [profile, key, layer as u8]
-}
-
 pub fn parse(data: &[u8]) -> Option<KeyAssignment> {
     let [profile, key, layer, threshold_low, threshold_high, fn_id, fn_size, rest @ ..] = data else {
         return None;

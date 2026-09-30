@@ -188,7 +188,7 @@ fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
                 dev,
                 analog::GET_KEY_ASSIGNMENT,
                 analog::KEY_ASSIGNMENT_SIZE,
-                &analog::get_args(profile, key, layer),
+                &[profile, key, layer as u8],
             )?;
             let a = analog::parse(r.data()).ok_or_else(|| format!("key {key}: short reply {}", hex(r.data())))?;
             let _ = writeln!(

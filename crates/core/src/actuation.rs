@@ -15,7 +15,7 @@ pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignmen
         t,
         analog::GET_KEY_ASSIGNMENT,
         analog::KEY_ASSIGNMENT_SIZE,
-        &analog::get_args(profile, key, Layer::Normal),
+        &[profile, key, Layer::Normal as u8],
     )?;
     analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
 }

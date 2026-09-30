@@ -360,10 +360,6 @@ impl Device {
         settings::save(&self.settings)
     }
 
-    pub fn set_confirm_write(&mut self, on: bool) -> Result<(), String> {
-        self.update_settings(|s| s.confirm_write = on)
-    }
-
     /// Fresh check before a write, honouring `watch_synapse`.
     fn check_synapse(&mut self, running: impl FnOnce() -> bool) -> bool {
         self.synapse = synapse_check(self.settings.watch_synapse, running);

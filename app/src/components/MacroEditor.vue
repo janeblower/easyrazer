@@ -84,10 +84,6 @@ function open(id: number | null) {
   message.value = "";
 }
 
-function revert() {
-  open(selected.value);
-}
-
 function move(i: number, by: number) {
   const ev = draft.value?.events;
   if (!ev || i + by < 0 || i + by >= ev.length) return;
@@ -263,7 +259,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         :can-apply="dirty && !busy"
         :can-write="writable && !busy && (dirty || !saved?.written)"
         :write-title="$t('macros.write')"
-        @revert="revert"
+        @revert="open(selected)"
         @apply="apply"
         @write="write"
       />
