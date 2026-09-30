@@ -72,9 +72,6 @@ function rtFill(mm: number | null, down: boolean) {
   const thumb = (v - RT_MIN) / (RT_MAX - RT_MIN);
   return span(thumb * (1 - Math.min(1, travel / units(v))), thumb);
 }
-// Unsplit, the one slider stands for both.
-const pressFill = computed(() => rtFill(props.rapid.press, props.split ? false : lead.value[2]));
-const releaseFill = computed(() => rtFill(props.rapid.release, true));
 
 const shown = computed(() => mid(MIN, MAX, props.value, MIN));
 const rtSliders = computed(
@@ -84,7 +81,8 @@ const rtSliders = computed(
         kind: "press",
         value: props.rapid.press,
         shown: mid(RT_MIN, RT_MAX, props.rapid.press, 0.4),
-        fill: pressFill.value,
+        // Unsplit, the one slider stands for both.
+        fill: rtFill(props.rapid.press, props.split ? false : lead.value[2]),
         hidden: false,
         input: (v: number) => {
           emit("press", v);
@@ -94,7 +92,7 @@ const rtSliders = computed(
         kind: "release",
         value: props.rapid.release,
         shown: mid(RT_MIN, RT_MAX, props.rapid.release, 0.4),
-        fill: releaseFill.value,
+        fill: rtFill(props.rapid.release, true),
         hidden: !props.split,
         input: (v: number) => {
           emit("release", v);
