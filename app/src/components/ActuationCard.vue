@@ -145,7 +145,7 @@ const rtSliders = computed(
       </div>
       <span class="text-xs text-muted">3.6</span>
     </div>
-    <img src="/switch.gif" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
+    <img src="/switch.webp" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
     <div class="flex flex-col gap-1 items-center">
       <label class="switch text-sm h-5 whitespace-nowrap">
         <input
