@@ -30,22 +30,14 @@ impl AppState {
 
 #[derive(Serialize)]
 pub struct KeyView {
-    key: u8,
     /// Key name from `keymap`, empty for lighting zones.
     name: &'static str,
-    label: &'static str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    editable: bool,
-    shape: kb_layout::Shape,
+    #[serde(flatten)]
+    key: kb_layout::LayoutKey,
 }
 
 fn key_views(keys: Vec<kb_layout::LayoutKey>) -> Vec<KeyView> {
-    keys.into_iter()
-        .map(|k| KeyView { key: k.key, name: keymap::name(k.key).unwrap_or(""), label: k.label, x: k.x, y: k.y, w: k.w, h: k.h, editable: k.editable, shape: k.shape })
-        .collect()
+    keys.into_iter().map(|key| KeyView { name: keymap::name(key.key).unwrap_or(""), key }).collect()
 }
 
 #[derive(Serialize)]

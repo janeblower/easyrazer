@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
-import type { AppSettings, Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
+import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
+import { useConfirmWrite } from "../confirmWrite";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
@@ -53,7 +54,6 @@ const saved = ref<Look | null>(null);
 // What the controls show; the effect sent to the keyboard is derived from it.
 const ui = ref<Ui | null>(null);
 const dynamicLighting = ref(false);
-const asking = ref(false);
 const busy = ref(false);
 const message = ref("");
 const layout = ref<KeyView[]>([]);
@@ -215,19 +215,21 @@ const dirOf = computed(() => {
 });
 const speedInfo = computed(() => cands.value.find((e) => e.speed));
 
+function flip(v: number) {
+  const info = speedInfo.value!;
+  const [lo, hi] = info.speed!;
+  return info.fast_low ? lo + hi - v : v;
+}
+
 // Some firmware speeds are "lower is faster"; the slider always reads slow → fast.
 const speedSlider = computed({
   get: () => {
     const [lo, hi] = speedInfo.value!.speed!;
-    const fastLow = speedInfo.value!.fast_low;
     const cur = ui.value!.speed;
-    const s = cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2);
-    return fastLow ? lo + hi - s : s;
+    return flip(cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2));
   },
   set: (v: number) => {
-    const [lo, hi] = speedInfo.value!.speed!;
-    const fastLow = speedInfo.value!.fast_low;
-    setUi("speed", fastLow ? lo + hi - v : v);
+    setUi("speed", flip(v));
   },
 });
 
@@ -280,14 +282,15 @@ function revert() {
   ui.value = stateFrom(applied.value ?? saved.value);
 }
 
-async function apply() {
+async function send(command: "lighting_apply" | "lighting_write", done: string) {
   busy.value = true;
   try {
     const look = norm(draft.value);
-    await invoke("lighting_apply", { look });
+    await invoke(command, { look });
     applied.value = look;
-    if (look?.effect.colors) custom.value = look.effect.colors;
-    message.value = t("lighting.applied");
+    if (command === "lighting_write") saved.value = look;
+    else if (look?.effect.colors) custom.value = look.effect.colors;
+    message.value = t(done);
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -295,46 +298,14 @@ async function apply() {
   }
 }
 
-async function write() {
-  busy.value = true;
-  try {
-    const look = norm(draft.value);
-    await invoke("lighting_write", { look });
-    applied.value = look;
-    saved.value = look;
-    message.value = t("lighting.saved");
-  } catch (error) {
-    message.value = String(error);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function save() {
-  try {
-    const settings = await invoke<AppSettings>("app_settings");
-    if (settings.confirm_write) {
-      asking.value = true;
-      return;
-    }
-  } catch (error) {
-    message.value = String(error);
-    return;
-  }
-  await write();
-}
-
-async function onConfirm(dontAsk: boolean) {
-  asking.value = false;
-  if (dontAsk) {
-    try {
-      await invoke("set_confirm_write", { on: false });
-    } catch (error) {
-      message.value = String(error);
-    }
-  }
-  await write();
-}
+const {
+  asking,
+  write: save,
+  onConfirm,
+} = useConfirmWrite(
+  async () => send("lighting_write", "lighting.saved"),
+  (error) => (message.value = String(error)),
+);
 
 async function toggleDynamic() {
   const on = !dynamicLighting.value;
@@ -473,7 +444,7 @@ onMounted(load);
       :can-write="canSave"
       :apply-only="isCustom"
       @revert="revert"
-      @apply="apply"
+      @apply="send('lighting_apply', 'lighting.applied')"
       @write="save"
     />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
