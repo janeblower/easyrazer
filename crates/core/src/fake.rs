@@ -11,6 +11,11 @@ const OK: u8 = 0x02;
 const FAIL: u8 = 0x03;
 const NOT_SUPPORTED: u8 = 0x05;
 
+/// Flash a body of `len` bytes takes: block tags plus a 6-byte header, in 8-byte units.
+pub fn footprint(len: usize) -> usize {
+    8 + (len + 6).div_ceil(8) * 8
+}
+
 pub struct FakeKeyboard {
     pub mode: Cell<u8>,
     pub active_profile: u8,
@@ -158,7 +163,7 @@ impl FakeKeyboard {
                 }
             }
             (0x06, 0x86) => {
-                let used: usize = self.macros.borrow().values().map(|b| crate::macros::footprint(b.len())).sum();
+                let used: usize = self.macros.borrow().values().map(|b| footprint(b.len())).sum();
                 let free = (0x6FA78 - used as u32).to_be_bytes();
                 let count = (self.macros.borrow().len() as u16).to_be_bytes();
                 (OK, [&count[..], &[0, 0], &free, &free].concat())

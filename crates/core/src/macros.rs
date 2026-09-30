@@ -54,11 +54,6 @@ pub fn encode(events: &[Event]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Flash a body of `len` bytes takes: block tags plus a 6-byte header, in 8-byte units.
-pub fn footprint(len: usize) -> usize {
-    8 + (len + 6).div_ceil(8) * 8
-}
-
 /// Replaces the body stored under `id`. The firmware buffers it and writes the flash ~100 ms later.
 pub fn write(t: &impl Transport, id: u16, body: &[u8]) -> Result<(), Error> {
     // Allocating over an existing id is unexplored; a missing id just fails.
@@ -89,7 +84,7 @@ pub fn free(t: &impl Transport) -> Result<u32, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fake::FakeKeyboard;
+    use crate::fake::{FakeKeyboard, footprint};
 
     const A: u8 = 31;
     const B: u8 = 50;
