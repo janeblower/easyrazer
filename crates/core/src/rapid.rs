@@ -20,6 +20,8 @@ pub const DEPTH_REPORT: u8 = 0x07;
 /// MI_01 Col04: `04 code*`, all zero when nothing is held.
 pub const RAZER_REPORT: u8 = 0x04;
 pub const RAZER_FN: u8 = 0x01;
+/// Smallest depth change worth showing; below it the UI would follow sensor noise.
+const DEPTH_STEP: u8 = 3;
 
 /// Rapid Trigger distances in depth units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +120,8 @@ pub enum Output {
     /// One brightness step down (-1) or up (+1).
     Brightness(i8),
     Sleep,
+    /// Depth of the first key still pressed, for the UI; 0 when none is.
+    Depth(u8),
 }
 
 #[derive(Clone, Debug)]
@@ -247,11 +251,14 @@ pub struct Engine {
     /// Key to repeat and when; like Windows, only the newest key repeats.
     repeat: Option<(u8, Instant)>,
     plays: Vec<Play>,
+    /// Key whose depth the UI shows.
+    lead: Option<u8>,
+    shown: u8,
 }
 
 impl Engine {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new() }
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: 0 }
     }
 
     pub fn set_config(&mut self, cfg: Config) {
@@ -266,6 +273,18 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// Depth of the first key pressed and still down, when it moved enough since last shown.
+    pub fn lead_depth(&mut self, depth: &[u8; 256]) -> Option<u8> {
+        if self.lead.is_none_or(|k| depth[k as usize] == 0) {
+            self.lead = (1..256).find(|&k| depth[k] != 0).map(|k| k as u8);
+        }
+        let d = self.lead.map_or(0, |k| depth[k as usize]);
+        (d.abs_diff(self.shown) >= DEPTH_STEP || (d == 0) != (self.shown == 0)).then(|| {
+            self.shown = d;
+            d
+        })
     }
 
     fn transition(&mut self, key: u8, down: bool, now: Instant, out: &mut Vec<Output>) {
@@ -466,6 +485,17 @@ mod tests {
 
     fn key(key: u8, down: bool) -> Output {
         Output::Key { key, down }
+    }
+
+    #[test]
+    fn lead_depth_follows_the_first_key_held() {
+        let mut e = engine();
+        assert_eq!(e.lead_depth(&depth(&[(S, 50)])), Some(50));
+        assert_eq!(e.lead_depth(&depth(&[(A, 200), (S, 52)])), None);
+        assert_eq!(e.lead_depth(&depth(&[(A, 200), (S, 90)])), Some(90));
+        assert_eq!(e.lead_depth(&depth(&[(A, 200)])), Some(200));
+        assert_eq!(e.lead_depth(&depth(&[])), Some(0));
+        assert_eq!(e.lead_depth(&depth(&[])), None);
     }
 
     #[test]

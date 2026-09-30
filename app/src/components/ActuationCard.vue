@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 export interface RapidView {
@@ -46,6 +47,13 @@ const pressLabel = computed(() => {
   return t("actuation.mm", { v: v === HW_MIN || v === HW_MAX ? v.toFixed(2) : v.toFixed(1) });
 });
 
+// Depth of the first key held, 0..255 over MIN..MAX; the keyboard streams it only in driver mode.
+const depth = ref(0);
+let unlisten: UnlistenFn | undefined;
+onMounted(async () => (unlisten = await listen<number>("key-depth", (e) => (depth.value = e.payload))));
+onUnmounted(() => unlisten?.());
+const fill = computed(() => (props.driver && depth.value ? markTop(MIN + (depth.value / 255) * (MAX - MIN)) : "0px"));
+
 function onPress(e: Event) {
   const input = e.target as HTMLInputElement;
   const v = Math.round(effective(Number(input.value)) * 10) / 10;
@@ -62,13 +70,14 @@ function onPress(e: Event) {
       <span class="text-xs text-muted">1.5</span>
       <div class="relative">
         <input
-          class="h-[200px] block [writing-mode:vertical-lr]"
+          class="depth h-[200px] block [writing-mode:vertical-lr]"
           type="range"
           :min="MIN"
           :max="MAX"
           step="0.01"
           :value="effective(value ?? MIN)"
           :disabled="!count"
+          :style="{ '--fill': fill }"
           @input="onPress"
         />
         <template v-if="!driver">
@@ -139,3 +148,24 @@ function onPress(e: Event) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.depth {
+  appearance: none;
+  width: 16px;
+  background: transparent;
+}
+.depth::-webkit-slider-runnable-track {
+  width: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, var(--accent) var(--fill), var(--key) var(--fill));
+}
+.depth::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--text);
+}
+</style>
