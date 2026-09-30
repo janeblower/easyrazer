@@ -64,7 +64,6 @@ pub struct LightingState {
     /// What the keyboard's flash holds; `None` when unknown or unreadable.
     pub saved: Option<Look>,
     pub dynamic_lighting: bool,
-    pub confirm_write: bool,
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -325,7 +324,6 @@ impl Device {
             },
             saved,
             dynamic_lighting,
-            confirm_write: self.settings.confirm_write,
             custom: self.settings.custom.clone(),
         })
     }
