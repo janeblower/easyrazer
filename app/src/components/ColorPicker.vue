@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { ref, useId, useTemplateRef, watch } from "vue";
 import type { Rgb } from "../types";
 
 const model = defineModel<Rgb | null>({ required: true });
@@ -19,8 +19,8 @@ const PRESETS = [
   "#ffc080",
 ];
 
-const open = ref(false);
-const root = useTemplateRef<HTMLElement>("root");
+const id = useId();
+const popup = useTemplateRef<HTMLElement>("popup");
 // Colour to come back to after "no colour" is switched off again.
 const last = ref<Rgb>(model.value ?? [0x44, 0xd6, 0x2c]);
 watch(model, (v) => v && (last.value = v));
@@ -31,36 +31,31 @@ const rgbOf = (h: string) => [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i +
 const pick = (h: string) => (model.value = rgbOf(h));
 const toggleNone = () => (model.value = model.value ? null : last.value);
 
-const onOutside = (e: MouseEvent) => root.value && !root.value.contains(e.target as Node) && (open.value = false);
-watch(open, (o) => {
-  o ? document.addEventListener("mousedown", onOutside) : document.removeEventListener("mousedown", onOutside);
-});
 watch(
   () => props.disabled,
-  (d) => d && (open.value = false),
+  (d) => d && popup.value?.hidePopover(),
 );
-onUnmounted(() => {
-  document.removeEventListener("mousedown", onOutside);
-});
 </script>
 
 <template>
-  <span ref="root" class="inline-flex relative">
+  <span class="inline-flex">
     <button
       class="p-0 border-line rounded-md h-[30px] w-9 relative overflow-hidden"
       :class="{ empty: !model }"
-      :style="{ background: hex(last) }"
+      :style="{ background: hex(last), anchorName: `--${id}` }"
+      :popovertarget="id"
       :disabled="disabled"
       :title="model ? $t('picker.color') : $t('picker.none')"
       :aria-label="model ? $t('picker.colorHex', { hex: hex(model) }) : $t('picker.none')"
-      @click="open = !open"
     ></button>
     <div
-      v-if="open"
-      class="p-2.5 border border-line rounded-lg border-solid bg-panel w-[200px] shadow-[0_6px_20px_rgba(0,0,0,0.5)] left-0 top-9 absolute z-10"
+      :id="id"
+      ref="popup"
+      popover
+      class="popup text-inherit p-2.5 border border-line rounded-lg border-solid bg-panel w-[200px] shadow-[0_6px_20px_rgba(0,0,0,0.5)]"
+      :style="{ positionAnchor: `--${id}` }"
       role="dialog"
       :aria-label="$t('picker.open')"
-      @keydown.esc="open = false"
     >
       <div class="gap-1.5 grid grid-cols-6">
         <button
@@ -96,6 +91,12 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.popup {
+  inset: auto;
+  margin: 6px 0 0;
+  top: anchor(bottom);
+  left: anchor(left);
+}
 .empty {
   opacity: 0.35;
 }
