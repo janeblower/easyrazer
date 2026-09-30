@@ -175,6 +175,7 @@ async function loadMacros() {
 
 async function load() {
   busy.value = true;
+  progress.value = [0, layout.value.filter((k) => k.editable).length];
   const unlisten = await listen<[number, number]>("read-progress", (e) => (progress.value = e.payload));
   try {
     const profile = status.value?.profile ?? null;
@@ -381,6 +382,8 @@ async function onOffer(on: boolean) {
 }
 
 onMounted(async () => {
+  // Before anything that takes the device lock: a connect can hold it for the whole read.
+  layout.value = await invoke<KeyView[]>("layout");
   unlistenClose = await listen("close-requested", () => (closing.value = true));
   unlistenError = await listen<string>("app-error", (e) => {
     showError(e.payload);
@@ -395,7 +398,6 @@ onMounted(async () => {
   } catch (error) {
     message.value = String(error);
   }
-  layout.value = await invoke<KeyView[]>("layout");
   await loadMacros();
   unlistenStatus = await listen<DeviceStatus>("status", (e) => {
     void onStatus(e.payload);
@@ -484,6 +486,7 @@ onUnmounted(() => {
           :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
           :rapid-edited="rapidEdited"
           :single="section === 'bindings'"
+          :loaded="progress?.[0] ?? null"
         />
         <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
           <div class="px-4 py-3 card flex flex-col gap-3">
