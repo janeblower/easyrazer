@@ -26,7 +26,7 @@ import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
-import AutostartOffer from "./components/AutostartOffer.vue";
+import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import { setLanguage, systemLanguage } from "./i18n";
 
@@ -521,7 +521,13 @@ onUnmounted(() => {
       @no="macrosToWrite = []"
     />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
-    <AutostartOffer v-if="offering && !closing" @answer="onOffer" @later="offering = false" />
+    <ModalDialog v-if="offering && !closing" :title="$t('dialogs.autostart.title')" @cancel="offering = false">
+      <p>{{ $t("dialogs.autostart.text") }}</p>
+      <template #actions>
+        <button @click="onOffer(false)">{{ $t("dialogs.autostart.no") }}</button>
+        <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
+      </template>
+    </ModalDialog>
     <footer class="text-xs text-muted">{{ $t("footer") }}</footer>
   </main>
 </template>
