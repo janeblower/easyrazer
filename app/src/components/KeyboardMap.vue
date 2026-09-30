@@ -201,21 +201,15 @@ function up(e: PointerEvent) {
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
-        <span class="text-xs flex justify-between">
-          <span>{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
-          <span
-            v-if="!colors && rapid.has(k.key)"
-            class="text-[10px]"
-            :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'"
+        <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span v-if="!colors" class="flex gap-1 items-end">
+          <span v-if="rapid.has(k.key)" class="text-[10px]" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'"
             >RT</span
           >
+          <span v-if="k.editable && values[k.key] != null" class="text-[11px] ml-auto truncate" :class="valueClass(k.key)">{{
+            values[k.key]
+          }}</span>
         </span>
-        <span
-          v-if="!colors && k.editable && values[k.key] != null"
-          class="text-[11px] max-w-full truncate self-end"
-          :class="valueClass(k.key)"
-          >{{ values[k.key] }}</span
-        >
       </div>
       <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
     </div>
