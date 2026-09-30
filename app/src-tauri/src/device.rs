@@ -169,7 +169,8 @@ impl Device {
         }
         let synapse = self.synapse;
         self.ensure_connected();
-        if should_restore(was, fresh_synapse) {
+        // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
+        if was && fresh_synapse == Some(false) {
             self.restore();
         }
         if self.control.is_none() {
@@ -432,7 +433,7 @@ impl Device {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if !wants_engine(self.synapse, self.settings.driver_mode) || self.control.is_none() {
+        if self.synapse || !self.settings.driver_mode || self.control.is_none() {
             self.stop_engine();
             return;
         }
@@ -632,10 +633,6 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
     fresh_check && !synapse && !engine && mode == Some(control::MODE_DRIVER)
 }
 
-fn wants_engine(synapse: bool, driver_mode: bool) -> bool {
-    !synapse && driver_mode
-}
-
 fn engine_config(
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
@@ -662,11 +659,6 @@ pub fn release_keyboard() {
     {
         let _ = control::set_hardware_mode(&t);
     }
-}
-
-/// Synapse overwrites the temporary store; once it is gone, bring the applied look back.
-fn should_restore(was_running: bool, fresh_synapse: Option<bool>) -> bool {
-    was_running && fresh_synapse == Some(false)
 }
 
 /// Settings from an older description may name effects that no longer exist.
@@ -749,13 +741,6 @@ mod tests {
     }
 
     #[test]
-    fn engine_runs_in_driver_mode_while_synapse_is_away() {
-        assert!(wants_engine(false, true));
-        assert!(!wants_engine(true, true));
-        assert!(!wants_engine(false, false));
-    }
-
-    #[test]
     fn engine_config_from_press_points_and_rapid_trigger() {
         let thresholds = BTreeMap::from([(31, 43), (33, 0)]);
         let rapid = BTreeMap::from([
@@ -770,14 +755,6 @@ mod tests {
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
         assert_eq!(c.rapid[33], None);
         assert_eq!((c.repeat_delay, c.repeat_interval), t);
-    }
-
-    #[test]
-    fn applied_look_is_restored_once_synapse_is_gone() {
-        assert!(should_restore(true, Some(false)));
-        assert!(!should_restore(true, Some(true)));
-        assert!(!should_restore(false, Some(false)));
-        assert!(!should_restore(true, None));
     }
 
     #[test]
