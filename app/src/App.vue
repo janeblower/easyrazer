@@ -28,6 +28,7 @@ import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
 import AutostartOffer from "./components/AutostartOffer.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
+import { useConfirmWrite } from "./confirmWrite";
 import { setLanguage, systemLanguage } from "./i18n";
 
 const { t } = useI18n();
@@ -55,7 +56,6 @@ const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
 const offering = ref(false);
-const asking = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
@@ -343,25 +343,14 @@ async function onWriteMacros() {
   await write("apply", "actuation.applied");
 }
 
-async function save() {
-  try {
-    const settings = await invoke<AppSettings>("app_settings");
-    if (settings.confirm_write) {
-      asking.value = true;
-      return;
-    }
-  } catch (error) {
-    message.value = String(error);
-    return;
-  }
-  await write("save", "actuation.saved");
-}
-
-async function onConfirm(dontAsk: boolean) {
-  asking.value = false;
-  if (dontAsk) await invoke("set_confirm_write", { on: false }).catch(showError);
-  await write("save", "actuation.saved");
-}
+const {
+  asking,
+  write: save,
+  onConfirm,
+} = useConfirmWrite(
+  async () => write("save", "actuation.saved"),
+  (error) => (message.value = String(error)),
+);
 
 async function onClose(action: CloseAction, remember: boolean) {
   closing.value = false;

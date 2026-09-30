@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
+import { useConfirmWrite } from "../confirmWrite";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
@@ -53,8 +54,6 @@ const saved = ref<Look | null>(null);
 // What the controls show; the effect sent to the keyboard is derived from it.
 const ui = ref<Ui | null>(null);
 const dynamicLighting = ref(false);
-const confirmWrite = ref(true);
-const asking = ref(false);
 const busy = ref(false);
 const message = ref("");
 const layout = ref<KeyView[]>([]);
@@ -267,7 +266,6 @@ async function load() {
     applied.value = s.applied;
     saved.value = s.saved;
     dynamicLighting.value = s.dynamic_lighting;
-    confirmWrite.value = s.confirm_write;
     loading = true;
     ui.value = stateFrom(s.applied ?? s.saved);
     await nextTick();
@@ -312,23 +310,7 @@ async function write() {
   }
 }
 
-async function save() {
-  if (confirmWrite.value) asking.value = true;
-  else await write();
-}
-
-async function onConfirm(dontAsk: boolean) {
-  asking.value = false;
-  if (dontAsk) {
-    try {
-      await invoke("set_confirm_write", { on: false });
-      confirmWrite.value = false;
-    } catch (error) {
-      message.value = String(error);
-    }
-  }
-  await write();
-}
+const { asking, write: save, onConfirm } = useConfirmWrite(write, (error) => (message.value = String(error)));
 
 async function toggleDynamic() {
   const on = !dynamicLighting.value;

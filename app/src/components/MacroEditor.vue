@@ -2,8 +2,9 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
-import type { AppSettings, KeyView, MacroEvent, MacroState, Mouse } from "../types";
+import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
+import { useConfirmWrite } from "../confirmWrite";
 import ConfirmWrite from "./ConfirmWrite.vue";
 import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
@@ -28,7 +29,6 @@ const selected = ref<number | null>(null);
 const draft = ref<Draft | null>(null);
 const busy = ref(false);
 const message = ref("");
-const asking = ref(false);
 const armed = ref(false); // the delete button asks for a second click
 const recording = ref(false);
 const withDelays = ref(true);
@@ -139,25 +139,7 @@ async function doWrite() {
   await run("write_macro", { id: selected.value }, "macros.written");
 }
 
-async function write() {
-  try {
-    const settings = await invoke<AppSettings>("app_settings");
-    if (settings.confirm_write) {
-      asking.value = true;
-      return;
-    }
-  } catch (error) {
-    message.value = String(error);
-    return;
-  }
-  await doWrite();
-}
-
-async function onConfirm(dontAsk: boolean) {
-  asking.value = false;
-  if (dontAsk) await invoke("set_confirm_write", { on: false }).catch((error: unknown) => (message.value = String(error)));
-  await doWrite();
-}
+const { asking, write, onConfirm } = useConfirmWrite(doWrite, (error) => (message.value = String(error)));
 
 async function remove() {
   if (!armed.value) {
