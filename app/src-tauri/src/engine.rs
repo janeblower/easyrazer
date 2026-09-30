@@ -33,7 +33,6 @@ type Feed = fn(&mut Engine, &[u8], Instant) -> Vec<Output>;
 pub struct EngineHandle {
     engine: Arc<Mutex<Engine>>,
     stop: Arc<AtomicBool>,
-    dead: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -61,19 +60,17 @@ impl EngineHandle {
         let razer = open(api, pid, "col04")?;
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
-        let dead = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
-            let (engine, stop, dead, sink) = (engine.clone(), stop.clone(), dead.clone(), sink.clone());
+            let (engine, stop, sink) = (engine.clone(), stop.clone(), sink.clone());
             std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
-                dead.store(true, Ordering::SeqCst);
                 stop.store(true, Ordering::SeqCst);
                 let out = lock(&engine).release_all();
                 emit(&out, &sink);
             })
         };
         let threads = vec![spawn(depth, feed_depth), spawn(razer, feed_razer)];
-        Ok(Self { engine, stop, dead, threads })
+        Ok(Self { engine, stop, threads })
     }
 
     pub fn set_config(&self, cfg: Config) {
@@ -82,7 +79,7 @@ impl EngineHandle {
 
     /// `false` once a reader lost the keyboard; the handle is then replaced.
     pub fn alive(&self) -> bool {
-        !self.dead.load(Ordering::SeqCst)
+        !self.threads.iter().any(JoinHandle::is_finished)
     }
 }
 
