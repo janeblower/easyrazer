@@ -1,9 +1,7 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::collections::BTreeMap;
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -18,14 +16,13 @@ use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
 use razer_core::{control, keymap, layout};
 use serde::Serialize;
+use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 
 use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, Sink};
 use crate::i18n;
 use crate::settings::{self, Macro, Rapid, Settings};
-
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
@@ -679,33 +676,31 @@ pub fn synapse_check(watch: bool, running: impl FnOnce() -> bool) -> bool {
     watch && running()
 }
 
+/// A failed snapshot counts as "running": writing while Synapse is alive gets overwritten.
 pub fn synapse_running() -> bool {
-    let out = Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq RazerAppEngine.exe", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    synapse_in(out.ok())
-}
-
-/// A failed check counts as "running": writing while Synapse is alive gets overwritten.
-/// With no match tasklist still prints a (localized) notice and exits 0, so empty output is a failure too.
-fn synapse_in(tasklist: Option<Output>) -> bool {
-    tasklist.filter(|o| o.status.success() && !o.stdout.is_empty()).is_none_or(|o| {
-        String::from_utf8_lossy(&o.stdout).contains("RazerAppEngine")
-    })
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return true;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut entry);
+        while ok != 0 && !found {
+            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            found = String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case("RazerAppEngine.exe");
+            ok = Process32NextW(snap, &mut entry);
+        }
+        CloseHandle(snap);
+        found
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use razer_core::lighting::Effect;
     use super::*;
-
-    use std::os::windows::process::ExitStatusExt;
-    use std::process::ExitStatus;
-
-    fn tasklist(code: u32, stdout: &[u8]) -> Option<Output> {
-        Some(Output { status: ExitStatus::from_raw(code), stdout: stdout.to_vec(), stderr: Vec::new() })
-    }
 
     #[test]
     fn synapse_is_not_checked_when_watching_is_off() {
@@ -725,19 +720,6 @@ mod tests {
         let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, live: None, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
-    }
-
-    #[test]
-    fn tasklist_failure_counts_as_synapse_running() {
-        assert!(synapse_in(None));
-        assert!(synapse_in(tasklist(1, b"")));
-        assert!(synapse_in(tasklist(0, b"")));
-    }
-
-    #[test]
-    fn detects_synapse_in_tasklist_output() {
-        assert!(synapse_in(tasklist(0, b"RazerAppEngine.exe  1234 Console  1  80 000 K")));
-        assert!(!synapse_in(tasklist(0, b"INFO: No tasks are running which match the specified criteria.")));
     }
 
     #[test]
