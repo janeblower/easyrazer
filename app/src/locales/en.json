@@ -4,7 +4,7 @@
   "mode": {
     "hw": "HW",
     "driver": "Driver",
-    "hint": "HW: the keyboard types by itself. Driver: EasyRazer types for it, Rapid Trigger works; the keyboard types only while the app runs."
+    "hint": "HW: the keyboard types by itself.\nDriver: EasyRazer types for it; the keyboard types only while the app runs.\n\nDriver mode only:\n• Rapid Trigger\n• Live key depth\n• Macros not written to the keyboard"
   },
   "footer": "EasyRazer is an unofficial project, not affiliated with Razer Inc.",
   "common": {
