@@ -112,7 +112,7 @@ pub fn encode(d: &DeviceSpec, e: &Effect) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
-pub fn decode(d: &DeviceSpec, bytes: &[u8]) -> Option<Effect> {
+fn decode(d: &DeviceSpec, bytes: &[u8]) -> Option<Effect> {
     let p = d.protocol();
     d.lighting.effects.iter().find_map(|name| decode_as(p.effects.get(name)?, name, bytes))
 }
