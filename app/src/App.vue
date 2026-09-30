@@ -16,7 +16,7 @@ import type {
   WriteResult,
 } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
-import KeysCard from "./components/KeysCard.vue";
+import SelectionBar from "./components/SelectionBar.vue";
 import ActionBar from "./components/ActionBar.vue";
 import ActuationCard from "./components/ActuationCard.vue";
 import BindingCard from "./components/BindingCard.vue";
@@ -439,18 +439,29 @@ onUnmounted(() => {
       </span>
     </nav>
     <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
-    <template v-if="tab === 'keys'">
-      <span class="inline-flex self-start">
-        <button
-          v-for="s in ['actuation', 'bindings', 'macros'] as const"
-          :key="s"
-          class="seg-btn"
-          :class="{ 'seg-on': section === s }"
-          @click="section = s"
-        >
-          {{ $t(`keys.${s}`) }}
-        </button>
-      </span>
+    <!-- With the map shown, the tab takes its width, not the window's. -->
+    <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'self-start': section !== 'macros' }">
+      <div class="flex gap-3 items-center">
+        <span class="inline-flex">
+          <button
+            v-for="s in ['actuation', 'bindings', 'macros'] as const"
+            :key="s"
+            class="seg-btn"
+            :class="{ 'seg-on': section === s }"
+            @click="section = s"
+          >
+            {{ $t(`keys.${s}`) }}
+          </button>
+        </span>
+        <SelectionBar
+          v-if="section !== 'macros'"
+          class="ml-auto"
+          :count="selection.size"
+          :single="section === 'bindings'"
+          @select-all="selectAll"
+          @clear="selection = new Set()"
+        />
+      </div>
       <MacroEditor
         v-if="section === 'macros'"
         :state="macroState"
@@ -459,8 +470,7 @@ onUnmounted(() => {
         :writable="writable"
         @update="(s) => (macroState = s)"
       />
-      <!-- The cards below take the width of the map, not of the window. -->
-      <div v-else class="flex flex-col gap-4 self-start">
+      <template v-else>
         <KeyboardMap
           v-model:selection="selection"
           :layout="layout"
@@ -473,7 +483,7 @@ onUnmounted(() => {
           :single="section === 'bindings'"
         />
         <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
-          <KeysCard :count="selection.size" :single="section === 'bindings'" @select-all="selectAll" @clear="selection = new Set()">
+          <div class="px-4 py-3 card flex flex-col gap-3">
             <ActuationCard
               v-if="section === 'actuation'"
               :count="selection.size"
@@ -487,22 +497,23 @@ onUnmounted(() => {
               @release="(v) => setRapid((r) => ({ ...r, release: v }))"
               @split="onSplit"
             />
-            <BindingCard
-              v-else
-              :key-id="bindKey"
-              :action="bindKey == null ? null : bindingOf(bindKey)"
-              :layout="layout"
-              :macros="macroState?.macros ?? {}"
-              @set="setBinding"
-            />
-            <ActionBar v-if="section === 'bindings'" v-bind="actions" @revert="revert" @apply="apply" @write="save" />
-          </KeysCard>
+            <template v-else>
+              <BindingCard
+                :key-id="bindKey"
+                :action="bindKey == null ? null : bindingOf(bindKey)"
+                :layout="layout"
+                :macros="macroState?.macros ?? {}"
+                @set="setBinding"
+              />
+              <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+            </template>
+          </div>
           <div v-if="section === 'actuation'" class="px-4 py-3 card flex flex-col justify-end">
             <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </div>
         </div>
-      </div>
-    </template>
+      </template>
+    </div>
     <LightingTab v-else-if="tab === 'lighting'" :status="status" />
     <SettingsTab v-else />
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
