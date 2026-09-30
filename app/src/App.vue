@@ -28,6 +28,7 @@ import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
 import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
+import AppIcon from "./components/AppIcon.vue";
 import { useConfirmWrite } from "./confirmWrite";
 import { setLanguage, systemLanguage } from "./i18n";
 
@@ -425,16 +426,18 @@ onUnmounted(() => {
       >
         {{ $t(`tabs.${name}`) }}
       </button>
-      <span class="ml-auto inline-flex self-center" :title="$t('mode.hint')">
+      <span class="ml-auto inline-flex" :title="$t('mode.hint')">
         <button
           v-for="on in [false, true]"
           :key="String(on)"
-          class="px-3 py-1 seg-btn"
-          :class="driver === on && (on ? 'border-driver bg-driver text-white' : 'seg-on')"
+          class="px-3 py-0 seg-btn inline-flex items-center"
+          :class="driver !== on ? 'text-muted' : on ? 'text-driver' : 'text-accent'"
+          :aria-label="$t(on ? 'mode.driver' : 'mode.hw')"
+          :aria-pressed="driver === on"
           :disabled="!writable"
           @click="setMode(on)"
         >
-          {{ $t(on ? "mode.driver" : "mode.hw") }}
+          <AppIcon class="h-7 w-7" :name="on ? 'rust' : 'chip'" />
         </button>
       </span>
     </nav>
