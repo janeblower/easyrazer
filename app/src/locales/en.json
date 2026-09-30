@@ -11,7 +11,8 @@
     "selectAll": "Select all",
     "clearSelection": "Clear selection",
     "selected": "Selected: {n}",
-    "selectHint": "Select keys: click, Ctrl+click, drag a box",
+    "selectHint": "Select keys",
+    "selectHow": "Click, Ctrl+click or drag a box",
     "revert": "Revert changes",
     "apply": "Apply",
     "write": "Save to keyboard memory",
@@ -38,7 +39,7 @@
   },
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros" },
   "bindings": {
-    "selectHint": "Click a key to pick it",
+    "selectHint": "Pick a key",
     "action": "Action",
     "types": { "key": "Key", "mouse": "Mouse", "media": "Media", "macro": "Macro", "disabled": "Disabled" },
     "factory": "Default",

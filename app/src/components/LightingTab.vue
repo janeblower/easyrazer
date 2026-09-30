@@ -436,7 +436,9 @@ onMounted(load);
           <div class="field">
             <span class="field-label">{{ $t("lighting.color") }}</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
-            <span class="hint">{{ selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint") }}</span>
+            <span class="hint" :title="$t('common.selectHow')">{{
+              selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint")
+            }}</span>
             <button @click="selectAll">{{ $t("common.selectAll") }}</button>
             <button :disabled="selection.size === 0" @click="selection = new Set()">{{ $t("common.clearSelection") }}</button>
           </div>
