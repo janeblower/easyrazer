@@ -13,13 +13,13 @@ use crate::macros::Event;
 
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
 /// without it a key resting at the point chatters on sensor noise.
-pub const HYSTERESIS: u8 = 12;
+const HYSTERESIS: u8 = 12;
 
 /// MI_01 Col06: `07 (fwID depth)* 00`; keys missing from a report are up.
-pub const DEPTH_REPORT: u8 = 0x07;
+const DEPTH_REPORT: u8 = 0x07;
 /// MI_01 Col04: `04 code*`, all zero when nothing is held.
-pub const RAZER_REPORT: u8 = 0x04;
-pub const RAZER_FN: u8 = 0x01;
+const RAZER_REPORT: u8 = 0x04;
+const RAZER_FN: u8 = 0x01;
 /// Smallest depth change worth showing; below it the UI would follow sensor noise.
 const DEPTH_STEP: u8 = 3;
 
