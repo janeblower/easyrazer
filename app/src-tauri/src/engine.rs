@@ -96,7 +96,10 @@ impl Drop for EngineHandle {
 }
 
 fn feed_depth(e: &mut Engine, report: &[u8], now: Instant) -> Vec<Output> {
-    rapid::parse_depth(report).map_or_else(Vec::new, |d| e.feed_depth(&d, now))
+    let Some(d) = rapid::parse_depth(report) else { return Vec::new() };
+    let mut out = e.feed_depth(&d, now);
+    out.extend(e.lead(&d));
+    out
 }
 
 fn feed_razer(e: &mut Engine, report: &[u8], _: Instant) -> Vec<Output> {

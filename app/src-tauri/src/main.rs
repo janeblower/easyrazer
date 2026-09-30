@@ -32,12 +32,24 @@ fn main() {
         .manage(commands::AppState { device: Mutex::new(device) })
         .setup(|app| {
             tray::build(app)?;
+            if let Some(w) = app.get_webview_window("main") {
+                no_alt_menu(w.hwnd()?.0);
+            }
             if !std::env::args().any(|a| a == autostart::TRAY_ARG) {
                 tray::show(app.handle());
             }
             let handle = app.handle().clone();
             let sink_handle = handle.clone();
             app.state::<commands::AppState>().device().set_sink(Arc::new(move |o| {
+                if let Output::Depth { depth, travel, down } = o {
+                    // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
+                    if let Some(w) = sink_handle.get_webview_window("main")
+                        && (depth == 0 || w.is_visible().unwrap_or(false))
+                    {
+                        let _ = w.emit("key-depth", (depth, travel, down));
+                    }
+                    return;
+                }
                 let h = sink_handle.clone();
                 // Off the reader thread: the device lock can be held for seconds by a full read.
                 std::thread::spawn(move || match o {
@@ -106,4 +118,20 @@ fn main() {
                 app.state::<commands::AppState>().device().stop_engine();
             }
         });
+}
+
+/// A lone Alt opens the (absent) window menu, and its modal loop stalls the event loop until the
+/// next key: live depth freezes mid-release. Alt+Space still opens the system menu.
+fn no_alt_menu(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SC_KEYMENU, WM_SYSCOMMAND};
+
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+        if msg == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_KEYMENU as usize && lp == 0 {
+            return 0;
+        }
+        unsafe { DefSubclassProc(hwnd, msg, wp, lp) }
+    }
+    unsafe { SetWindowSubclass(hwnd, Some(proc), 1, 0) };
 }
