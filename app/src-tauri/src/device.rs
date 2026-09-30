@@ -31,7 +31,6 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct Status {
     pub device: bool,
     pub synapse: bool,
-    pub mode: Option<u8>,
     /// Driver mode chosen in the app: the host engine types, Rapid Trigger works.
     pub driver_mode: bool,
     pub profile: Option<u8>,
@@ -176,23 +175,20 @@ impl Device {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
             let driver_mode = self.settings.driver_mode;
-            return Status { device: false, synapse, mode: None, driver_mode, profile: None, model: None, unsupported, error };
+            return Status { device: false, synapse, driver_mode, profile: None, model: None, unsupported, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
         let running = self.engine.is_some();
         let Some((t, spec)) = &self.control else { unreachable!() };
-        let mut mode = control::mode(t).ok();
+        let mode = control::mode(t).ok();
         let released = should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok();
-        if released {
-            mode = control::mode(t).ok();
-        }
         let profile = control::active_profile(t).ok();
         let model = Some(spec.name.clone());
         if released {
             self.restore();
         }
-        Status { device: true, synapse, mode, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
+        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
     }
 
     /// Assignments the keyboard types with now.
