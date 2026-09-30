@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import type { KeyMap, KeyView, Rgb } from "../types";
 
@@ -87,21 +87,9 @@ const bandStyle = computed(() => {
 
 // The device reads the editable keys in layout order and reports only how many are done.
 const readOrder = computed(() => new Map(props.layout.filter((k) => k.editable).map((k, i) => [k.key, i])));
-// One read is a single exchange with no progress of its own, so the dial runs for the average time so far.
-const keyMs = ref(40);
-let readStart = 0;
-watch(
-  () => props.loaded,
-  (n) => {
-    if (n === 0) readStart = performance.now();
-    else if (n) keyMs.value = (performance.now() - readStart) / n;
-  },
-);
-
-function readState(key: number) {
+function isRead(key: number) {
   const i = readOrder.value.get(key);
-  if (props.loaded == null || i == null || i < props.loaded) return "done";
-  return i === props.loaded ? "reading" : "waiting";
+  return props.loaded == null || i == null || i < props.loaded;
 }
 
 const keys = computed(() => props.layout.filter((k) => k.shape !== "ring"));
@@ -133,7 +121,7 @@ function keyClass(k: KeyView) {
   const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
   const look = props.colors
     ? ["cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
-    : k.editable && readState(k.key) === "done"
+    : k.editable && isRead(k.key)
       ? "bg-key cursor-pointer"
       : "bg-key-off text-muted cursor-default";
   return [border, look, k.shape === "round" ? "rounded-full !items-center !justify-center" : "rounded-md"];
@@ -230,32 +218,8 @@ function up(e: PointerEvent) {
           <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
           <span v-if="k.editable && values[k.key] != null" class="ml-auto truncate" :class="valueClass(k.key)">{{ values[k.key] }}</span>
         </span>
-        <span v-if="readState(k.key) === 'reading'" class="key-dial" :style="{ animationDuration: `${keyMs}ms` }"></span>
       </div>
       <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.key-dial {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: conic-gradient(var(--accent) var(--fill), var(--line) 0);
-  animation: dial-fill linear forwards;
-}
-@property --fill {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-@keyframes dial-fill {
-  to {
-    --fill: 360deg;
-  }
-}
-</style>
