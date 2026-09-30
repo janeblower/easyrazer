@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "EasyRazer", "width": 1160, "height": 960, "minWidth": 1160, "minHeight": 960, "visible": false }
+      { "label": "main", "title": "EasyRazer", "width": 1160, "height": 912, "minWidth": 1160, "minHeight": 912, "visible": false }
     ],
     "security": { "csp": null }
   },
