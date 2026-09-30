@@ -259,6 +259,30 @@ function revert() {
   bindErrors.value = {};
 }
 
+type Written = { status: "ok" | "unconfirmed"; key: number };
+type Failed = { status: "error"; key: number; message: string };
+
+// Confirmed and unconfirmed keys take the device value and leave the edits; only failed ones keep them.
+function merge<O extends Written, V, E>(
+  results: (O | Failed)[],
+  base: KeyMap<V>,
+  edits: KeyMap<E>,
+  value: (r: O) => V,
+  unconfirmed: (r: O) => string,
+) {
+  const next = { base: { ...base }, edits: { ...edits }, errors: {} as KeyMap<string> };
+  for (const r of results) {
+    if (r.status === "error") {
+      next.errors[r.key] = r.message;
+      continue;
+    }
+    next.base[r.key] = value(r);
+    delete next.edits[r.key];
+    if (r.status === "unconfirmed") next.errors[r.key] = unconfirmed(r);
+  }
+  return next;
+}
+
 async function write(command: "apply" | "save", done: string) {
   busy.value = true;
   let failed = false;
@@ -277,38 +301,28 @@ async function write(command: "apply" | "save", done: string) {
       rapidEdits.value = {};
     }
     unsaved.value = new Set(keys);
-    const base = { ...baseline.value };
-    const next = { ...edits.value };
-    const errs: KeyMap<string> = {};
-    for (const r of results) {
-      if (r.status === "error") {
-        errs[r.key] = r.message;
-        continue;
-      }
-      base[r.key] = r.mm;
-      delete next[r.key];
-      if (r.status === "unconfirmed") errs[r.key] = t("actuation.unconfirmed", { v: r.mm.toFixed(1) });
-    }
-    baseline.value = base;
-    edits.value = next;
-    errors.value = errs;
+    const applied = merge(
+      results,
+      baseline.value,
+      edits.value,
+      (r) => r.mm,
+      (r) => t("actuation.unconfirmed", { v: r.mm.toFixed(1) }),
+    );
+    baseline.value = applied.base;
+    edits.value = applied.edits;
+    errors.value = applied.errors;
     bindUnsaved.value = new Set(unsaved_bindings);
-    const bBase = { ...bindBase.value };
-    const bNext = { ...bindEdits.value };
-    const bErrs: KeyMap<string> = {};
-    for (const r of bound) {
-      if (r.status === "error") {
-        bErrs[r.key] = r.message;
-        continue;
-      }
-      bBase[r.key] = r.action;
-      delete bNext[r.key];
-      if (r.status === "unconfirmed") bErrs[r.key] = t("bindings.unconfirmed");
-    }
-    bindBase.value = bBase;
-    bindEdits.value = bNext;
-    bindErrors.value = bErrs;
-    const bad = Object.keys(errs).length + Object.keys(bErrs).length;
+    const binds = merge(
+      bound,
+      bindBase.value,
+      bindEdits.value,
+      (r) => r.action,
+      () => t("bindings.unconfirmed"),
+    );
+    bindBase.value = binds.base;
+    bindEdits.value = binds.edits;
+    bindErrors.value = binds.errors;
+    const bad = Object.keys(applied.errors).length + Object.keys(binds.errors).length;
     message.value = bad ? t("actuation.failed", { n: bad }) : t(done);
   } catch (error) {
     message.value = String(error);
