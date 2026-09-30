@@ -84,10 +84,7 @@ const actions = computed(() => ({
   canApply: canApply.value,
   canWrite: canSave.value,
 }));
-const selectedValue = computed(() => {
-  const values = Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k]);
-  return values.length > 0 && values.every((v) => v === values[0]) ? (values[0] ?? null) : null;
-});
+const selectedValue = computed(() => common(Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k])) ?? null);
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
 const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;

@@ -215,19 +215,21 @@ const dirOf = computed(() => {
 });
 const speedInfo = computed(() => cands.value.find((e) => e.speed));
 
+function flip(v: number) {
+  const info = speedInfo.value!;
+  const [lo, hi] = info.speed!;
+  return info.fast_low ? lo + hi - v : v;
+}
+
 // Some firmware speeds are "lower is faster"; the slider always reads slow → fast.
 const speedSlider = computed({
   get: () => {
     const [lo, hi] = speedInfo.value!.speed!;
-    const fastLow = speedInfo.value!.fast_low;
     const cur = ui.value!.speed;
-    const s = cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2);
-    return fastLow ? lo + hi - s : s;
+    return flip(cur != null && cur >= lo && cur <= hi ? cur : Math.round((lo + hi) / 2));
   },
   set: (v: number) => {
-    const [lo, hi] = speedInfo.value!.speed!;
-    const fastLow = speedInfo.value!.fast_low;
-    setUi("speed", fastLow ? lo + hi - v : v);
+    setUi("speed", flip(v));
   },
 });
 
