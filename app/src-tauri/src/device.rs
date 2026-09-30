@@ -748,6 +748,8 @@ impl Device {
             Ok(h) => {
                 self.engine = Some(h);
                 self.ram = None;
+                // A new engine starts with game mode off.
+                let _ = control::set_led(t, control::LED_GAME, false, false);
                 self.restore();
             }
             Err(e) => self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e)])),
@@ -765,6 +767,7 @@ impl Device {
             && control::set_hardware_mode(t).is_ok()
         {
             self.ram = None;
+            let _ = control::set_led(t, control::LED_GAME, false, false);
             self.restore();
         }
     }
@@ -821,6 +824,12 @@ impl Device {
     }
 
     /// Fn+F11/F12 in driver mode; the firmware's own step is about a tenth.
+    pub fn set_led(&mut self, led: u8, on: bool, blink: bool) {
+        if let Some((t, _)) = self.connect() {
+            let _ = control::set_led(t, led, on, blink);
+        }
+    }
+
     pub fn step_brightness(&mut self, up: bool) {
         let applied = self.settings.loaded_profile().and_then(|p| p.data.look.as_ref()).map(|l| l.brightness);
         let Some((t, d)) = self.connect() else { return };

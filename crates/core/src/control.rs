@@ -9,6 +9,11 @@ pub const MODE_DRIVER: u8 = 0x03;
 const GET_MODE: Command = Command::new(0x00, 0x84);
 const SET_MODE: Command = Command::new(0x00, 0x04);
 const GET_ACTIVE_PROFILE: Command = Command::new(0x05, 0x84);
+const SET_LED: Command = Command::new(0x03, 0x00);
+const SET_LED_BLINK: Command = Command::new(0x03, 0x02);
+
+pub const LED_MACRO: u8 = 0x07;
+pub const LED_GAME: u8 = 0x08;
 
 pub fn mode(t: &impl Transport) -> Result<u8, Error> {
     Ok(exchange(t, GET_MODE, 2, &[])?.args[0])
@@ -28,6 +33,14 @@ pub fn set_driver_mode(t: &impl Transport) -> Result<(), Error> {
 
 pub fn active_profile(t: &impl Transport) -> Result<u8, Error> {
     Ok(exchange(t, GET_ACTIVE_PROFILE, 1, &[])?.args[0])
+}
+
+/// The M indicator obeys this only in driver mode.
+pub fn set_led(t: &impl Transport, led: u8, on: bool, blink: bool) -> Result<(), Error> {
+    if blink {
+        exchange(t, SET_LED_BLINK, 3, &[0, led, 1])?;
+    }
+    exchange(t, SET_LED, 3, &[0, led, on.into()]).map(|_| ())
 }
 
 #[cfg(test)]

@@ -98,7 +98,10 @@ const F10: u8 = 121;
 const F11: u8 = 122;
 const F12: u8 = 123;
 const PAUSE: u8 = 126;
+const LEFT_WIN: u8 = 127;
 const MENU: u8 = 129;
+/// Fn reports depth under `RIGHT_GUI`'s fwID; only the firmware's Fn layer uses it.
+const FN: u8 = 59;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +125,10 @@ pub enum Output {
     Sleep,
     /// Fn+Menu: the app loads its next profile.
     NextProfile,
+    /// Fn+F9: the firmware only blinks the M indicator, there is no on-the-fly recording.
+    MacroLed,
+    /// Fn+F10 turned game mode on or off; it blocks the Win key.
+    GameMode(bool),
     /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
     /// since its last extreme — what Rapid Trigger measures — and whether it is down.
     Depth { depth: u8, travel: u8, down: bool },
@@ -146,8 +153,9 @@ fn fn_layer(key: u8) -> Option<&'static [Output]> {
         F11 => &[Output::Brightness(-1)],
         F12 => &[Output::Brightness(1)],
         PAUSE => &[Output::Sleep],
+        F9 => &[Output::MacroLed],
         MENU => &[Output::NextProfile],
-        F9 | F10 => &[],
+        F10 => &[],
         _ => return None,
     })
 }
@@ -258,11 +266,12 @@ pub struct Engine {
     /// Key whose depth the UI shows.
     lead: Option<u8>,
     shown: (u8, bool),
+    game: bool,
 }
 
 impl Engine {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: (0, false) }
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: (0, false), game: false }
     }
 
     pub fn set_config(&mut self, cfg: Config) {
@@ -307,9 +316,14 @@ impl Engine {
             }
             return;
         }
-        let action = if self.held.contains(&RAZER_FN)
-            && let Some(fn_out) = fn_layer(key)
-        {
+        let fn_held = self.held.contains(&RAZER_FN);
+        let action = if key == FN || (self.game && key == LEFT_WIN) {
+            Action::Disabled
+        } else if fn_held && key == F10 {
+            self.game = !self.game;
+            out.push(Output::GameMode(self.game));
+            Action::Disabled
+        } else if fn_held && let Some(fn_out) = fn_layer(key) {
             out.extend_from_slice(fn_out);
             Action::Disabled
         } else {
@@ -563,10 +577,34 @@ mod tests {
         e.feed_depth(&depth(&[]), t);
         assert_eq!(e.feed_depth(&depth(&[(PAUSE, 150)]), t), [Output::Sleep]);
         e.feed_depth(&depth(&[]), t);
-        assert!(e.feed_depth(&depth(&[(F9, 150)]), t).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[(F9, 150)]), t), [Output::MacroLed]);
         e.feed_depth(&depth(&[]), t);
         e.feed_razer(&[]);
         assert_eq!(e.feed_depth(&depth(&[(F12, 150)]), t), [key(F12, true)]);
+    }
+
+    #[test]
+    fn fn_types_nothing() {
+        let (mut e, t) = (engine(), Instant::now());
+        assert!(e.feed_depth(&depth(&[(FN, 150)]), t).is_empty());
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+    }
+
+    #[test]
+    fn game_mode_blocks_win() {
+        let (mut e, t) = (engine(), Instant::now());
+        let fn_f10 = |e: &mut Engine| {
+            e.feed_razer(&[RAZER_FN]);
+            let out = e.feed_depth(&depth(&[(F10, 150)]), t);
+            e.feed_depth(&depth(&[]), t);
+            e.feed_razer(&[]);
+            out
+        };
+        assert_eq!(fn_f10(&mut e), [Output::GameMode(true)]);
+        assert!(e.feed_depth(&depth(&[(LEFT_WIN, 150)]), t).is_empty());
+        e.feed_depth(&depth(&[]), t);
+        assert_eq!(fn_f10(&mut e), [Output::GameMode(false)]);
+        assert_eq!(e.feed_depth(&depth(&[(LEFT_WIN, 150)]), t), [key(LEFT_WIN, true)]);
     }
 
     #[test]
