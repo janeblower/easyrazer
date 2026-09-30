@@ -8,6 +8,7 @@ mod engine;
 mod i18n;
 mod settings;
 mod tray;
+mod wheel;
 
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
