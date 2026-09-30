@@ -53,6 +53,10 @@ let unlisten: UnlistenFn | undefined;
 onMounted(async () => (unlisten = await listen<[number, number, boolean]>("key-depth", (e) => (lead.value = e.payload))));
 onUnmounted(() => unlisten?.());
 const units = (mm: number) => (mm / (MAX - MIN)) * 255;
+// With nothing selected the thumbs rest mid-track; "any" lets them sit between the 0.1 steps.
+const step = computed(() => (props.count ? 0.1 : "any"));
+const mid = (min: number, max: number, v: number | null | undefined, fallback: number) => (props.count ? (v ?? fallback) : (min + max) / 2);
+
 const NONE = { "--from": "0px", "--to": "0px" };
 const span = (from: number, to: number) => ({ "--from": at(from), "--to": at(to) });
 const fill = computed(() => (props.driver && lead.value[0] ? span(0, lead.value[0] / 255) : NONE));
@@ -84,8 +88,8 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
           type="range"
           :min="MIN"
           :max="MAX"
-          step="0.1"
-          :value="value ?? MIN"
+          :step="step"
+          :value="mid(MIN, MAX, value, MIN)"
           :disabled="!count"
           :style="fill"
           @input="emit('set', mm($event))"
@@ -137,8 +141,8 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
             type="range"
             :min="RT_MIN"
             :max="RT_MAX"
-            step="0.1"
-            :value="rapid.press ?? 0.4"
+            :step="step"
+            :value="mid(RT_MIN, RT_MAX, rapid.press, 0.4)"
             :disabled="!rtOn"
             :style="pressFill"
             @input="emit('press', mm($event))"
@@ -154,8 +158,8 @@ const releaseFill = computed(() => rtFill(props.rapid.release, true));
             type="range"
             :min="RT_MIN"
             :max="RT_MAX"
-            step="0.1"
-            :value="rapid.release ?? 0.4"
+            :step="step"
+            :value="mid(RT_MIN, RT_MAX, rapid.release, 0.4)"
             :disabled="!rtOn"
             :style="releaseFill"
             @input="emit('release', mm($event))"
