@@ -176,7 +176,12 @@ async function loadMacros() {
 async function load() {
   busy.value = true;
   progress.value = [0, layout.value.filter((k) => k.editable).length];
-  const unlisten = await listen<[number, number]>("read-progress", (e) => (progress.value = e.payload));
+  const unlisten = await listen<[number, number, number, number, Rapid | null]>("read-progress", (e) => {
+    const [done, total, key, mm, rapid] = e.payload;
+    progress.value = [done, total];
+    baseline.value[key] = mm;
+    if (rapid) rapidBase.value[key] = rapid;
+  });
   try {
     const profile = status.value?.profile ?? null;
     const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings } = await invoke<Actuation>("read_all");

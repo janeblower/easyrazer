@@ -126,8 +126,9 @@ pub fn lighting_layout() -> Vec<KeyView> {
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
     let mut device = state.device();
-    let all = device.read_all(|done, total| {
-        let _ = app.emit("read-progress", (done, total));
+    let rapid = device.settings().rapid.clone();
+    let all = device.read_all(|done, total, a| {
+        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), rapid.get(&a.key)));
     })?;
     let s = device.settings();
     Ok(Actuation {

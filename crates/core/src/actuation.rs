@@ -28,13 +28,13 @@ pub fn read_all(
     t: &impl Transport,
     profile: u8,
     keys: &[u8],
-    mut progress: impl FnMut(usize),
+    mut progress: impl FnMut(usize, &KeyAssignment),
 ) -> Result<Vec<KeyAssignment>, Error> {
     keys.iter()
         .enumerate()
         .map(|(i, &k)| {
             let a = read_key(t, profile, k)?;
-            progress(i + 1);
+            progress(i + 1, &a);
             Ok(a)
         })
         .collect()
@@ -144,9 +144,9 @@ mod tests {
     fn read_all_returns_every_key_and_reports_progress() {
         let kb = FakeKeyboard::new(&[A, S, W]);
         let mut seen = Vec::new();
-        let all = read_all(&kb, 1, &[A, S, W], |n| seen.push(n)).unwrap();
+        let all = read_all(&kb, 1, &[A, S, W], |n, a| seen.push((n, a.key))).unwrap();
         assert_eq!(all.iter().map(|a| a.key).collect::<Vec<_>>(), [A, S, W]);
-        assert_eq!(seen, [1, 2, 3]);
+        assert_eq!(seen, [(1, A), (2, S), (3, W)]);
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn backup_lists_every_key() {
         let kb = FakeKeyboard::new(&[A, S]);
-        let all = read_all(&kb, 1, &[A, S], |_| {}).unwrap();
+        let all = read_all(&kb, 1, &[A, S], |_, _| {}).unwrap();
         let text = format_backup(1, &all);
         assert!(text.starts_with("profile 1\n"), "{text}");
         assert!(text.lines().any(|l| l.starts_with(" 31 A ") && l.ends_with("fn 02 [00 1F]")), "{text}");
