@@ -80,15 +80,15 @@ pub struct Settings {
     /// Interface language; `None` until the window picks one from the system.
     pub language: Option<String>,
     /// Before profiles: applied but unsaved settings, moved into the loaded profile once.
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub applied: Option<Look>,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub actuation: BTreeMap<u8, f32>,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub bindings: BTreeMap<u8, Action>,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub rapid: BTreeMap<u8, Rapid>,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -122,6 +122,9 @@ impl Settings {
     }
 
     pub fn take_legacy(&mut self, id: u32) {
+        if self.profile(id).is_none() {
+            return;
+        }
         let actuation = std::mem::take(&mut self.actuation);
         let bindings = std::mem::take(&mut self.bindings);
         let rapid = std::mem::take(&mut self.rapid);
@@ -206,6 +209,12 @@ mod tests {
         assert_eq!(p.data.look.as_ref().unwrap().brightness, 9);
         let text = serde_json::to_string(&s).unwrap();
         assert!(!text.contains("\"actuation\"") && !text.contains("\"applied\""), "{text}");
+    }
+
+    #[test]
+    fn legacy_fields_survive_a_save_before_migration() {
+        let s = parse(r#"{"actuation": {"31": 3.6}}"#);
+        assert_eq!(parse(&serde_json::to_string(&s).unwrap()).actuation[&31], 3.6);
     }
 
     #[test]
