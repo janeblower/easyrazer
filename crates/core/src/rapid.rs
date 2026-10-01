@@ -120,6 +120,8 @@ pub enum Output {
     /// One brightness step down (-1) or up (+1).
     Brightness(i8),
     Sleep,
+    /// Fn+Menu: the app loads its next profile.
+    NextProfile,
     /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
     /// since its last extreme — what Rapid Trigger measures — and whether it is down.
     Depth { depth: u8, travel: u8, down: bool },
@@ -144,7 +146,8 @@ fn fn_layer(key: u8) -> Option<&'static [Output]> {
         F11 => &[Output::Brightness(-1)],
         F12 => &[Output::Brightness(1)],
         PAUSE => &[Output::Sleep],
-        F9 | F10 | MENU => &[],
+        MENU => &[Output::NextProfile],
+        F9 | F10 => &[],
         _ => return None,
     })
 }
@@ -540,6 +543,14 @@ mod tests {
         assert_eq!(e.tick(t + Duration::from_millis(600)), [key(S, true)]);
         e.feed_depth(&depth(&[(A, 150)]), t + Duration::from_millis(700));
         assert!(e.tick(t + Duration::from_secs(2)).is_empty());
+    }
+
+    #[test]
+    fn fn_menu_switches_the_profile() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(MENU, 150)]), t), [Output::NextProfile]);
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
     }
 
     #[test]
