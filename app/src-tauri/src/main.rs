@@ -6,6 +6,7 @@ mod device;
 mod dynamic_lighting;
 mod engine;
 mod i18n;
+mod profiles;
 mod settings;
 mod tray;
 
