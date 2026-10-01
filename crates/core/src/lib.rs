@@ -5,8 +5,8 @@ pub mod analog;
 pub mod binding;
 pub mod control;
 pub mod devices;
-#[cfg(test)]
-mod fake;
+#[cfg(any(test, feature = "fake"))]
+pub mod fake;
 #[cfg(feature = "hid")]
 pub mod hid;
 pub mod keymap;

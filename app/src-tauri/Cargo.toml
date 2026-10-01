@@ -14,3 +14,6 @@ serde_json = "1"
 hidapi = "2"
 razer-core = { path = "../../crates/core", features = ["hid"] }
 windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Power", "Win32_UI_Shell", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp"] }
+
+[dev-dependencies]
+razer-core = { path = "../../crates/core", features = ["hid", "fake"] }

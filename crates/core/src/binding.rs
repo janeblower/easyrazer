@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn apply_keeps_the_press_points() {
         let kb = FakeKeyboard::new(&[A]);
-        kb.keys.borrow_mut().get_mut(&A).unwrap().threshold_low = 77;
+        kb.edit(1, 0, A, |a| a.threshold_low = 77);
         let r = apply(&kb, 1, &[(A, Action::Disabled)]);
         assert!(matches!(&r[0].1, Outcome::Ok(a) if a.fn_id == FN_DISABLED && a.threshold_low == 77), "{r:?}");
     }

@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn apply_changes_only_the_press_point() {
         let kb = FakeKeyboard::new(&[A]);
-        kb.keys.borrow_mut().get_mut(&A).unwrap().threshold_high = 77;
+        kb.edit(1, 0, A, |a| a.threshold_high = 77);
         let before = kb.key(A);
         let expected = KeyAssignment { threshold_low: 109, ..before };
         assert_eq!(apply(&kb, 1, &[(A, 2.4)]), [(A, Outcome::Ok(expected.clone()))]);
