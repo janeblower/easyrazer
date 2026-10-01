@@ -11,12 +11,11 @@ use crate::transport::{Error, Transport, exchange};
 pub const LIVE: u8 = 0;
 
 pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignment, Error> {
-    let r = exchange(
-        t,
-        analog::GET_KEY_ASSIGNMENT,
-        analog::KEY_ASSIGNMENT_SIZE,
-        &[profile, key, Layer::Normal as u8],
-    )?;
+    read_layer(t, profile, key, Layer::Normal)
+}
+
+pub fn read_layer(t: &impl Transport, profile: u8, key: u8, layer: Layer) -> Result<KeyAssignment, Error> {
+    let r = exchange(t, analog::GET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &[profile, key, layer as u8])?;
     analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
 }
 

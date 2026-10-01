@@ -4,7 +4,7 @@
   "set_brightness": "0F:04",
   "get_brightness": "0F:84",
   "set_frame": "0F:03",
-  "stores": { "temporary": 0, "saved": 1 },
+  "stores": { "temporary": 0 },
   "effects": {
     "off": { "bytes": "00 00 00 00" },
     "static": { "bytes": "01 00 00 01 {rgb1}" },

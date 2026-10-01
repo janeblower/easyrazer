@@ -14,5 +14,6 @@ pub mod layout;
 pub mod lighting;
 pub mod macros;
 pub mod packet;
+pub mod profiles;
 pub mod rapid;
 pub mod transport;

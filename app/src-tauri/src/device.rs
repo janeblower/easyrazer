@@ -306,7 +306,7 @@ impl Device {
         let dynamic_lighting = dynamic_lighting::enabled();
         self.ensure_connected();
         let saved = match (&self.control, self.synapse) {
-            (Some((t, d)), false) => lighting::get_look(t, d, Store::Saved).ok().flatten(),
+            (Some((t, d)), false) => lighting::get_look(t, d, Store::Slot(1)).ok().flatten(),
             _ => None,
         };
         Ok(LightingState {
@@ -350,7 +350,7 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         let (t, d) = self.keyboard()?;
-        lighting::set_look(t, d, Store::Saved, &look).map_err(|e| e.to_string())?;
+        lighting::set_look(t, d, Store::Slot(1), &look).map_err(|e| e.to_string())?;
         lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         self.settings.applied = Some(look);
         settings::save(&self.settings)
@@ -775,7 +775,7 @@ mod tests {
         let (original, saved_before) = {
             let (t, d) = dev.connect().expect("keyboard not connected");
             let original = lighting::get_look(t, d, Store::Temporary).unwrap().expect("known effect in the temporary store");
-            (original, lighting::get_look(t, d, Store::Saved).unwrap())
+            (original, lighting::get_look(t, d, Store::Slot(1)).unwrap())
         };
         let test = Look { effect: Effect { name: "static".into(), rgb1: Some([0x12, 0x34, 0x56]), ..Default::default() }, brightness: 0x80 };
         dev.lighting_preview(&test).unwrap();
@@ -783,7 +783,7 @@ mod tests {
         let read = lighting::get_look(t, d, Store::Temporary).unwrap();
         lighting::set_look(t, d, Store::Temporary, &original).unwrap();
         assert_eq!(read, Some(test));
-        assert_eq!(lighting::get_look(t, d, Store::Saved).unwrap(), saved_before);
+        assert_eq!(lighting::get_look(t, d, Store::Slot(1)).unwrap(), saved_before);
     }
 
     #[test]

@@ -42,8 +42,8 @@ pub struct Look {
 pub enum Store {
     /// Shown at once, gone after a replug.
     Temporary,
-    /// Survives replugs; flash with limited write endurance.
-    Saved,
+    /// Flash profile 1-5; survives replugs, limited write endurance.
+    Slot(u8),
 }
 
 /// What the UI needs to build the controls of one effect.
@@ -147,10 +147,9 @@ fn decode_as(t: &EffectTemplate, name: &str, bytes: &[u8]) -> Option<Effect> {
 }
 
 fn store(d: &DeviceSpec, s: Store) -> u8 {
-    let st = &d.protocol().stores;
     match s {
-        Store::Temporary => st.temporary,
-        Store::Saved => st.saved,
+        Store::Temporary => d.protocol().stores.temporary,
+        Store::Slot(n) => n,
     }
 }
 
@@ -182,7 +181,7 @@ fn set_frame(t: &impl Transport, d: &DeviceSpec, look: &Look) -> Result<(), Erro
 pub fn set_look(t: &impl Transport, d: &DeviceSpec, s: Store, look: &Look) -> Result<(), Error> {
     let p = d.protocol();
     if look.effect.name == CUSTOM {
-        if s == Store::Saved {
+        if s != Store::Temporary {
             return Err(Error::BadArgument("the custom layout cannot be saved to the keyboard".into()));
         }
         template(d, CUSTOM)?;
@@ -310,7 +309,7 @@ mod tests {
         let look = Look { effect: Effect { rgb1: Some(RED), ..fx("static") }, brightness: 0x80 };
         set_look(&kb, spec(), Store::Temporary, &look).unwrap();
         assert_eq!(get_look(&kb, spec(), Store::Temporary).unwrap(), Some(look));
-        let saved = get_look(&kb, spec(), Store::Saved).unwrap().unwrap();
+        let saved = get_look(&kb, spec(), Store::Slot(1)).unwrap().unwrap();
         assert_eq!((saved.effect, saved.brightness), (fx("spectrum"), 0xF2));
     }
 
@@ -318,8 +317,8 @@ mod tests {
     fn saved_look_round_trips() {
         let kb = FakeKeyboard::new(&[]);
         let look = Look { effect: Effect { dir: Some("left".into()), speed: Some(0x10), ..fx("wave") }, brightness: 0 };
-        set_look(&kb, spec(), Store::Saved, &look).unwrap();
-        assert_eq!(get_look(&kb, spec(), Store::Saved).unwrap(), Some(look));
+        set_look(&kb, spec(), Store::Slot(1), &look).unwrap();
+        assert_eq!(get_look(&kb, spec(), Store::Slot(1)).unwrap(), Some(look));
     }
 
     #[test]
@@ -366,7 +365,7 @@ mod tests {
     #[test]
     fn custom_look_cannot_go_to_the_flash() {
         let kb = FakeKeyboard::new(&[]);
-        assert!(matches!(set_look(&kb, spec(), Store::Saved, &custom(&[])), Err(Error::BadArgument(_))));
+        assert!(matches!(set_look(&kb, spec(), Store::Slot(1), &custom(&[])), Err(Error::BadArgument(_))));
         assert!(matches!(set_look(&kb, spec(), Store::Temporary, &Look { effect: fx(CUSTOM), brightness: 1 }), Err(Error::BadArgument(_))));
         assert!(kb.sent.borrow().is_empty());
     }
