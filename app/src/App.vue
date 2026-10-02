@@ -35,6 +35,7 @@ import { useConfirmWrite } from "./confirmWrite";
 import { setLanguage, systemLanguage } from "./i18n";
 
 const { t } = useI18n();
+const version = __APP_VERSION__;
 const status = ref<DeviceStatus | null>(null);
 const layout = ref<KeyView[]>([]);
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
@@ -632,6 +633,6 @@ onUnmounted(() => {
         <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
       </template>
     </ModalDialog>
-    <footer class="text-xs text-muted">{{ $t("footer") }}</footer>
+    <footer class="text-xs text-muted">{{ version }} · {{ $t("footer") }}</footer>
   </main>
 </template>
