@@ -292,8 +292,9 @@ pub async fn set_language(app: AppHandle, state: State<'_, AppState>, language: 
 }
 
 #[tauri::command]
-pub fn hide_window(window: WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())
+pub async fn hide_window(state: State<'_, AppState>, window: WebviewWindow) -> Result<(), String> {
+    window.destroy().map_err(|e| e.to_string())?;
+    state.device().drop_preview()
 }
 
 #[tauri::command]

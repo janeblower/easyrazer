@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
 import { useConfirmWrite } from "../confirmWrite";
+import { trackUnapplied } from "../unapplied";
 import ConfirmWrite from "./ConfirmWrite.vue";
 import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
@@ -41,6 +42,7 @@ const dirty = computed(
     !!draft.value &&
     (!saved.value || saved.value.name !== draft.value.name || JSON.stringify(saved.value.events) !== JSON.stringify(draft.value.events)),
 );
+trackUnapplied(() => dirty.value);
 const keys = computed(() => props.layout.filter((k) => k.editable).map((k) => ({ key: k.key, name: keyName(k, t) })));
 const byName = computed(() => new Map(props.layout.map((k) => [k.name, k.key])));
 const size = computed(() => footprint(bodySize(draft.value?.events ?? [])));

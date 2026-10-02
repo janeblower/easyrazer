@@ -2,7 +2,7 @@
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{App, AppHandle, Emitter, Manager, Wry};
+use tauri::{App, AppHandle, Emitter, Manager, WebviewWindowBuilder, Wry};
 
 use crate::commands::AppState;
 use crate::{autostart, i18n};
@@ -26,12 +26,22 @@ pub fn retitle(app: &AppHandle) {
     let _ = items.quit.set_text(i18n::t(&l, "tray.quit"));
 }
 
+/// Builds the window on demand: a hidden one would keep its WebView2 processes running.
 pub fn show(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    let w = match app.get_webview_window("main") {
+        Some(w) => w,
+        None => {
+            let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == "main") else { return };
+            let Ok(w) = WebviewWindowBuilder::from_config(app, cfg).and_then(|b| b.build()) else { return };
+            if let Ok(hwnd) = w.hwnd() {
+                crate::no_alt_menu(hwnd.0);
+            }
+            w
+        }
+    };
+    let _ = w.unminimize();
+    let _ = w.show();
+    let _ = w.set_focus();
 }
 
 pub fn sync_autostart(app: &AppHandle) {

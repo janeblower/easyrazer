@@ -165,7 +165,8 @@
       "title": "Close the window",
       "text": "In the tray EasyRazer keeps watching the keyboard and brings the lighting back after a replug.",
       "exit": "Quit",
-      "tray": "Minimize to tray"
+      "tray": "Minimize to tray",
+      "unapplied": "Changes not applied will be lost."
     },
     "write": {
       "title": "Save to keyboard memory?",

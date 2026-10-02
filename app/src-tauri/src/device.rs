@@ -96,6 +96,8 @@ pub struct Device {
     menu: Option<MenuListener>,
     sink: Option<Sink>,
     progress: Option<Progress>,
+    /// The keyboard shows a look the window has not applied.
+    previewed: bool,
 }
 
 /// Reports a slot read: reads done, reads in all, the key when the window shows it.
@@ -119,6 +121,7 @@ impl Device {
             menu: None,
             sink: None,
             progress: None,
+            previewed: false,
         })
     }
 
@@ -604,8 +607,20 @@ impl Device {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.previewed = true;
         let (t, d) = self.keyboard()?;
         lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())
+    }
+
+    /// Brings back the look the lighting tab reverts to, once the window has dropped its preview.
+    pub fn drop_preview(&mut self) -> Result<(), String> {
+        if !std::mem::take(&mut self.previewed) {
+            return Ok(());
+        }
+        let state = self.lighting_state()?;
+        let Some(look) = state.applied.or(state.saved) else { return Ok(()) };
+        let (t, d) = self.keyboard()?;
+        lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())
     }
 
     /// Remembers the look in the loaded profile; without a keyboard it is shown on the next connect.
@@ -617,6 +632,7 @@ impl Device {
         if self.settings.loaded_profile().is_none() {
             return Err(missing);
         }
+        self.previewed = false;
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         }
@@ -939,7 +955,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
