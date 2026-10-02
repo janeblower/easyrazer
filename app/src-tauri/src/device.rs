@@ -127,12 +127,42 @@ impl Device {
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
                 if !self.synapse {
-                    self.ram = None;
-                    self.restore();
+                    self.reload();
                 }
             }
         }
         self.control.is_some()
+    }
+
+    /// Syncs the slots if this connect has not yet, then loads the profile into profile 0.
+    fn reload(&mut self) {
+        if !self.synced
+            && let Err(e) = self.sync(|_, _, _| {})
+        {
+            self.restore_error = Some(i18n::tf(self.lang(), "backend.restoreProfile", &[("error", &e)]));
+            return;
+        }
+        self.ram = None;
+        self.restore();
+    }
+
+    /// Reads the slots into the settings, importing and migrating what is not there yet.
+    fn sync(&mut self, progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<(), String> {
+        let keys = editable_keys();
+        let total = keys.len();
+        let mut progress = progress;
+        let lang = self.lang().to_string();
+        let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
+        let missing = self.msg("backend.noKeyboard");
+        let Some((t, d)) = &self.control else { return Err(missing) };
+        let startup = control::active_profile(t).map_err(|e| e.to_string())?;
+        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, |n, a| progress(n, total, a)).map_err(|e| e.to_string())?;
+        if let Some(id) = self.settings.loaded {
+            self.settings.take_legacy(id);
+        }
+        self.startup = Some(startup);
+        self.synced = true;
+        settings::save(&self.settings)
     }
 
     fn hw_menu(&self) -> bool {
@@ -194,8 +224,7 @@ impl Device {
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
         if was && fresh_synapse == Some(false) {
-            self.ram = None;
-            self.restore();
+            self.reload();
         }
         let (profile, profile_name) = match self.settings.loaded_profile() {
             Some(p) if self.synced => (Some(p.id), Some(p.name.clone())),
@@ -226,22 +255,7 @@ impl Device {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
-        let keys = editable_keys();
-        let total = keys.len();
-        let mut progress = progress;
-        let lang = self.lang().to_string();
-        let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
-        let fresh = self.settings.profiles.is_empty();
-        let missing = self.msg("backend.noKeyboard");
-        let Some((t, d)) = &self.control else { return Err(missing) };
-        let startup = control::active_profile(t).map_err(|e| e.to_string())?;
-        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, |n, a| progress(n, total, a)).map_err(|e| e.to_string())?;
-        if fresh && let Some(id) = self.settings.loaded {
-            self.settings.take_legacy(id);
-        }
-        self.startup = Some(startup);
-        self.synced = true;
-        settings::save(&self.settings)?;
+        self.sync(progress)?;
         self.restore();
         self.sync_engine();
         let missing = self.msg("backend.noKeyboard");
@@ -278,6 +292,9 @@ impl Device {
         let host = self.engine.is_some();
         let unwritten = self.msg("backend.macroUnwritten");
         let missing = self.msg("backend.noKeyboard");
+        if self.settings.loaded_profile().is_none() {
+            return Err(missing);
+        }
         let written = written_macros(&self.settings);
         let (t, _) = self.keyboard()?;
         let bound: Vec<(u8, Outcome)> = if host {
@@ -378,8 +395,8 @@ impl Device {
             }
         }
         self.backed_up = true;
-        // Writing the startup slot is copied into profile 0 as well.
-        if Some(k) == self.startup && self.settings.loaded == Some(id) {
+        // The firmware copies a write to the startup slot into profile 0, whichever profile it was.
+        if Some(k) == self.startup {
             self.ram = None;
             self.restore();
         }
@@ -423,6 +440,9 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         let missing = self.msg("backend.noKeyboard");
+        if self.settings.loaded_profile().is_none() {
+            return Err(missing);
+        }
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         }
@@ -440,7 +460,7 @@ impl Device {
     /// Writes the look into the profile's slot.
     pub fn lighting_write(&mut self, look: Look) -> Result<(), String> {
         if look.effect.name == lighting::CUSTOM {
-            return Err("the custom layout cannot be saved to the keyboard".into());
+            return Err(self.msg("backend.customNotSaved"));
         }
         self.lighting_apply(look)?;
         let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;

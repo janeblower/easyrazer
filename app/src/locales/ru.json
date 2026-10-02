@@ -202,6 +202,7 @@
     "autostart": "Автозапуск: {error}",
     "engine": "Rapid Trigger не запущен: {error}",
     "profileSlot": "Слот {n}",
+    "customNotSaved": "Своя раскладка не сохраняется в память клавиатуры",
     "restoreProfile": "Не удалось загрузить профиль: {error}"
   },
   "tray": { "open": "Открыть", "autostart": "Запускать с Windows", "quit": "Выход" }
