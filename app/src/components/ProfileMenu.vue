@@ -30,8 +30,20 @@ function close() {
   editing.value = null;
 }
 
+// The blur that commits a rename comes before the click on another row; that click is not a pick.
+let renamedAt = 0;
+
+function commitRename() {
+  const id = editing.value;
+  editing.value = null;
+  if (id != null) renamedAt = Date.now();
+  if (id != null && draft.value.trim()) emit("rename", id, draft.value);
+}
+
 function onDocClick(e: MouseEvent) {
-  if (!root.value?.contains(e.target as Node)) close();
+  if (root.value?.contains(e.target as Node)) return;
+  if (editing.value != null) commitRename();
+  close();
 }
 
 onMounted(() => {
@@ -42,7 +54,7 @@ onUnmounted(() => {
 });
 
 function pick(id: number) {
-  if (editing.value != null) return;
+  if (!props.writable || editing.value != null || Date.now() - renamedAt < 300) return;
   close();
   if (id !== props.view?.loaded) emit("load", id);
 }
@@ -53,12 +65,6 @@ async function startRename(id: number, name: string) {
   draft.value = name;
   await nextTick();
   input.value?.[0]?.select();
-}
-
-function commitRename() {
-  const id = editing.value;
-  editing.value = null;
-  if (id != null && draft.value.trim()) emit("rename", id, draft.value);
 }
 
 function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: number) {

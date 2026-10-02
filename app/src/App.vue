@@ -222,6 +222,14 @@ async function load() {
   }
 }
 
+function revert() {
+  edits.value = {};
+  rapidEdits.value = {};
+  errors.value = {};
+  bindEdits.value = {};
+  bindErrors.value = {};
+}
+
 async function onStatus(s: DeviceStatus) {
   if (s.error) showError(s.error);
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
@@ -231,6 +239,7 @@ async function onStatus(s: DeviceStatus) {
     loadedProfile = null;
     return;
   }
+  if (loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile) revert();
   if (loadedProfile === null || loadedProfile !== s.profile) await load();
 }
 
@@ -266,14 +275,6 @@ function setValue(mm: number) {
 
 function selectAll() {
   selection.value = new Set(layout.value.filter((k) => k.editable).map((k) => k.key));
-}
-
-function revert() {
-  edits.value = {};
-  rapidEdits.value = {};
-  errors.value = {};
-  bindEdits.value = {};
-  bindErrors.value = {};
 }
 
 async function profileOp(command: string, args: Record<string, unknown> = {}) {
