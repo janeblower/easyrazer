@@ -205,5 +205,6 @@
     "customNotSaved": "The custom layout cannot be saved to the keyboard",
     "restoreProfile": "Could not load the profile: {error}"
   },
+  "profiles": { "new": "New profile", "copy": "{name} (copy)" },
   "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
 }

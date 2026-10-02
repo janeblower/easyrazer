@@ -14,14 +14,14 @@ use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
-use razer_core::profiles::Snapshot;
+use razer_core::profiles::{self as slots, Snapshot};
 use razer_core::{control, layout};
 use serde::Serialize;
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 
 use crate::dynamic_lighting;
-use crate::engine::{self, EngineHandle, Sink};
+use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
 use crate::settings::{self, Macro, Rapid, Settings};
@@ -69,6 +69,9 @@ pub struct LightingState {
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
+/// Profiles as (id, name, slot, unsaved), the loaded id, the startup slot, whether a slot is free.
+pub type ProfileList = (Vec<(u32, String, Option<u8>, bool)>, Option<u32>, Option<u8>, bool);
+
 pub struct Device {
     api: HidApi,
     control: Option<(HidTransport, &'static DeviceSpec)>,
@@ -88,8 +91,8 @@ pub struct Device {
     startup: Option<u8>,
     /// Slots were read this connect.
     synced: bool,
-    /// Col04 is read, so Fn+Menu may report the next-profile code.
-    menu_listening: bool,
+    /// Reads Col04, so Fn+Menu may report the next-profile code.
+    menu: Option<MenuListener>,
     sink: Option<Sink>,
 }
 
@@ -108,7 +111,7 @@ impl Device {
             ram: None,
             startup: None,
             synced: false,
-            menu_listening: false,
+            menu: None,
             sink: None,
         })
     }
@@ -118,6 +121,7 @@ impl Device {
         let alive = self.control.as_ref().is_some_and(|(t, _)| control::mode(t).is_ok());
         if !alive {
             self.engine = None;
+            self.menu = None;
             self.ram = None;
             self.synced = false;
             self.startup = None;
@@ -126,6 +130,10 @@ impl Device {
             self.control = hid::open_control(&self.api).ok().flatten();
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
+                if let Some(sink) = &self.sink {
+                    // Fn+Menu is rebound only once someone listens, or it would do nothing.
+                    self.menu = MenuListener::start(&self.api, d.pid, sink.clone()).ok();
+                }
                 if !self.synapse {
                     self.reload();
                 }
@@ -166,11 +174,7 @@ impl Device {
     }
 
     fn hw_menu(&self) -> bool {
-        self.menu_listening && self.engine.is_none()
-    }
-
-    pub fn invalidate_ram(&mut self) {
-        self.ram = None;
+        self.engine.is_none() && self.menu.as_ref().is_some_and(MenuListener::alive)
     }
 
     /// Loads the loaded profile into profile 0: the keyboard forgets it on unplug, on a mode switch
@@ -281,6 +285,103 @@ impl Device {
     /// Id of the loaded profile.
     pub fn loaded(&self) -> Option<u32> {
         self.settings.loaded
+    }
+
+    pub fn load_profile(&mut self, id: u32) -> Result<(), String> {
+        if self.settings.profile(id).is_none() {
+            return Err(format!("no profile {id}"));
+        }
+        self.settings.loaded = Some(id);
+        settings::save(&self.settings)?;
+        self.restore();
+        self.sync_engine();
+        Ok(())
+    }
+
+    /// Fn+Menu.
+    pub fn next_profile(&mut self) {
+        if let Some(id) = profiles::next(&self.settings) {
+            let _ = self.load_profile(id);
+        }
+    }
+
+    pub fn create_profile(&mut self) -> Result<(), String> {
+        let name = self.msg("profiles.new");
+        profiles::create(&mut self.settings, name).ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        settings::save(&self.settings)
+    }
+
+    pub fn duplicate_profile(&mut self, id: u32) -> Result<(), String> {
+        let base = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
+        let name = i18n::tf(self.lang(), "profiles.copy", &[("name", &base)]);
+        profiles::duplicate(&mut self.settings, id, name);
+        settings::save(&self.settings)
+    }
+
+    pub fn rename_profile(&mut self, id: u32, name: &str) -> Result<(), String> {
+        let slot = profiles::rename(&mut self.settings, id, name).map_err(|e| e.to_string())?;
+        if let Some(k) = slot {
+            if self.check_synapse(synapse_running) {
+                return Err(self.msg("backend.synapseRunning"));
+            }
+            let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
+            let (t, _) = self.keyboard()?;
+            slots::write_name(t, k, &new).map_err(|e| e.to_string())?;
+        }
+        settings::save(&self.settings)
+    }
+
+    /// Ops that change the flash list; every one of them may reload profile 0.
+    fn slot_op(&mut self, op: impl FnOnce(&HidTransport, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
+        if self.check_synapse(synapse_running) {
+            return Err(self.msg("backend.synapseRunning"));
+        }
+        let startup = self.startup.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let missing = self.msg("backend.noKeyboard");
+        let Some((t, _)) = &self.control else { return Err(missing) };
+        let after = op(t, &mut self.settings, startup).map_err(|e| e.to_string())?;
+        if after != startup {
+            self.ram = None;
+        }
+        self.startup = Some(after);
+        settings::save(&self.settings)?;
+        self.restore();
+        self.sync_engine();
+        Ok(())
+    }
+
+    pub fn delete_profile(&mut self, id: u32) -> Result<(), String> {
+        self.slot_op(|t, s, startup| profiles::delete(t, s, id, startup))
+    }
+
+    pub fn free_slot(&mut self, id: u32) -> Result<(), String> {
+        self.slot_op(|t, s, startup| profiles::free_slot(t, s, id, startup))
+    }
+
+    /// One erase of the keyboard's settings page.
+    pub fn set_startup(&mut self, id: u32) -> Result<(), String> {
+        self.slot_op(|t, s, _| profiles::set_startup(t, s, id))?;
+        // `05:04` reloads profile 0 even when the slot was already the startup one.
+        self.ram = None;
+        self.restore();
+        Ok(())
+    }
+
+    /// Before the app exits: Fn+Menu goes back to the loaded profile's own binding.
+    pub fn shutdown(&mut self) {
+        self.stop_engine();
+        if !self.hw_menu() || self.synapse {
+            return;
+        }
+        self.menu = None;
+        self.restore();
+    }
+
+    pub fn profiles_view(&self) -> ProfileList {
+        let s = &self.settings;
+        let list = s.profiles.iter().map(|p| (p.id, p.name.clone(), p.slot, profiles::is_unsaved(p, &s.slots))).collect();
+        let used = s.profiles.iter().filter(|p| p.slot.is_some()).count();
+        (list, s.loaded, self.startup, used < slots::MAX_SLOTS as usize)
     }
 
     /// Applies press points and bindings to the loaded profile and profile 0 until the next replug,
@@ -761,7 +862,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu_listening: false, sink: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }

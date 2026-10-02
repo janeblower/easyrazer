@@ -56,6 +56,11 @@ fn main() {
                 std::thread::spawn(move || match o {
                     Output::Brightness(step) => h.state::<commands::AppState>().device().step_brightness(step > 0),
                     Output::Sleep => engine::sleep(),
+                    Output::NextProfile => {
+                        let state = h.state::<commands::AppState>();
+                        state.device().next_profile();
+                        let _ = h.emit("status", &commands::poll(&state));
+                    }
                     _ => {}
                 });
             }));
@@ -109,6 +114,15 @@ fn main() {
             commands::set_close_action,
             commands::set_watch_synapse,
             commands::set_language,
+            commands::profiles,
+            commands::load_profile,
+            commands::create_profile,
+            commands::duplicate_profile,
+            commands::rename_profile,
+            commands::delete_profile,
+            commands::set_startup,
+            commands::free_slot,
+            commands::write_profile,
             commands::hide_window,
             commands::quit
         ])
@@ -116,7 +130,7 @@ fn main() {
         .expect("tauri build")
         .run(|app, e| {
             if let tauri::RunEvent::Exit = e {
-                app.state::<commands::AppState>().device().stop_engine();
+                app.state::<commands::AppState>().device().shutdown();
             }
         });
 }

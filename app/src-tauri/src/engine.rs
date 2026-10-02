@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use hidapi::{HidApi, HidDevice};
 use razer_core::hid::VID;
 use razer_core::binding::Mouse;
+use razer_core::profiles;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
 use windows_sys::Win32::System::Power::SetSuspendState;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -51,6 +52,46 @@ fn open(api: &HidApi, pid: u16, col: &str) -> Result<HidDevice, String> {
         .ok_or_else(|| format!("MI_01 {col} not found"))?
         .open_device(api)
         .map_err(|e| e.to_string())
+}
+
+/// Reads Col04 outside driver mode: Fn+Menu then reports `NEXT_PROFILE_CODE` instead of switching slots.
+pub struct MenuListener {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl MenuListener {
+    pub fn start(api: &HidApi, pid: u16, sink: Sink) -> Result<Self, String> {
+        let dev = open(api, pid, "col04")?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            let mut buf = [0u8; 64];
+            while !flag.load(Ordering::SeqCst) {
+                let Ok(n) = dev.read_timeout(&mut buf, POLL.as_millis() as i32) else { return };
+                let Some(codes) = (n > 0).then(|| rapid::parse_razer(&buf[..n])).flatten() else { continue };
+                if profiles::menu_pressed(&held, &codes) {
+                    sink(Output::NextProfile);
+                }
+                held = codes;
+            }
+        });
+        Ok(Self { stop, thread: Some(thread) })
+    }
+
+    pub fn alive(&self) -> bool {
+        self.thread.as_ref().is_some_and(|t| !t.is_finished())
+    }
+}
+
+impl Drop for MenuListener {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 impl EngineHandle {

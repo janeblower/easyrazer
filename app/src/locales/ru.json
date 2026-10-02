@@ -205,5 +205,6 @@
     "customNotSaved": "Своя раскладка не сохраняется в память клавиатуры",
     "restoreProfile": "Не удалось загрузить профиль: {error}"
   },
+  "profiles": { "new": "Новый профиль", "copy": "{name} (копия)" },
   "tray": { "open": "Открыть", "autostart": "Запускать с Windows", "quit": "Выход" }
 }
