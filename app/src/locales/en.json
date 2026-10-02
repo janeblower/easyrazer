@@ -205,6 +205,26 @@
     "customNotSaved": "The custom layout cannot be saved to the keyboard",
     "restoreProfile": "Could not load the profile: {error}"
   },
-  "profiles": { "new": "New profile", "copy": "{name} (copy)" },
+  "profiles": {
+    "new": "New profile",
+    "copy": "{name} (copy)",
+    "menu": "Manage",
+    "onlyHere": "app only",
+    "unsaved": "not written",
+    "legend": "⏻ — starts without the app · Fn+Menu — next profile",
+    "startup": "Start without the app",
+    "isStartup": "Already starts without the app",
+    "rename": "Rename",
+    "duplicate": "Duplicate",
+    "free": "Free slot {slot}/5",
+    "write": "Write to a free slot",
+    "noSlot": "All 5 slots are taken",
+    "remove": "Delete",
+    "removeTitle": "Delete profile “{name}”?",
+    "removeText": "The profile goes from the app and from the keyboard's memory.",
+    "dropTitle": "Drop the changes not applied?",
+    "drop": "Drop",
+    "cancel": "Cancel"
+  },
   "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
 }

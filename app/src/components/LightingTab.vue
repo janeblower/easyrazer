@@ -318,6 +318,10 @@ async function toggleDynamic() {
 }
 
 watch(connected, async (ok) => ok && load());
+watch(
+  () => props.status?.profile,
+  async (now, before) => now != null && now !== before && connected.value && load(),
+);
 onMounted(load);
 </script>
 

@@ -25,7 +25,7 @@ const view = computed(() => {
   if (!s.device) return { kind: "warn", text: t("status.notFound") };
   if (props.progress) return { kind: "info", text: t("status.reading", { done: props.progress[0], total: props.progress[1] }) };
   if (props.message) return { kind: "info", text: props.message };
-  return { kind: "ok", text: t("status.connected", { model: s.model ?? "", profile: s.profile ?? "?" }) };
+  return { kind: "ok", text: t("status.connected", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
 });
 </script>
 
