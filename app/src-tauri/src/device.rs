@@ -1,6 +1,6 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -77,8 +77,8 @@ pub struct Device {
     control: Option<(HidTransport, &'static DeviceSpec)>,
     /// Last known Synapse state; assumed running until checked.
     synapse: bool,
-    /// A backup has been written this session.
-    backed_up: bool,
+    /// Slots backed up this session.
+    backed_up: BTreeSet<u8>,
     settings: Settings,
     /// Description of the last keyboard seen, so the lighting tab can be edited while it is unplugged.
     last_spec: Option<&'static DeviceSpec>,
@@ -103,7 +103,7 @@ impl Device {
             api,
             control: None,
             synapse: true,
-            backed_up: false,
+            backed_up: BTreeSet::new(),
             settings: settings::load(),
             last_spec: None,
             restore_error: None,
@@ -502,7 +502,7 @@ impl Device {
         Ok(Written { results: applied.results, bindings: applied.bindings, ..self.written(Vec::new(), Vec::new()) })
     }
 
-    /// Writes the profile to its slot, a free one if it has none; backs the slot up before the first write.
+    /// Writes the profile to its slot, a free one if it has none; backs each slot up before its first write.
     pub fn write_profile(&mut self, id: u32) -> Result<(), String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
@@ -514,15 +514,15 @@ impl Device {
             .map(|p| p.data.normal.iter().filter_map(|(&k, r)| Some((k, binding::decode(r.fn_id, &r.fn_data)?))).collect())
             .unwrap_or_default();
         let bodies = bodies_to_write(&self.settings, &bound);
-        let backed_up = self.backed_up;
         let slot = self.settings.profile(id).and_then(|p| p.slot);
         let missing = self.msg("backend.noKeyboard");
         self.ensure_connected();
         // Field borrows, not `keyboard()`: the slot write needs `self.settings` mutably at the same time.
         let Some((t, d)) = &self.control else { return Err(missing) };
-        if !backed_up && let Some(k) = slot {
+        if let Some(k) = slot.filter(|k| !self.backed_up.contains(k)) {
             let all = actuation::read_all(t, k, &keys, |_, _| {}).map_err(|e| e.to_string())?;
             write_backup(&actuation::format_backup(k, &all))?;
+            self.backed_up.insert(k);
         }
         for (mid, body) in &bodies {
             macros::write(t, *mid, body).map_err(|e| e.to_string())?;
@@ -533,7 +533,6 @@ impl Device {
                 m.written = true;
             }
         }
-        self.backed_up = true;
         // The firmware copies a write to the startup slot into profile 0, whichever profile it was.
         if Some(k) == self.startup {
             self.ram = None;
@@ -900,7 +899,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
