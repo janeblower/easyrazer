@@ -35,6 +35,7 @@ pub struct EngineHandle {
     engine: Arc<Mutex<Engine>>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    sink: Sink,
 }
 
 fn lock(e: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
@@ -113,7 +114,17 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, feed_depth), spawn(razer, feed_razer)];
-        Ok(Self { engine, stop, threads })
+        Ok(Self { engine, stop, threads, sink })
+    }
+
+    /// Stops typing and releases the held keys now; the readers exit only after their current read.
+    pub fn halt(&self) {
+        let out = {
+            let mut e = lock(&self.engine);
+            self.stop.store(true, Ordering::SeqCst);
+            e.release_all()
+        };
+        emit(&out, &self.sink);
     }
 
     pub fn set_config(&self, cfg: Config) {

@@ -756,8 +756,11 @@ impl Device {
 
     /// Stops the engine and hands typing back to the firmware, unless Synapse owns the keyboard now.
     pub fn stop_engine(&mut self) {
-        if self.engine.take().is_some()
-            && !self.synapse
+        let Some(engine) = self.engine.take() else { return };
+        // Keys go up before the firmware reports the held ones down. The readers take up to a read
+        // timeout to exit, so the firmware types meanwhile.
+        engine.halt();
+        if !self.synapse
             && let Some((t, _)) = &self.control
             && control::set_hardware_mode(t).is_ok()
         {

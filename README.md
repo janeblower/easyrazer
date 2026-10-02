@@ -59,7 +59,7 @@ The trade-off: in HW mode the firmware clamps actuation to 1.62–3.56 mm; the f
 Windows drops keys that an ordinary app injects into windows run as administrator and
 into the lock screen or UAC prompts. While one of those has focus, EasyRazer hands
 typing back to the firmware (HW mode) and returns to driver mode afterwards; Rapid
-Trigger does not work there.
+Trigger does not work there. Each switch takes about 25 ms.
 
 ### Flash wear
 
