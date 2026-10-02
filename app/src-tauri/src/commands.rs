@@ -1,6 +1,7 @@
 //! Tauri commands: the only surface the UI can reach.
 
 use std::collections::BTreeMap;
+use std::sync::mpsc::Sender;
 use std::sync::{Mutex, MutexGuard};
 
 use razer_core::actuation::Outcome;
@@ -19,6 +20,8 @@ use crate::{autostart, i18n, tray};
 
 pub struct AppState {
     pub device: Mutex<Device>,
+    /// Lets the watcher connect; taken once the window listens to the read progress.
+    pub window_ready: Mutex<Option<Sender<()>>>,
 }
 
 impl AppState {
@@ -113,6 +116,13 @@ pub fn poll(state: &AppState) -> Status {
 #[tauri::command]
 pub async fn status(state: State<'_, AppState>) -> Result<Status, String> {
     Ok(poll(&state))
+}
+
+#[tauri::command]
+pub fn window_ready(state: State<'_, AppState>) {
+    if let Some(tx) = state.window_ready.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = tx.send(());
+    }
 }
 
 #[tauri::command]
@@ -382,7 +392,7 @@ mod tests {
 
     #[test]
     fn a_panic_under_the_lock_does_not_lock_everyone_out() {
-        let state = AppState { device: Mutex::new(Device::new().unwrap()) };
+        let state = AppState { device: Mutex::new(Device::new().unwrap()), window_ready: Mutex::new(None) };
         let _ = std::thread::scope(|s| {
             s.spawn(|| {
                 let _guard = state.device();

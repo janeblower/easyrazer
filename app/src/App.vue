@@ -456,7 +456,6 @@ onMounted(async () => {
   } catch (error) {
     message.value = String(error);
   }
-  await loadMacros();
   // A connect reads the keyboard on its own, before the status that starts load() arrives.
   unlistenProgress = await listen<[number, number, number | null, number | null, Rapid | null]>("read-progress", (e) => {
     const [done, total, key, mm, rapid] = e.payload;
@@ -465,6 +464,8 @@ onMounted(async () => {
     baseline.value[key] = mm;
     if (rapid) rapidBase.value[key] = rapid;
   });
+  await invoke("window_ready");
+  await loadMacros();
   unlistenStatus = await listen<DeviceStatus>("status", (e) => {
     void onStatus(e.payload);
   });

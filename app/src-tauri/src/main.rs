@@ -11,7 +11,7 @@ mod settings;
 mod tray;
 
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use razer_core::rapid::Output;
@@ -28,15 +28,17 @@ fn main() {
         default_hook(info);
     }));
     let device = device::Device::new().expect("hidapi init");
+    let (window_ready, ready) = mpsc::channel();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
-        .manage(commands::AppState { device: Mutex::new(device) })
-        .setup(|app| {
+        .manage(commands::AppState { device: Mutex::new(device), window_ready: Mutex::new(Some(window_ready)) })
+        .setup(move |app| {
             tray::build(app)?;
             if let Some(w) = app.get_webview_window("main") {
                 no_alt_menu(w.hwnd()?.0);
             }
-            if !std::env::args().any(|a| a == autostart::TRAY_ARG) {
+            let shown = !std::env::args().any(|a| a == autostart::TRAY_ARG);
+            if shown {
                 tray::show(app.handle());
             }
             let handle = app.handle().clone();
@@ -69,13 +71,20 @@ fn main() {
                     _ => {}
                 });
             }));
-            std::thread::spawn(move || loop {
-                // One failed step must not end the watching for the rest of the session.
-                let step = std::panic::catch_unwind(AssertUnwindSafe(|| commands::poll(&handle.state::<commands::AppState>())));
-                if let Ok(status) = step {
-                    let _ = handle.emit("status", &status);
+            std::thread::spawn(move || {
+                // The first connect reads the keyboard; a shown window should see it. The timeout keeps
+                // the keyboard restored if the page never loads.
+                if shown {
+                    let _ = ready.recv_timeout(Duration::from_secs(10));
                 }
-                std::thread::sleep(Duration::from_secs(2));
+                loop {
+                    // One failed step must not end the watching for the rest of the session.
+                    let step = std::panic::catch_unwind(AssertUnwindSafe(|| commands::poll(&handle.state::<commands::AppState>())));
+                    if let Ok(status) = step {
+                        let _ = handle.emit("status", &status);
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                }
             });
             Ok(())
         })
@@ -98,6 +107,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::status,
             commands::layout,
+            commands::window_ready,
             commands::read_all,
             commands::apply,
             commands::save,
