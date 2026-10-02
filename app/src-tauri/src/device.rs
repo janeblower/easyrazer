@@ -319,20 +319,33 @@ impl Device {
     }
 
     pub fn rename_profile(&mut self, id: u32, name: &str) -> Result<(), String> {
+        let old = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
         let slot = profiles::rename(&mut self.settings, id, name).map_err(|e| e.to_string())?;
-        if let Some(k) = slot {
-            if self.check_synapse(synapse_running) {
-                return Err(self.msg("backend.synapseRunning"));
+        let written = match slot {
+            Some(k) => self.write_slot_name(id, k),
+            None => Ok(()),
+        };
+        // The name must not outlive a failed slot write, or the next save would split the two.
+        if let Err(e) = written.and_then(|()| settings::save(&self.settings)) {
+            if let Some(p) = self.settings.profile_mut(id) {
+                p.name = old;
             }
-            let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
-            let (t, _) = self.keyboard()?;
-            slots::write_name(t, k, &new).map_err(|e| e.to_string())?;
+            return Err(e);
         }
-        settings::save(&self.settings)
+        Ok(())
     }
 
-    /// Ops that change the flash list; every one of them may reload profile 0.
-    fn slot_op(&mut self, op: impl FnOnce(&HidTransport, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
+    fn write_slot_name(&mut self, id: u32, slot: u8) -> Result<(), String> {
+        if self.check_synapse(synapse_running) {
+            return Err(self.msg("backend.synapseRunning"));
+        }
+        let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
+        let (t, _) = self.keyboard()?;
+        slots::write_name(t, slot, &new).map_err(|e| e.to_string())
+    }
+
+    /// Ops that change the flash list; every one of them may reload profile 0, `reloads` says it always does.
+    fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&HidTransport, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -340,7 +353,7 @@ impl Device {
         let missing = self.msg("backend.noKeyboard");
         let Some((t, _)) = &self.control else { return Err(missing) };
         let after = op(t, &mut self.settings, startup).map_err(|e| e.to_string())?;
-        if after != startup {
+        if reloads || after != startup {
             self.ram = None;
         }
         self.startup = Some(after);
@@ -351,20 +364,17 @@ impl Device {
     }
 
     pub fn delete_profile(&mut self, id: u32) -> Result<(), String> {
-        self.slot_op(|t, s, startup| profiles::delete(t, s, id, startup))
+        self.slot_op(false, |t, s, startup| profiles::delete(t, s, id, startup))
     }
 
     pub fn free_slot(&mut self, id: u32) -> Result<(), String> {
-        self.slot_op(|t, s, startup| profiles::free_slot(t, s, id, startup))
+        self.slot_op(false, |t, s, startup| profiles::free_slot(t, s, id, startup))
     }
 
     /// One erase of the keyboard's settings page.
     pub fn set_startup(&mut self, id: u32) -> Result<(), String> {
-        self.slot_op(|t, s, _| profiles::set_startup(t, s, id))?;
         // `05:04` reloads profile 0 even when the slot was already the startup one.
-        self.ram = None;
-        self.restore();
-        Ok(())
+        self.slot_op(true, |t, s, _| profiles::set_startup(t, s, id))
     }
 
     /// Before the app exits: Fn+Menu goes back to the loaded profile's own binding.

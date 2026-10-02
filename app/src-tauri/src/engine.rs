@@ -61,6 +61,7 @@ pub struct MenuListener {
 }
 
 impl MenuListener {
+    /// Opens Col04 and reports each Fn+Menu press to `sink` until dropped.
     pub fn start(api: &HidApi, pid: u16, sink: Sink) -> Result<Self, String> {
         let dev = open(api, pid, "col04")?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -80,6 +81,7 @@ impl MenuListener {
         Ok(Self { stop, thread: Some(thread) })
     }
 
+    /// The reader thread is still running; it ends when the keyboard goes away.
     pub fn alive(&self) -> bool {
         self.thread.as_ref().is_some_and(|t| !t.is_finished())
     }
