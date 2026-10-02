@@ -12,12 +12,13 @@ use razer_core::binding::Mouse;
 use razer_core::profiles;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
 use windows_sys::Win32::System::Power::SetSuspendState;
+use windows_sys::Win32::System::Shutdown::LockWorkStation;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput,
     VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_PAUSE, VK_VOLUME_DOWN,
-    VK_VOLUME_MUTE, VK_VOLUME_UP,
+    VK_LWIN, VK_RWIN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{WHEEL_DELTA, XBUTTON1, XBUTTON2};
 use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW};
@@ -28,6 +29,7 @@ pub type Sink = Arc<dyn Fn(Output) + Send + Sync>;
 /// Longest a reader blocks, so a stop request is noticed.
 const POLL: Duration = Duration::from_millis(100);
 const PAUSE: u8 = 126;
+const L: u8 = 39;
 
 type Feed = fn(&mut Engine, &[u8], Instant) -> Vec<Output>;
 
@@ -35,6 +37,7 @@ pub struct EngineHandle {
     engine: Arc<Mutex<Engine>>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    sink: Sink,
 }
 
 fn lock(e: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
@@ -113,7 +116,17 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, feed_depth), spawn(razer, feed_razer)];
-        Ok(Self { engine, stop, threads })
+        Ok(Self { engine, stop, threads, sink })
+    }
+
+    /// Stops typing and releases the held keys now; the readers exit only after their current read.
+    pub fn halt(&self) {
+        let out = {
+            let mut e = lock(&self.engine);
+            self.stop.store(true, Ordering::SeqCst);
+            e.release_all()
+        };
+        emit(&out, &self.sink);
     }
 
     pub fn set_config(&self, cfg: Config) {
@@ -209,6 +222,11 @@ fn send_key(key: u8, down: bool) {
     let Some(sc) = scancode(key) else { return };
     let ext = if sc > 0xFF { KEYEVENTF_EXTENDEDKEY } else { 0 };
     send(KEYBDINPUT { wVk: 0, wScan: sc & 0xFF, dwFlags: KEYEVENTF_SCANCODE | ext | up, time: 0, dwExtraInfo: 0 });
+    // Windows ignores an injected Win+L; the L still goes out, or the Win release opens Start.
+    let win = || [VK_LWIN, VK_RWIN].iter().any(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0);
+    if key == L && down && win() {
+        unsafe { LockWorkStation() };
+    }
 }
 
 fn send_media(m: Media) {
@@ -328,6 +346,11 @@ mod tests {
         for k in razer_core::layout::keys().into_iter().filter(|k| k.editable) {
             assert!(scancode(k.key).is_some() || k.key == PAUSE, "fwID {} {}", k.key, k.label);
         }
+    }
+
+    #[test]
+    fn lock_key_is_l() {
+        assert_eq!(razer_core::keymap::by_name("L"), Some(L));
     }
 
     #[test]

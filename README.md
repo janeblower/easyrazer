@@ -56,6 +56,12 @@ mode when it exits, fails, or sees Synapse start.
 The trade-off: in HW mode the firmware clamps actuation to 1.62–3.56 mm; the full
 1.5–3.6 mm range needs driver mode.
 
+Windows drops keys that an ordinary app injects into windows run as administrator and
+into the lock screen or UAC prompts. While one of those has focus, EasyRazer hands
+typing back to the firmware (HW mode) and returns to driver mode afterwards; Rapid
+Trigger does not work there. Each switch takes about 25 ms. Ctrl+Alt+Del accepts only
+a real keyboard, so it does nothing in driver mode.
+
 ### Flash wear
 
 The keyboard's MCU (STM32L4+) is rated for 10,000 erases per 4 KB flash page. The
@@ -112,6 +118,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 - [x] English and Russian UI
 - [x] Rapid Trigger and the HW / Driver switch
 - [ ] Snap Tap
+- [ ] Driver mode in admin windows, on the lock screen and for Ctrl+Alt+Del, through Razer's kernel driver
 - [x] Volume wheel and Fn+F9/F10/Menu
 - [x] Profiles: in the app and in keyboard memory
 - [ ] Host-driven lighting animations
