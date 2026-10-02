@@ -117,6 +117,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 - [x] English and Russian UI
 - [x] Rapid Trigger and the HW / Driver switch
 - [ ] Snap Tap
+- [ ] Driver mode in admin windows and on the lock screen, through Razer's kernel driver
 - [x] Volume wheel and Fn+F9/F10/Menu
 - [x] Profiles: in the app and in keyboard memory
 - [ ] Host-driven lighting animations
