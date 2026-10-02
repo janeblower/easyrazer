@@ -31,14 +31,16 @@
 
 ## Сравнение с Synapse
 
-Замер на одном ПК: Synapse 4.0.827 сразу после запуска, EasyRazer 0.2.2 в трее в режиме HW.
+Замер на одном ПК: Synapse 4.0.827 сразу после запуска, EasyRazer 0.2.3 в трее в режиме драйвера; в режиме HW
+нужно меньше. В трее окно закрыто, и WebView2 не запущен; открытое окно добавляет
+6 процессов WebView2, ~350 МБ.
 
 | | Synapse 4 | EasyRazer |
 |---|---|---|
 | Стек | Electron (`RazerAppEngine`) и службы Windows | ядро на Rust, Tauri 2, интерфейс на Vue в системном WebView2 |
 | Установка | установщик, ~1.2 ГБ на диске | один `.exe` на 8 МБ, без установщика |
-| Процессы | 13: 11 × `RazerAppEngine`, Elevation Service, Game Manager Service | 7: `easyrazer` и 6 × WebView2 |
-| Память, рабочий набор / private | ~1.75 ГБ / ~1.07 ГБ | ~385 МБ / ~235 МБ, из них сам `easyrazer` — 29 МБ / 8 МБ, остальное — WebView2 |
+| Процессы | 13: 11 × `RazerAppEngine`, Elevation Service, Game Manager Service | 1: `easyrazer` |
+| Память, рабочий набор / private | ~1.75 ГБ / ~1.07 ГБ | ~33 МБ / ~8 МБ |
 | Сеть | грузит модули устройств с `apps.razer.com` | не нужна |
 | Кто определяет нажатия | всегда хост: Synapse ставит всем клавишам `0/0` и держит клавиатуру в driver mode | по умолчанию прошивка (HW); хост — только в режиме «Драйвер», ради Rapid Trigger |
 
