@@ -64,25 +64,26 @@ const fill = computed(() => (props.driver && lead.value[0] ? span(0, lead.value[
 const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "up" : "down") : null));
 // Press grows down from the top and meets the thumb as the key goes down; release grows up
 // from the thumb and reaches the top as the key lets go.
-function rtFill(mm: number | null, down: boolean) {
+// With nothing selected it previews the lead key against the idle thumb, like the actuation slider.
+function rtFill(v: number, down: boolean) {
   const [, travel, isDown] = lead.value;
-  if (!rtOn.value || !travel || isDown !== down) return NONE;
+  if (!props.driver || (props.count && !rtOn.value) || !travel || isDown !== down) return NONE;
   if (!down) return span(0, (travel - units(RT_MIN)) / units(RT_MAX - RT_MIN));
-  const v = mm ?? 0.4;
   const thumb = (v - RT_MIN) / (RT_MAX - RT_MIN);
   return span(thumb * (1 - Math.min(1, travel / units(v))), thumb);
 }
 
 const shown = computed(() => mid(MIN, MAX, props.value, MIN));
+const rtShown = computed(() => [mid(RT_MIN, RT_MAX, props.rapid.press, 0.4), mid(RT_MIN, RT_MAX, props.rapid.release, 0.4)]);
 const rtSliders = computed(
   () =>
     [
       {
         kind: "press",
         value: props.rapid.press,
-        shown: mid(RT_MIN, RT_MAX, props.rapid.press, 0.4),
+        shown: rtShown.value[0],
         // Unsplit, the one slider stands for both.
-        fill: rtFill(props.rapid.press, props.split ? false : lead.value[2]),
+        fill: rtFill(rtShown.value[0], props.split ? false : lead.value[2]),
         hidden: false,
         input: (v: number) => {
           emit("press", v);
@@ -91,8 +92,8 @@ const rtSliders = computed(
       {
         kind: "release",
         value: props.rapid.release,
-        shown: mid(RT_MIN, RT_MAX, props.rapid.release, 0.4),
-        fill: rtFill(props.rapid.release, true),
+        shown: rtShown.value[1],
+        fill: rtFill(rtShown.value[1], true),
         hidden: !props.split,
         input: (v: number) => {
           emit("release", v);
