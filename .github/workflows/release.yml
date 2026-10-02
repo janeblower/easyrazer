@@ -25,7 +25,14 @@ jobs:
         shell: bash
       - run: bun install --frozen-lockfile
         working-directory: app
-      - run: bun tauri build
+      # Windows file version must be numeric, so nightlies keep the Cargo.toml placeholder.
+      - run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            bun tauri build --config "{\"version\":\"$GITHUB_REF_NAME\"}"
+          else
+            bun tauri build
+          fi
+        shell: bash
         working-directory: app
 
       - name: Publish
