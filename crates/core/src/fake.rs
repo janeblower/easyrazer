@@ -166,7 +166,7 @@ impl FakeKeyboard {
                 }
                 if !self.ignored_writes.contains(&k.key) {
                     let mut pages = self.pages.borrow_mut();
-                    // Profile 0 keeps one copy for both layers of a Normal write.
+                    // Models the worst case the app must survive (a Normal write also replacing Hypershift in profile 0), not verified firmware behaviour.
                     if k.profile == 0 && k.layer == 0 {
                         pages.get_mut(&(0, 1)).unwrap().insert(k.key, KeyAssignment { layer: 1, ..k.clone() });
                     }
