@@ -42,6 +42,7 @@ pub fn sync_slots(
         }
         if !s.profiles.iter().any(|p| p.slot == Some(k)) {
             let name = slots::read_name(t, k).ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| fallback_name(k));
+            let name = free_name(s, &name, numbered);
             let id = s.new_profile_id();
             s.profiles.push(Profile { id, name, slot: Some(k), data: s.slots[&k].clone(), rapid: BTreeMap::new(), custom: None });
         }
@@ -90,6 +91,34 @@ fn missing(id: u32) -> Error {
     Error::BadArgument(format!("no profile {id}"))
 }
 
+/// Names differing only in case or surrounding spaces count as the same.
+pub fn name_taken(s: &Settings, name: &str, except: Option<u32>) -> bool {
+    let key = name.trim().to_lowercase();
+    s.profiles.iter().any(|p| Some(p.id) != except && p.name.trim().to_lowercase() == key)
+}
+
+/// `suffix(n)` for the n-th try of [`free_name`]: nothing first, then " 2", " 3"…
+pub fn numbered(n: usize) -> String {
+    if n == 1 { String::new() } else { format!(" {n}") }
+}
+
+/// `base` with the first `suffix(n)` no profile uses; the base is cut so the suffix always fits the slot.
+pub fn free_name(s: &Settings, base: &str, suffix: impl Fn(usize) -> String) -> String {
+    (1..)
+        .map(|n| {
+            let tail = suffix(n);
+            let room = slots::NAME_CHARS.saturating_sub(tail.encode_utf16().count());
+            let mut units = 0;
+            let head: String = base.trim().chars().take_while(|c| {
+                units += c.len_utf16();
+                units <= room
+            }).collect();
+            slots::fit_name(&format!("{}{tail}", head.trim_end()))
+        })
+        .find(|name| !name.is_empty() && !name_taken(s, name, None))
+        .expect("numbered suffixes never run out")
+}
+
 fn insert_copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
     let i = s.profiles.iter().position(|p| p.id == from)?;
     let mut name = slots::fit_name(&name);
@@ -117,6 +146,9 @@ pub fn rename(s: &mut Settings, id: u32, name: &str) -> Result<Option<u8>, Error
     let name = slots::fit_name(name);
     if name.is_empty() {
         return Err(Error::BadArgument("empty profile name".into()));
+    }
+    if name_taken(s, &name, Some(id)) {
+        return Err(Error::BadArgument(format!("profile name {name} is taken")));
     }
     let p = s.profile_mut(id).ok_or_else(|| missing(id))?;
     p.name = name;
@@ -354,6 +386,53 @@ mod tests {
         assert!(rename(&mut s, id, "   ").is_err());
         rename(&mut s, id, &"x".repeat(40)).unwrap();
         assert_eq!(s.profile(id).unwrap().name.chars().count(), slots::NAME_CHARS);
+    }
+
+    #[test]
+    fn free_names_are_numbered_and_case_blind() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        assert_eq!(free_name(&s, "New", numbered), "New");
+        create(&mut s, "New".into()).unwrap();
+        assert_eq!(free_name(&s, "new", numbered), "new 2");
+        assert_eq!(free_name(&s, "  New  ", numbered), "New 2");
+        let copy = |n: usize| if n == 1 { " (copy)".to_string() } else { format!(" (copy {n})") };
+        assert_eq!(free_name(&s, "default", copy), "default (copy)");
+        create(&mut s, "default (copy)".into()).unwrap();
+        assert_eq!(free_name(&s, "default", copy), "default (copy 2)");
+    }
+
+    #[test]
+    fn a_long_base_keeps_its_number() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let long = "x".repeat(40);
+        create(&mut s, long.clone()).unwrap();
+        let next = free_name(&s, &long, numbered);
+        assert!(next.ends_with(" 2") && next.encode_utf16().count() <= slots::NAME_CHARS, "{next}");
+    }
+
+    #[test]
+    fn rename_refuses_a_name_in_use() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let first = s.loaded.unwrap();
+        let other = create(&mut s, "Game".into()).unwrap();
+        assert!(rename(&mut s, other, " DEFAULT ").is_err());
+        assert_eq!(s.profile(other).unwrap().name, "Game");
+        rename(&mut s, first, "Default").unwrap();
+        assert_eq!(s.profile(first).unwrap().name, "Default", "its own name in another case is fine");
+    }
+
+    #[test]
+    fn imported_slots_with_one_name_get_numbers() {
+        let kb = FakeKeyboard::new(KEYS);
+        slots::create(&kb, 2).unwrap();
+        let default = kb.names.borrow()[&1].clone();
+        kb.names.borrow_mut().insert(2, default);
+        let s = synced(&kb);
+        let names: Vec<&str> = s.profiles.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["default", "default 2"]);
     }
 
     #[test]

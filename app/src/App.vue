@@ -56,7 +56,7 @@ const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
 const profiles = ref<ProfilesView | null>(null);
 const removing = ref<number | null>(null); // asked before deleting
-const switching = ref<number | null>(null); // asked before dropping edits
+const switching = ref<(() => void) | null>(null); // asked before dropping edits
 const message = ref("");
 const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
@@ -289,16 +289,29 @@ async function profileOp(command: string, args: Record<string, unknown> = {}) {
   await refresh();
 }
 
+// Loading another profile drops unapplied edits; ask first.
+function switchTo(op: () => void) {
+  if (dirty.value > 0) switching.value = op;
+  else op();
+}
+
 function onLoad(id: number) {
-  if (dirty.value > 0) switching.value = id;
-  else void profileOp("load_profile", { id });
+  switchTo(() => {
+    void profileOp("load_profile", { id });
+  });
+}
+
+function onCreate() {
+  switchTo(() => {
+    void profileOp("create_profile");
+  });
 }
 
 function confirmSwitch() {
-  const id = switching.value;
+  const op = switching.value;
   switching.value = null;
   revert();
-  if (id != null) void profileOp("load_profile", { id });
+  op?.();
 }
 
 function confirmRemove() {
@@ -482,7 +495,7 @@ onUnmounted(() => {
         :view="profiles"
         :writable="writable"
         @load="onLoad"
-        @create="profileOp('create_profile')"
+        @create="onCreate"
         @duplicate="(id) => profileOp('duplicate_profile', { id })"
         @rename="(id, name) => profileOp('rename_profile', { id, name })"
         @remove="(id) => (removing = id)"

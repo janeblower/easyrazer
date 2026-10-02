@@ -311,15 +311,21 @@ impl Device {
         }
     }
 
+    /// The new profile is loaded at once, so the window can rename it in place.
     pub fn create_profile(&mut self) -> Result<(), String> {
-        let name = self.msg("profiles.new");
-        profiles::create(&mut self.settings, name).ok_or_else(|| self.msg("backend.noKeyboard"))?;
-        settings::save(&self.settings)
+        let name = profiles::free_name(&self.settings, &self.msg("profiles.new"), profiles::numbered);
+        let id = profiles::create(&mut self.settings, name).ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        self.load_profile(id)
     }
 
     pub fn duplicate_profile(&mut self, id: u32) -> Result<(), String> {
         let base = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
-        let name = i18n::tf(self.lang(), "profiles.copy", &[("name", &base)]);
+        let lang = self.lang().to_string();
+        let copy = |n: usize| match n {
+            1 => i18n::tf(&lang, "profiles.copy", &[("name", "")]),
+            n => i18n::tf(&lang, "profiles.copyN", &[("name", ""), ("n", &n.to_string())]),
+        };
+        let name = profiles::free_name(&self.settings, &base, copy);
         profiles::duplicate(&mut self.settings, id, name);
         settings::save(&self.settings)
     }
@@ -331,6 +337,9 @@ impl Device {
         }
         if slots::fit_name(name) == old {
             return Ok(());
+        }
+        if profiles::name_taken(&self.settings, &slots::fit_name(name), Some(id)) {
+            return Err(self.msg("backend.nameTaken"));
         }
         let slot = profiles::rename(&mut self.settings, id, name).map_err(|e| e.to_string())?;
         let written = match slot {

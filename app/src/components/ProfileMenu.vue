@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import type { ProfilesView } from "../types";
 import AppIcon from "./AppIcon.vue";
 
@@ -24,7 +24,17 @@ const input = useTemplateRef<HTMLInputElement[]>("input");
 
 const loaded = () => props.view?.profiles.find((p) => p.id === props.view?.loaded) ?? null;
 
+// The backend refuses such a rename too; checked here so the field can say why.
+const taken = computed(() => {
+  const key = draft.value.trim().toLowerCase();
+  return editing.value != null && !!props.view?.profiles.some((p) => p.id !== editing.value && p.name.trim().toLowerCase() === key);
+});
+
+// A created profile arrives loaded; it is then renamed in place.
+let creating = false;
+
 function close() {
+  creating = false;
   open.value = false;
   actions.value = null;
   editing.value = null;
@@ -37,7 +47,11 @@ function commitRename() {
   const id = editing.value;
   editing.value = null;
   if (id != null) renamedAt = Date.now();
-  if (id != null && draft.value.trim()) emit("rename", id, draft.value);
+  if (id != null && draft.value.trim() && !taken.value) emit("rename", id, draft.value);
+}
+
+function onEnter() {
+  if (!taken.value) commitRename();
 }
 
 function onDocClick(e: MouseEvent) {
@@ -66,6 +80,23 @@ async function startRename(id: number, name: string) {
   await nextTick();
   input.value?.[0]?.select();
 }
+
+function create() {
+  if (editing.value != null) commitRename();
+  actions.value = null;
+  creating = true;
+  emit("create");
+}
+
+watch(
+  () => props.view?.loaded,
+  async (id, before) => {
+    if (!creating || id == null || id === before) return;
+    creating = false;
+    const p = props.view?.profiles.find((q) => q.id === id);
+    if (p && open.value) await startRename(p.id, p.name);
+  },
+);
 
 function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: number) {
   actions.value = null;
@@ -125,13 +156,16 @@ function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: numbe
           ref="input"
           v-model="draft"
           class="py-0.5 flex-1 min-w-0"
+          :class="{ 'border-error': taken }"
           maxlength="32"
+          :aria-invalid="taken"
           @click.stop
-          @keydown.enter="commitRename"
+          @keydown.enter="onEnter"
           @keydown.esc="editing = null"
           @blur="commitRename"
         />
         <span v-else class="flex-1 truncate">{{ p.name }}</span>
+        <span v-if="editing === p.id && taken" class="taken" role="alert">{{ $t("profiles.nameTakenHint") }}</span>
         <span v-if="p.unsaved" class="text-xs text-edited">{{ $t("profiles.unsaved") }}</span>
         <span v-if="p.slot" class="slot slot-flash">{{ p.slot }}/5</span>
         <span v-else class="slot">{{ $t("profiles.onlyHere") }}</span>
@@ -176,7 +210,8 @@ function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: numbe
         </div>
       </div>
       <div class="sep" />
-      <button class="item text-muted" @click="(close(), emit('create'))">
+      <!-- mousedown would blur the rename field first and redraw the list under the click. -->
+      <button class="item text-muted" @mousedown.prevent @click="create">
         <span class="ic text-accent">＋</span>{{ $t("profiles.new") }}
       </button>
       <div class="sep" />
@@ -259,6 +294,19 @@ function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: numbe
   width: 16px;
   text-align: center;
   color: var(--muted);
+}
+.taken {
+  position: absolute;
+  left: 34px;
+  top: calc(100% - 2px);
+  z-index: 11;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--error);
+  background: var(--panel);
+  color: var(--error);
 }
 .sep {
   height: 1px;

@@ -204,11 +204,13 @@
     "noFreeSlot": "All 5 slots are taken",
     "lastSlot": "The last slot cannot be freed",
     "onlyProfile": "The only profile cannot be deleted",
-    "emptyName": "A profile name cannot be empty"
+    "emptyName": "A profile name cannot be empty",
+    "nameTaken": "A profile with this name already exists"
   },
   "profiles": {
     "new": "New profile",
     "copy": "{name} (copy)",
+    "copyN": "{name} (copy {n})",
     "menu": "Manage",
     "onlyHere": "app only",
     "unsaved": "not written",
@@ -225,7 +227,8 @@
     "removeText": "The profile goes from the app and from the keyboard's memory.",
     "dropTitle": "Drop the changes not applied?",
     "drop": "Drop",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "nameTakenHint": "This name is taken"
   },
   "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
 }
