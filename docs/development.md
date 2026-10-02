@@ -3,7 +3,7 @@
 ## Окружение
 
 Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools, Bun.
-Сборка и запуск — в [README](../README.md#сборка).
+Сборка и запуск — в [README](README.ru.md#сборка).
 
 Тесты:
 
