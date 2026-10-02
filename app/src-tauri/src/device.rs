@@ -955,6 +955,28 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the keyboard connected and Synapse closed; erases flash pages"]
+    fn profile_slot_round_trip_on_hardware() {
+        assert!(!synapse_running(), "close Synapse first");
+        let mut dev = Device::new().unwrap();
+        dev.read_all(|_, _, _| {}).unwrap();
+        let before = dev.settings.profiles.len();
+        dev.create_profile().unwrap();
+        let id = dev.settings.profiles.iter().find(|p| p.slot.is_none()).map(|p| p.id).unwrap();
+        dev.write_profile(id).unwrap();
+        let p = dev.settings.profile(id).unwrap().clone();
+        let k = p.slot.expect("written to a slot");
+        let (t, d) = dev.connect().unwrap();
+        let read = slots::read_snapshot(t, d, k, &editable_keys(), |_, _| {}).unwrap();
+        assert!(p.data.matches(&read));
+        assert_eq!(slots::read_name(t, k).unwrap(), p.name);
+        dev.delete_profile(id).unwrap();
+        let (t, _) = dev.connect().unwrap();
+        assert!(!slots::list(t).unwrap().contains(&k));
+        assert_eq!(dev.settings.profiles.len(), before);
+    }
+
+    #[test]
     fn saving_writes_the_bodies_of_bound_unwritten_macros() {
         let m = |written| Macro { name: String::new(), events: vec![Event::Delay { ms: 5 }], written };
         let s = Settings { macros: [(1, m(true)), (2, m(false)), (3, m(false))].into(), ..Default::default() };
