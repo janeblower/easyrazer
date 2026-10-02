@@ -66,6 +66,8 @@ pub struct Actuation {
     /// `null` for a binding the app cannot show, such as Hypershift.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
+    /// Id of the loaded profile the table belongs to.
+    profile: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -126,17 +128,17 @@ pub fn lighting_layout() -> Vec<KeyView> {
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
     let mut device = state.device();
-    let rapid = device.settings().rapid.clone();
     let all = device.read_all(|done, total, a| {
-        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), rapid.get(&a.key)));
+        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), None::<Rapid>));
     })?;
-    let s = device.settings();
+    let (unsaved, unsaved_bindings) = device.unsaved();
     Ok(Actuation {
         values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
-        unsaved: s.actuation.keys().copied().collect(),
-        rapid: s.rapid.clone(),
-        unsaved_bindings: s.bindings.keys().copied().collect(),
+        unsaved,
+        rapid: device.rapid(),
+        unsaved_bindings,
         bindings: device.bindings(),
+        profile: device.loaded(),
     })
 }
 

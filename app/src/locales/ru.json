@@ -190,7 +190,7 @@
     "unsupported": "Модель клавиатуры Razer не поддерживается (PID {pid}).",
     "notFound": "Поддерживаемая клавиатура Razer не найдена.",
     "reading": "Чтение клавиатуры: {done} из {total}",
-    "connected": "Подключено: {model}, профиль {profile}"
+    "connected": "Подключено: {model}, профиль «{profile}»"
   },
   "backend": {
     "synapseRunning": "Запущен Synapse — закройте его, включая значок в трее",
@@ -200,7 +200,9 @@
     "macroUnwritten": "Макрос не записан в клавиатуру: запишите его в «Макросах» или запишите назначение",
     "restoreBindings": "Не удалось вернуть назначения клавиш: {keys}",
     "autostart": "Автозапуск: {error}",
-    "engine": "Rapid Trigger не запущен: {error}"
+    "engine": "Rapid Trigger не запущен: {error}",
+    "profileSlot": "Слот {n}",
+    "restoreProfile": "Не удалось загрузить профиль: {error}"
   },
   "tray": { "open": "Открыть", "autostart": "Запускать с Windows", "quit": "Выход" }
 }

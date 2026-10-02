@@ -14,7 +14,8 @@ use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
-use razer_core::{control, keymap, layout};
+use razer_core::profiles::Snapshot;
+use razer_core::{control, layout};
 use serde::Serialize;
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
@@ -22,7 +23,11 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot
 use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, Sink};
 use crate::i18n;
+use crate::profiles;
 use crate::settings::{self, Macro, Rapid, Settings};
+
+/// Marks a key of `ram` as unknown so the next load writes it; the firmware takes no `fnId` 0xFF.
+const UNKNOWN_FN: u8 = 0xFF;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
@@ -30,7 +35,8 @@ pub struct Status {
     pub synapse: bool,
     /// Driver mode chosen in the app: the host engine types, Rapid Trigger works.
     pub driver_mode: bool,
-    pub profile: Option<u8>,
+    pub profile: Option<u32>,
+    pub profile_name: Option<String>,
     pub model: Option<String>,
     /// PID of a Razer keyboard without a description.
     pub unsupported: Option<u16>,
@@ -76,8 +82,14 @@ pub struct Device {
     restore_error: Option<String>,
     /// Runs in driver mode; the keyboard only reports depth meanwhile.
     engine: Option<EngineHandle>,
-    /// Live assignments read this connect and updated by writes: the engine's press points and bindings.
-    live: Option<BTreeMap<u8, KeyAssignment>>,
+    /// What profile 0 holds; `None` once the firmware reloaded it from the startup slot.
+    ram: Option<Snapshot>,
+    /// The slot the keyboard starts with, as last read or set.
+    startup: Option<u8>,
+    /// Slots were read this connect.
+    synced: bool,
+    /// Col04 is read, so Fn+Menu may report the next-profile code.
+    menu_listening: bool,
     sink: Option<Sink>,
 }
 
@@ -93,7 +105,10 @@ impl Device {
             last_spec: None,
             restore_error: None,
             engine: None,
-            live: None,
+            ram: None,
+            startup: None,
+            synced: false,
+            menu_listening: false,
             sink: None,
         })
     }
@@ -103,13 +118,16 @@ impl Device {
         let alive = self.control.as_ref().is_some_and(|(t, _)| control::mode(t).is_ok());
         if !alive {
             self.engine = None;
-            self.live = None;
+            self.ram = None;
+            self.synced = false;
+            self.startup = None;
             self.control = None;
             let _ = self.api.refresh_devices();
             self.control = hid::open_control(&self.api).ok().flatten();
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
                 if !self.synapse {
+                    self.ram = None;
                     self.restore();
                 }
             }
@@ -117,24 +135,34 @@ impl Device {
         self.control.is_some()
     }
 
-    /// Brings back what was applied but not saved: the keyboard forgets it on unplug and on a mode switch, Synapse overwrites it.
+    fn hw_menu(&self) -> bool {
+        self.menu_listening && self.engine.is_none()
+    }
+
+    pub fn invalidate_ram(&mut self) {
+        self.ram = None;
+    }
+
+    /// Loads the loaded profile into profile 0: the keyboard forgets it on unplug, on a mode switch
+    /// and on `05:04`, and Synapse overwrites it.
     fn restore(&mut self) {
+        if !self.synced {
+            return;
+        }
+        let menu = self.hw_menu();
         let Some((t, d)) = &self.control else { return };
-        let mut errors = Vec::new();
-        if let Some(look) = &self.settings.applied
-            && let Err(e) = lighting::set_look(t, d, Store::Temporary, look)
-        {
-            errors.push(i18n::tf(self.lang(), "backend.restoreLighting", &[("error", &e.to_string())]));
-        }
-        let changes = pairs(&self.settings.actuation);
-        errors.extend(restore_error(self.lang(), "backend.restoreActuation", &actuation::apply(t, actuation::LIVE, &changes)));
-        // In driver mode the firmware ignores bindings in the live copy; the engine applies them.
-        if self.engine.is_none() {
-            let bindings = pairs(&self.settings.bindings);
-            errors.extend(restore_error(self.lang(), "backend.restoreBindings", &binding::apply(t, actuation::LIVE, &bindings)));
-        }
-        if !errors.is_empty() {
-            self.restore_error = Some(errors.join("; "));
+        let Some(id) = self.settings.loaded else { return };
+        let base = match (&self.ram, self.startup.and_then(|k| self.settings.slots.get(&k))) {
+            (Some(r), _) => r.clone(),
+            (None, Some(s)) => s.clone(),
+            (None, None) => Snapshot::default(),
+        };
+        match profiles::load(t, d, &self.settings, id, &base, menu) {
+            Ok(after) => self.ram = Some(after),
+            Err(e) => {
+                self.ram = None;
+                self.restore_error = Some(i18n::tf(self.lang(), "backend.restoreProfile", &[("error", &e.to_string())]));
+            }
         }
     }
 
@@ -166,13 +194,18 @@ impl Device {
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
         if was && fresh_synapse == Some(false) {
+            self.ram = None;
             self.restore();
         }
+        let (profile, profile_name) = match self.settings.loaded_profile() {
+            Some(p) if self.synced => (Some(p.id), Some(p.name.clone())),
+            _ => (None, None),
+        };
         if self.control.is_none() {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
             let driver_mode = self.settings.driver_mode;
-            return Status { device: false, synapse, driver_mode, profile: None, model: None, unsupported, error };
+            return Status { device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, unsupported, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
@@ -180,40 +213,71 @@ impl Device {
         let Some((t, spec)) = &self.control else { unreachable!() };
         let mode = control::mode(t).ok();
         let released = should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok();
-        let profile = control::active_profile(t).ok();
         let model = Some(spec.name.clone());
         if released {
+            self.ram = None;
             self.restore();
         }
-        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, model, unsupported: None, error }
+        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, profile_name, model, unsupported: None, error }
     }
 
-    /// Assignments the keyboard types with now.
-    pub fn read_all(&mut self, mut progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<Vec<KeyAssignment>, String> {
+    /// Reads the slots once per connect and loads the profile; returns its Normal layer.
+    pub fn read_all(&mut self, progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<Vec<KeyAssignment>, String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
-        let (t, _) = self.keyboard()?;
         let keys = editable_keys();
-        let all = actuation::read_all(t, actuation::LIVE, &keys, |n, a| progress(n, keys.len(), a)).map_err(|e| e.to_string())?;
-        self.live = Some(all.iter().map(|a| (a.key, a.clone())).collect());
-        Ok(all)
+        let total = keys.len();
+        let mut progress = progress;
+        let lang = self.lang().to_string();
+        let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
+        let fresh = self.settings.profiles.is_empty();
+        let missing = self.msg("backend.noKeyboard");
+        let Some((t, d)) = &self.control else { return Err(missing) };
+        let startup = control::active_profile(t).map_err(|e| e.to_string())?;
+        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, |n, a| progress(n, total, a)).map_err(|e| e.to_string())?;
+        if fresh && let Some(id) = self.settings.loaded {
+            self.settings.take_legacy(id);
+        }
+        self.startup = Some(startup);
+        self.synced = true;
+        settings::save(&self.settings)?;
+        self.restore();
+        self.sync_engine();
+        let missing = self.msg("backend.noKeyboard");
+        let p = self.settings.loaded_profile().ok_or(missing)?;
+        Ok(p.data.normal.iter().map(|(&k, r)| r.at(actuation::LIVE, analog::Layer::Normal, k)).collect())
     }
 
-    /// What each key does now: the applied binding over the live one; `None` when the app cannot show it.
+    /// What each key does now; `None` when the app cannot show it.
     pub fn bindings(&self) -> BTreeMap<u8, Option<Action>> {
-        let live = self.live.iter().flatten().map(|(&k, a)| (k, binding::decode(a.fn_id, &a.fn_data)));
-        live.chain(self.settings.bindings.iter().map(|(&k, &a)| (k, Some(a)))).collect()
+        let Some(p) = self.settings.loaded_profile() else { return BTreeMap::new() };
+        p.data.normal.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect()
     }
 
-    /// Applies press points and bindings until the next replug (the app restores them on every
-    /// connect) and Rapid Trigger, which lives only here.
+    /// Keys whose press point and binding differ from the profile's slot.
+    pub fn unsaved(&self) -> (Vec<u8>, Vec<u8>) {
+        self.settings.loaded_profile().map_or_else(Default::default, |p| profiles::unsaved(p, &self.settings.slots))
+    }
+
+    pub fn rapid(&self) -> BTreeMap<u8, Rapid> {
+        self.settings.loaded_profile().map(|p| p.rapid.clone()).unwrap_or_default()
+    }
+
+    /// Id of the loaded profile.
+    pub fn loaded(&self) -> Option<u32> {
+        self.settings.loaded
+    }
+
+    /// Applies press points and bindings to the loaded profile and profile 0 until the next replug,
+    /// and Rapid Trigger, which lives only here.
     pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>, bindings: &[(u8, Action)]) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
         let host = self.engine.is_some();
         let unwritten = self.msg("backend.macroUnwritten");
+        let missing = self.msg("backend.noKeyboard");
         let written = written_macros(&self.settings);
         let (t, _) = self.keyboard()?;
         let bound: Vec<(u8, Outcome)> = if host {
@@ -228,96 +292,120 @@ impl Device {
                 })
                 .collect()
         };
-        let done: Vec<(u8, Action)> = bindings.iter().copied().filter(|(k, _)| saved(&bound).any(|s| s == *k)).collect();
-        let differ = control::active_profile(t).and_then(|p| binding::unsaved(t, p, &done));
-        let unsaved_bound: Vec<(u8, Action)> = match differ {
-            Ok(keys) => done.iter().copied().filter(|(k, _)| keys.contains(k)).collect(),
-            Err(_) => done.clone(),
-        };
         let results = actuation::apply(t, actuation::LIVE, changes);
-        let touched: Vec<u8> = results.iter().filter(|(_, o)| !matches!(o, Outcome::Failed(_))).map(|&(k, _)| k).collect();
-        // Unknown whether they match the profile: keep them all, restoring an equal value is harmless.
-        let unsaved = match control::active_profile(t).and_then(|p| actuation::unsaved(t, p, &touched)) {
-            Ok(u) => u.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
-            Err(_) => changes.iter().copied().filter(|(k, _)| touched.contains(k)).collect::<Vec<_>>(),
-        };
-        track(&mut self.settings.actuation, touched, unsaved);
-        track(&mut self.settings.bindings, done.iter().map(|&(k, _)| k), unsaved_bound);
-        if !host {
-            self.note(&bound);
+        let Some(p) = self.settings.loaded_mut() else { return Err(missing) };
+        for (k, o) in &results {
+            if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, p.data.normal.get_mut(k)) {
+                (r.thr_low, r.thr_high) = (a.threshold_low, a.threshold_high);
+            }
         }
-        self.note(&results);
-        self.settings.rapid.extend(rapid.iter().map(|(&k, &r)| (k, r)));
+        for (k, o) in &bound {
+            if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, p.data.normal.get_mut(k)) {
+                (r.fn_id, r.fn_data) = (a.fn_id, a.fn_data.clone());
+            }
+        }
+        p.rapid.extend(rapid.iter().map(|(&k, &r)| (k, r)));
+        if let Some(ram) = &mut self.ram {
+            for (k, o) in &results {
+                if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
+                    (r.thr_low, r.thr_high) = (a.threshold_low, a.threshold_high);
+                }
+            }
+            // In driver mode bindings never reach profile 0: the engine plays them.
+            if !host {
+                for (k, o) in &bound {
+                    if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
+                        (r.fn_id, r.fn_data) = (a.fn_id, a.fn_data.clone());
+                    }
+                }
+                // A Normal write to profile 0 overwrote the key's Hypershift, Fn+Menu's code among them.
+                for (k, _) in results.iter().chain(&bound) {
+                    if let Some(h) = ram.hypershift.get_mut(k) {
+                        h.fn_id = UNKNOWN_FN;
+                    }
+                }
+            }
+        }
         settings::save(&self.settings)?;
+        if !host && !(results.is_empty() && bound.is_empty()) {
+            self.restore();
+        }
         self.sync_engine();
         Ok(self.written(results, bound))
     }
 
-    /// Writes applied press points and bindings with the edits on top to the flash; checks Synapse
-    /// afresh and backs up the keyboard before the first write.
+    /// Applies the edits, then writes the loaded profile to its slot.
     pub fn save(&mut self, edits: &[(u8, f32)], bind_edits: &[(u8, Action)]) -> Result<Written, String> {
-        let changes = to_save(&self.settings.actuation, edits);
-        let bindings = to_save(&self.settings.bindings, bind_edits);
-        if changes.is_empty() && bindings.is_empty() {
-            return Ok(self.written(Vec::new(), Vec::new()));
-        }
+        let applied = if edits.is_empty() && bind_edits.is_empty() {
+            self.written(Vec::new(), Vec::new())
+        } else {
+            self.apply(edits, &BTreeMap::new(), bind_edits)?
+        };
+        let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        self.write_profile(id)?;
+        Ok(Written { results: applied.results, bindings: applied.bindings, ..self.written(Vec::new(), Vec::new()) })
+    }
+
+    /// Writes the profile to its slot, a free one if it has none; backs the slot up before the first write.
+    pub fn write_profile(&mut self, id: u32) -> Result<(), String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
-        let (backed_up, host) = (self.backed_up, self.engine.is_some());
-        // A key bound in the flash must find its macro there too.
-        let bodies = bodies_to_write(&self.settings, &bindings);
-        let (t, _) = self.keyboard()?;
-        let profile = control::active_profile(t).map_err(|e| e.to_string())?;
-        if !backed_up {
-            let all = actuation::read_all(t, profile, &editable_keys(), |_, _| {}).map_err(|e| e.to_string())?;
-            write_backup(&actuation::format_backup(profile, &all))?;
+        let keys = editable_keys();
+        let bound: Vec<(u8, Action)> = self
+            .settings
+            .profile(id)
+            .map(|p| p.data.normal.iter().filter_map(|(&k, r)| Some((k, binding::decode(r.fn_id, &r.fn_data)?))).collect())
+            .unwrap_or_default();
+        let bodies = bodies_to_write(&self.settings, &bound);
+        let backed_up = self.backed_up;
+        let slot = self.settings.profile(id).and_then(|p| p.slot);
+        let missing = self.msg("backend.noKeyboard");
+        self.ensure_connected();
+        // Field borrows, not `keyboard()`: the slot write needs `self.settings` mutably at the same time.
+        let Some((t, d)) = &self.control else { return Err(missing) };
+        if !backed_up && let Some(k) = slot {
+            let all = actuation::read_all(t, k, &keys, |_, _| {}).map_err(|e| e.to_string())?;
+            write_backup(&actuation::format_backup(k, &all))?;
         }
-        for (id, body) in &bodies {
-            macros::write(t, *id, body).map_err(|e| e.to_string())?;
+        for (mid, body) in &bodies {
+            macros::write(t, *mid, body).map_err(|e| e.to_string())?;
         }
-        let results = actuation::save(t, profile, &changes);
-        let bound = binding::save(t, profile, &bindings, !host);
-        for (id, _) in bodies {
-            if let Some(m) = self.settings.macros.get_mut(&id) {
+        let k = profiles::write_slot(t, d, &mut self.settings, id, &keys).map_err(|e| e.to_string())?;
+        for (mid, _) in bodies {
+            if let Some(m) = self.settings.macros.get_mut(&mid) {
                 m.written = true;
             }
         }
         self.backed_up = true;
-        self.note(&results);
-        self.note(&bound);
-        track(&mut self.settings.actuation, saved(&results), []);
-        track(&mut self.settings.bindings, saved(&bound), []);
-        settings::save(&self.settings)?;
-        self.sync_engine();
-        Ok(self.written(results, bound))
+        // Writing the startup slot is copied into profile 0 as well.
+        if Some(k) == self.startup && self.settings.loaded == Some(id) {
+            self.ram = None;
+            self.restore();
+        }
+        settings::save(&self.settings)
     }
 
     fn written(&self, results: Vec<(u8, Outcome)>, bindings: Vec<(u8, Outcome)>) -> Written {
-        Written {
-            results,
-            unsaved: self.settings.actuation.keys().copied().collect(),
-            bindings,
-            unsaved_bindings: self.settings.bindings.keys().copied().collect(),
-        }
+        let (unsaved, unsaved_bindings) = self.unsaved();
+        Written { results, unsaved, bindings, unsaved_bindings }
     }
 
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
         let dynamic_lighting = dynamic_lighting::enabled();
         self.ensure_connected();
-        let saved = match (&self.control, self.synapse) {
-            (Some((t, d)), false) => lighting::get_look(t, d, Store::Slot(1)).ok().flatten(),
-            _ => None,
-        };
+        let p = self.settings.loaded_profile();
+        let saved = p.and_then(|p| p.slot).and_then(|k| self.settings.slots.get(&k)).and_then(|s| s.look.clone());
+        let applied = p.and_then(|p| p.data.look.clone());
         Ok(LightingState {
             effects: self.last_spec.map(lighting::effect_infos).unwrap_or_default(),
             applied: match self.last_spec {
-                Some(d) => usable(d, self.settings.applied.clone()),
-                None => self.settings.applied.clone(),
+                Some(d) => usable(d, applied),
+                None => applied,
             },
             saved,
             dynamic_lighting,
-            custom: self.settings.custom.clone(),
+            custom: p.and_then(|p| p.custom.clone()),
         })
     }
 
@@ -329,31 +417,34 @@ impl Device {
         lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())
     }
 
-    /// Remembers the look; without a keyboard it is shown on the next connect.
+    /// Remembers the look in the loaded profile; without a keyboard it is shown on the next connect.
     pub fn lighting_apply(&mut self, look: Look) -> Result<(), String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
+        let missing = self.msg("backend.noKeyboard");
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         }
-        if look.effect.name == lighting::CUSTOM {
-            self.settings.custom = look.effect.colors.clone();
+        if let Some(r) = &mut self.ram {
+            r.look = Some(look.clone());
         }
-        self.settings.applied = Some(look);
+        let p = self.settings.loaded_mut().ok_or(missing)?;
+        if look.effect.name == lighting::CUSTOM {
+            p.custom = look.effect.colors.clone();
+        }
+        p.data.look = Some(look);
         settings::save(&self.settings)
     }
 
-    /// Writes the keyboard's flash; checks Synapse afresh like actuation writes.
+    /// Writes the look into the profile's slot.
     pub fn lighting_write(&mut self, look: Look) -> Result<(), String> {
-        if self.check_synapse(synapse_running) {
-            return Err(self.msg("backend.synapseRunning"));
+        if look.effect.name == lighting::CUSTOM {
+            return Err("the custom layout cannot be saved to the keyboard".into());
         }
-        let (t, d) = self.keyboard()?;
-        lighting::set_look(t, d, Store::Slot(1), &look).map_err(|e| e.to_string())?;
-        lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
-        self.settings.applied = Some(look);
-        settings::save(&self.settings)
+        self.lighting_apply(look)?;
+        let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        self.write_profile(id)
     }
 
     /// Fresh check before a write, honouring `watch_synapse`.
@@ -381,7 +472,7 @@ impl Device {
         }
         let d = self.keyboard()?.1;
         hid::set_autonomous(&self.api, d, true).map_err(|e| e.to_string())?;
-        if let (Some((t, _)), Some(look)) = (&self.control, &self.settings.applied) {
+        if let (Some((t, _)), Some(look)) = (&self.control, self.settings.loaded_profile().and_then(|p| p.data.look.as_ref())) {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -389,16 +480,6 @@ impl Device {
 
     pub fn set_sink(&mut self, sink: Sink) {
         self.sink = Some(sink);
-    }
-
-    /// Keeps the live map in step with what a write left in the keyboard.
-    fn note(&mut self, results: &[(u8, Outcome)]) {
-        let Some(live) = &mut self.live else { return };
-        for (k, o) in results {
-            if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(l)) = (o, live.get_mut(k)) {
-                *l = KeyAssignment { profile: l.profile, ..a.clone() };
-            }
-        }
     }
 
     /// Switches between hardware and driver mode; stays in hardware mode if the engine cannot start.
@@ -424,18 +505,9 @@ impl Device {
             self.stop_engine();
             return;
         }
-        if self.live.is_none() {
-            let (t, _) = self.control.as_ref().unwrap();
-            match actuation::read_all(t, actuation::LIVE, &editable_keys(), |_, _| {}) {
-                Ok(all) => self.live = Some(all.into_iter().map(|a| (a.key, a)).collect()),
-                Err(e) => {
-                    self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e.to_string())]));
-                    return;
-                }
-            }
-        }
-        let thresholds = self.live.iter().flatten().map(|(&k, a)| (k, a.threshold_low)).collect();
-        let mut cfg = engine_config(&thresholds, &self.bindings(), &self.settings.rapid, engine::repeat_timing());
+        let Some(p) = self.settings.loaded_profile() else { return };
+        let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
+        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.rapid, engine::repeat_timing());
         cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
@@ -449,6 +521,7 @@ impl Device {
         match started {
             Ok(h) => {
                 self.engine = Some(h);
+                self.ram = None;
                 self.restore();
             }
             Err(e) => self.restore_error = Some(i18n::tf(self.lang(), "backend.engine", &[("error", &e)])),
@@ -462,6 +535,7 @@ impl Device {
             && let Some((t, _)) = &self.control
             && control::set_hardware_mode(t).is_ok()
         {
+            self.ram = None;
             self.restore();
         }
     }
@@ -519,7 +593,7 @@ impl Device {
 
     /// Fn+F11/F12 in driver mode; the firmware's own step is about a tenth.
     pub fn step_brightness(&mut self, up: bool) {
-        let applied = self.settings.applied.as_ref().map(|l| l.brightness);
+        let applied = self.settings.loaded_profile().and_then(|p| p.data.look.as_ref()).map(|l| l.brightness);
         let Some((t, d)) = self.connect() else { return };
         let current = match applied {
             Some(b) => b,
@@ -530,7 +604,7 @@ impl Device {
         };
         let value = if up { current.saturating_add(26) } else { current.saturating_sub(26) };
         let shown = lighting::set_brightness(t, d, Store::Temporary, value).is_ok();
-        if shown && let Some(look) = &mut self.settings.applied {
+        if shown && let Some(look) = self.settings.loaded_mut().and_then(|p| p.data.look.as_mut()) {
             look.brightness = value;
             let _ = settings::save(&self.settings);
         }
@@ -540,29 +614,6 @@ impl Device {
 /// Press point in the UI's 0.1 mm steps.
 pub fn mm(threshold: u8) -> f32 {
     (analog::threshold_to_mm(threshold) * 10.0).round() / 10.0
-}
-
-/// The `touched` keys are now unsaved exactly as `unsaved` says.
-fn track<V>(overrides: &mut BTreeMap<u8, V>, touched: impl IntoIterator<Item = u8>, unsaved: impl IntoIterator<Item = (u8, V)>) {
-    for k in touched {
-        overrides.remove(&k);
-    }
-    overrides.extend(unsaved);
-}
-
-/// Saving makes permanent what the keyboard types with now, plus the pending edits.
-fn to_save<V: Copy>(overrides: &BTreeMap<u8, V>, edits: &[(u8, V)]) -> Vec<(u8, V)> {
-    let mut all = overrides.clone();
-    all.extend(edits.iter().copied());
-    all.into_iter().collect()
-}
-
-fn pairs<V: Copy>(m: &BTreeMap<u8, V>) -> Vec<(u8, V)> {
-    m.iter().map(|(&k, &v)| (k, v)).collect()
-}
-
-fn saved(results: &[(u8, Outcome)]) -> impl Iterator<Item = u8> + '_ {
-    results.iter().filter(|(_, o)| matches!(o, Outcome::Ok(_))).map(|&(k, _)| k)
 }
 
 fn written_macros(s: &Settings) -> Vec<u16> {
@@ -590,15 +641,6 @@ fn host_bound(key: u8, a: Action) -> Outcome {
         Some((fn_id, fn_data)) => Outcome::Ok(KeyAssignment { profile: actuation::LIVE, key, layer: 0, threshold_low: 0, threshold_high: 0, fn_id, fn_data }),
         None => Outcome::Failed(Error::BadArgument(format!("cannot bind {a:?}"))),
     }
-}
-
-fn restore_error(lang: &str, message: &str, results: &[(u8, Outcome)]) -> Option<String> {
-    let bad: Vec<&str> = results
-        .iter()
-        .filter(|(_, o)| !matches!(o, Outcome::Ok(_)))
-        .map(|&(k, _)| keymap::name(k).unwrap_or("?"))
-        .collect();
-    (!bad.is_empty()).then(|| i18n::tf(lang, message, &[("keys", &bad.join(", "))]))
 }
 
 fn editable_keys() -> Vec<u8> {
@@ -699,7 +741,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, live: None, sink: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: false, settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu_listening: false, sink: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }
@@ -751,20 +793,15 @@ mod tests {
             let profile = control::active_profile(t).unwrap();
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
-        assert!(!dev.settings.actuation.contains_key(&a), "A is applied in the app; save or revert it first");
+        dev.read_all(|_, _, _| {}).unwrap();
         let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), &[]).unwrap();
         let (t, _) = dev.connect().unwrap();
-        actuation::write_key(t, &live).unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
-        dev.update_settings(|s| {
-            s.actuation.remove(&a);
-        })
-        .unwrap();
+        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), &[]).unwrap();
         assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)), "{:?}", w.results);
         assert_eq!(w.unsaved, [a]);
         assert_eq!(profile_after, saved);
     }
-
 
     #[test]
     #[ignore = "needs the keyboard connected and Synapse closed"]
@@ -802,27 +839,5 @@ mod tests {
         assert_eq!(next_macro_id(&BTreeMap::new()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m())].into()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m()), (0x8004, m())].into()), 0x8005);
-    }
-
-    #[test]
-    fn tracking_replaces_touched_keys_with_what_is_still_unsaved() {
-        let mut o = BTreeMap::from([(31, 2.0), (32, 2.5), (18, 3.0)]);
-        track(&mut o, [31, 32], [(32, 3.6)]);
-        assert_eq!(o, BTreeMap::from([(32, 3.6), (18, 3.0)]));
-    }
-
-    #[test]
-    fn saving_writes_applied_press_points_with_edits_on_top() {
-        let o = BTreeMap::from([(31, 2.0), (32, 2.5)]);
-        assert_eq!(to_save(&o, &[(32, 3.0), (18, 1.5)]), [(18, 1.5), (31, 2.0), (32, 3.0)]);
-    }
-
-    #[test]
-    fn restore_reports_keys_that_were_not_applied() {
-        let a = |t| KeyAssignment { profile: 0, key: 31, layer: 0, threshold_low: t, threshold_high: 0, fn_id: 2, fn_data: vec![] };
-        let key = "backend.restoreActuation";
-        assert_eq!(restore_error("ru", key, &[(31, Outcome::Ok(a(0)))]), None);
-        let e = restore_error("ru", key, &[(31, Outcome::Ok(a(0))), (32, Outcome::Unconfirmed(a(9))), (18, Outcome::Failed(Error::Io("x".into())))]);
-        assert_eq!(e.as_deref(), Some("Не удалось вернуть точки срабатывания клавиш: S, W"));
     }
 }

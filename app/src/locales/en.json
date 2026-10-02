@@ -190,7 +190,7 @@
     "unsupported": "This Razer keyboard model is not supported (PID {pid}).",
     "notFound": "No supported Razer keyboard found.",
     "reading": "Reading the keyboard: {done} of {total}",
-    "connected": "Connected: {model}, profile {profile}"
+    "connected": "Connected: {model}, profile “{profile}”"
   },
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
@@ -200,7 +200,9 @@
     "macroUnwritten": "The macro is not in the keyboard: write it in Macros, or write the binding",
     "restoreBindings": "Could not restore the bindings of keys: {keys}",
     "autostart": "Autostart: {error}",
-    "engine": "Rapid Trigger did not start: {error}"
+    "engine": "Rapid Trigger did not start: {error}",
+    "profileSlot": "Slot {n}",
+    "restoreProfile": "Could not load the profile: {error}"
   },
   "tray": { "open": "Open", "autostart": "Start with Windows", "quit": "Quit" }
 }
