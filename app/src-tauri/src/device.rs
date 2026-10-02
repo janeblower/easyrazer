@@ -164,6 +164,10 @@ impl Device {
         let missing = self.msg("backend.noKeyboard");
         let Some((t, d)) = &self.control else { return Err(missing) };
         let startup = control::active_profile(t).map_err(|e| e.to_string())?;
+        // Synapse or another tool may have rewritten the startup slot since it was cached.
+        if !self.synced {
+            self.settings.slots.remove(&startup);
+        }
         profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, |n, a| progress(n, total, a)).map_err(|e| e.to_string())?;
         if let Some(id) = self.settings.loaded {
             self.settings.take_legacy(id);
@@ -180,7 +184,7 @@ impl Device {
     /// Loads the loaded profile into profile 0: the keyboard forgets it on unplug, on a mode switch
     /// and on `05:04`, and Synapse overwrites it.
     fn restore(&mut self) {
-        if !self.synced {
+        if !self.synced || self.synapse {
             return;
         }
         let menu = self.hw_menu();
@@ -194,7 +198,8 @@ impl Device {
         match profiles::load(t, d, &self.settings, id, &base, menu) {
             Ok(after) => self.ram = Some(after),
             Err(e) => {
-                self.ram = None;
+                // Profile 0 holds a partial write, so the next load must write every key.
+                self.ram = Some(Snapshot::default());
                 self.restore_error = Some(i18n::tf(self.lang(), "backend.restoreProfile", &[("error", &e.to_string())]));
             }
         }
@@ -228,6 +233,7 @@ impl Device {
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
         if was && fresh_synapse == Some(false) {
+            self.synced = false;
             self.reload();
         }
         let (profile, profile_name) = match self.settings.loaded_profile() {
@@ -355,7 +361,15 @@ impl Device {
         let startup = self.startup.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         let missing = self.msg("backend.noKeyboard");
         let Some((t, _)) = &self.control else { return Err(missing) };
-        let after = op(t, &mut self.settings, startup).map_err(|e| e.to_string())?;
+        let after = match op(t, &mut self.settings, startup) {
+            Ok(a) => a,
+            Err(e) => {
+                // A half-done `05:04`/`05:03` leaves the keyboard in an unknown state.
+                self.synced = false;
+                self.ram = None;
+                return Err(e.to_string());
+            }
+        };
         if reloads || after != startup {
             self.ram = None;
         }
@@ -367,6 +381,17 @@ impl Device {
     }
 
     pub fn delete_profile(&mut self, id: u32) -> Result<(), String> {
+        let slotted = self.settings.profile(id).ok_or_else(|| format!("no profile {id}"))?.slot.is_some();
+        if !slotted {
+            let was_loaded = self.settings.loaded == Some(id);
+            profiles::remove(&mut self.settings, id).map_err(|e| e.to_string())?;
+            settings::save(&self.settings)?;
+            if was_loaded {
+                self.restore();
+                self.sync_engine();
+            }
+            return Ok(());
+        }
         self.slot_op(false, |t, s, startup| profiles::delete(t, s, id, startup))
     }
 

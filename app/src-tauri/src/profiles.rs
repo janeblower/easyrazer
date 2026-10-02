@@ -157,13 +157,23 @@ pub fn delete(t: &impl Transport, s: &mut Settings, id: u32, startup: u8) -> Res
     if s.profiles.len() <= 1 {
         return Err(Error::BadArgument("the only profile cannot be deleted".into()));
     }
+    let slotted = s.profile(id).ok_or_else(|| missing(id))?.slot.is_some();
+    let startup = if slotted { free_slot(t, s, id, startup)? } else { startup };
+    remove(s, id)?;
+    Ok(startup)
+}
+
+/// Removes a profile that holds no slot, loading a neighbour if it was loaded.
+pub fn remove(s: &mut Settings, id: u32) -> Result<(), Error> {
+    if s.profiles.len() <= 1 {
+        return Err(Error::BadArgument("the only profile cannot be deleted".into()));
+    }
     let i = s.profiles.iter().position(|p| p.id == id).ok_or_else(|| missing(id))?;
-    let startup = if s.profiles[i].slot.is_some() { free_slot(t, s, id, startup)? } else { startup };
     s.profiles.remove(i);
     if s.loaded == Some(id) {
         s.loaded = s.profiles.get(i).or(s.profiles.get(i.saturating_sub(1))).map(|p| p.id);
     }
-    Ok(startup)
+    Ok(())
 }
 
 /// Writes the profile to its slot, taking a free one if it has none; returns the slot.
