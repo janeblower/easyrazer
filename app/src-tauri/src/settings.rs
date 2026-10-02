@@ -43,7 +43,8 @@ pub struct Macro {
 }
 
 /// A profile of the app; written to a flash slot it also works without the app.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Profile {
     /// Never reused, so a stale id from the window cannot hit another profile.
     pub id: u32,
@@ -155,8 +156,15 @@ fn path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer").join("settings.json"))
 }
 
+/// A damaged file is set aside, not overwritten: the next save would destroy the only copy of the app-only profiles.
 pub fn load() -> Settings {
-    path().and_then(|p| std::fs::read_to_string(p).ok()).map_or_else(Settings::default, |t| parse(&t))
+    let Some(p) = path() else { return Settings::default() };
+    let Ok(text) = std::fs::read_to_string(&p) else { return Settings::default() };
+    serde_json::from_str(&text).unwrap_or_else(|_| {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let _ = std::fs::rename(&p, p.with_file_name(format!("settings.json.bad-{secs}")));
+        Settings::default()
+    })
 }
 
 /// A damaged file is ignored rather than keeping the app from starting.
@@ -170,7 +178,9 @@ pub fn save(s: &Settings) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
-    std::fs::write(p, text).map_err(|e| e.to_string())
+    let tmp = p.with_file_name("settings.json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -215,6 +225,12 @@ mod tests {
     fn legacy_fields_survive_a_save_before_migration() {
         let s = parse(r#"{"actuation": {"31": 3.6}}"#);
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()).actuation[&31], 3.6);
+    }
+
+    #[test]
+    fn a_profile_missing_new_fields_still_parses() {
+        let s = parse(r#"{"profiles": [{"id": 3, "name": "a", "slot": 2, "data": {"normal": {}, "hypershift": {}, "look": null}}]}"#);
+        assert_eq!((s.profiles.len(), s.profiles[0].id, s.profiles[0].slot), (1, 3, Some(2)));
     }
 
     #[test]
