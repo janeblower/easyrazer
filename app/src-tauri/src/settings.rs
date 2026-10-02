@@ -167,7 +167,7 @@ pub fn load() -> Settings {
     })
 }
 
-/// A damaged file is ignored rather than keeping the app from starting.
+#[cfg(test)]
 fn parse(text: &str) -> Settings {
     serde_json::from_str(text).unwrap_or_default()
 }
