@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -94,7 +95,11 @@ pub struct Device {
     /// Reads Col04, so Fn+Menu may report the next-profile code.
     menu: Option<MenuListener>,
     sink: Option<Sink>,
+    progress: Option<Progress>,
 }
+
+/// Reports a slot read: reads done, reads in all, the key when the window shows it.
+pub type Progress = Arc<dyn Fn(usize, usize, Option<&KeyAssignment>) + Send + Sync>;
 
 impl Device {
     pub fn new() -> Result<Self, Error> {
@@ -113,6 +118,7 @@ impl Device {
             synced: false,
             menu: None,
             sink: None,
+            progress: None,
         })
     }
 
@@ -144,8 +150,13 @@ impl Device {
 
     /// Syncs the slots if this connect has not yet, then loads the profile into profile 0.
     fn reload(&mut self) {
+        let progress = self.progress.clone();
         if !self.synced
-            && let Err(e) = self.sync(|_, _, _| {})
+            && let Err(e) = self.sync(|n, total, a| {
+                if let Some(p) = &progress {
+                    p(n, total, a);
+                }
+            })
         {
             self.restore_error = Some(i18n::tf(self.lang(), "backend.restoreProfile", &[("error", &e)]));
             return;
@@ -155,10 +166,8 @@ impl Device {
     }
 
     /// Reads the slots into the settings, importing and migrating what is not there yet.
-    fn sync(&mut self, progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<(), String> {
+    fn sync(&mut self, progress: impl FnMut(usize, usize, Option<&KeyAssignment>)) -> Result<(), String> {
         let keys = editable_keys();
-        let total = keys.len();
-        let mut progress = progress;
         let lang = self.lang().to_string();
         let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
         let missing = self.msg("backend.noKeyboard");
@@ -168,7 +177,7 @@ impl Device {
         if !self.synced {
             self.settings.slots.remove(&startup);
         }
-        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, |n, a| progress(n, total, a)).map_err(|e| e.to_string())?;
+        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
         if let Some(id) = self.settings.loaded {
             self.settings.take_legacy(id);
         }
@@ -261,7 +270,7 @@ impl Device {
     }
 
     /// Reads the slots once per connect and loads the profile; returns its Normal layer.
-    pub fn read_all(&mut self, progress: impl FnMut(usize, usize, &KeyAssignment)) -> Result<Vec<KeyAssignment>, String> {
+    pub fn read_all(&mut self, progress: impl FnMut(usize, usize, Option<&KeyAssignment>)) -> Result<Vec<KeyAssignment>, String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -667,6 +676,10 @@ impl Device {
         self.sink = Some(sink);
     }
 
+    pub fn set_progress(&mut self, progress: Progress) {
+        self.progress = Some(progress);
+    }
+
     /// Switches between hardware and driver mode; stays in hardware mode if the engine cannot start.
     pub fn set_driver_mode(&mut self, on: bool) -> Result<(), String> {
         if self.synapse {
@@ -926,7 +939,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None };
+        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }

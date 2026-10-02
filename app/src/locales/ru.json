@@ -189,7 +189,7 @@
     "synapse": "Запущен Synapse (RazerAppEngine). Закройте его, включая значок в трее, — иначе он перезапишет настройки.",
     "unsupported": "Модель клавиатуры Razer не поддерживается (PID {pid}).",
     "notFound": "Поддерживаемая клавиатура Razer не найдена.",
-    "reading": "Чтение клавиатуры: {done} из {total}",
+    "reading": "Чтение клавиатуры: {percent}%",
     "connected": "Подключено: {model}, профиль «{profile}»"
   },
   "backend": {

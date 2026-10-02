@@ -19,7 +19,7 @@ pub fn sync_slots(
     keys: &[u8],
     startup: u8,
     fallback_name: &dyn Fn(u8) -> String,
-    mut progress: impl FnMut(usize, &KeyAssignment),
+    mut progress: impl FnMut(usize, usize, Option<&KeyAssignment>),
 ) -> Result<Vec<u8>, Error> {
     let listed = slots::list(t)?;
     s.slots.retain(|k, _| listed.contains(k));
@@ -31,13 +31,14 @@ pub fn sync_slots(
     // The startup slot first: its keys are what the window shows while it reads.
     let mut order = listed.clone();
     order.sort_by_key(|&k| k != startup);
+    // Both layers of every slot not cached yet; the window shows this as one progress.
+    let per_slot = 2 * keys.len();
+    let total = per_slot * order.iter().filter(|k| !s.slots.contains_key(k)).count();
+    let mut done = 0;
     for k in order {
         if let Entry::Vacant(e) = s.slots.entry(k) {
-            let snap = if k == startup {
-                slots::read_snapshot(t, d, k, keys, &mut progress)?
-            } else {
-                slots::read_snapshot(t, d, k, keys, |_, _| {})?
-            };
+            let snap = slots::read_snapshot(t, d, k, keys, |n, a| progress(done + n, total, a.filter(|_| k == startup)))?;
+            done += per_slot;
             e.insert(snap);
         }
         if !s.profiles.iter().any(|p| p.slot == Some(k)) {
@@ -255,7 +256,7 @@ mod tests {
 
     fn synced(kb: &FakeKeyboard) -> Settings {
         let mut s = Settings::default();
-        sync_slots(kb, spec(), &mut s, KEYS, 1, &name, |_, _| {}).unwrap();
+        sync_slots(kb, spec(), &mut s, KEYS, 1, &name, |_, _, _| {}).unwrap();
         s
     }
 
@@ -264,11 +265,13 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         slots::create(&kb, 3).unwrap();
         kb.names.borrow_mut().insert(3, vec![0x41; 200]);
-        let mut seen = 0;
+        let mut seen = Vec::new();
         let mut s = Settings::default();
-        let listed = sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |n, _| seen = n).unwrap();
+        let listed = sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |n, total, a| seen.push((n, total, a.is_some()))).unwrap();
         assert_eq!(listed, [1, 3]);
-        assert_eq!(seen, KEYS.len(), "progress follows the startup slot");
+        let all = 2 * 2 * KEYS.len();
+        assert_eq!(seen.last(), Some(&(all, all, false)), "progress covers both slots");
+        assert_eq!(seen.iter().filter(|s| s.2).count(), KEYS.len(), "keys come from the startup slot only");
         let names: Vec<_> = s.profiles.iter().map(|p| (p.name.as_str(), p.slot)).collect();
         assert_eq!(names, [("default", Some(1)), ("Slot 3", Some(3))]);
         assert_eq!(s.loaded_profile().unwrap().slot, Some(1));
@@ -281,7 +284,7 @@ mod tests {
         slots::create(&kb, 2).unwrap();
         let mut s = synced(&kb);
         slots::delete(&kb, 2).unwrap();
-        sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |_, _| {}).unwrap();
+        sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |_, _, _| {}).unwrap();
         assert_eq!(s.profiles.len(), 2);
         assert!(s.profiles.iter().any(|p| p.slot.is_none()));
         assert!(!s.slots.contains_key(&2));
@@ -292,7 +295,7 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let sent = kb.sent.borrow().len();
-        sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |_, _| {}).unwrap();
+        sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |_, _, _| {}).unwrap();
         assert_eq!(kb.sent.borrow().len(), sent + 1, "only the list");
     }
 

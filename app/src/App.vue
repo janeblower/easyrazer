@@ -52,7 +52,8 @@ const bindUnsaved = ref(new Set<number>());
 const section = ref<"actuation" | "bindings" | "macros">("actuation");
 const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
-const progress = ref<[number, number] | null>(null);
+const progress = ref<[number, number] | null>(null); // reads done, reads in all
+const editableCount = computed(() => layout.value.filter((k) => k.editable).length);
 const busy = ref(false);
 const profiles = ref<ProfilesView | null>(null);
 const removing = ref<number | null>(null); // asked before deleting
@@ -67,6 +68,7 @@ let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
+let unlistenProgress: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dirty = computed(
@@ -188,13 +190,7 @@ async function loadProfiles() {
 
 async function load() {
   busy.value = true;
-  progress.value = [0, layout.value.filter((k) => k.editable).length];
-  const unlisten = await listen<[number, number, number, number, Rapid | null]>("read-progress", (e) => {
-    const [done, total, key, mm, rapid] = e.payload;
-    progress.value = [done, total];
-    baseline.value[key] = mm;
-    if (rapid) rapidBase.value[key] = rapid;
-  });
+  progress.value = [0, 1];
   try {
     const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings, profile } = await invoke<Actuation>("read_all");
     baseline.value = base;
@@ -216,7 +212,6 @@ async function load() {
   } catch (error) {
     message.value = String(error);
   } finally {
-    unlisten();
     progress.value = null;
     busy.value = false;
   }
@@ -237,6 +232,7 @@ async function onStatus(s: DeviceStatus) {
   status.value = s;
   if (!s.device || s.synapse) {
     loadedProfile = null;
+    progress.value = null;
     return;
   }
   if (loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile) revert();
@@ -461,6 +457,14 @@ onMounted(async () => {
     message.value = String(error);
   }
   await loadMacros();
+  // A connect reads the keyboard on its own, before the status that starts load() arrives.
+  unlistenProgress = await listen<[number, number, number | null, number | null, Rapid | null]>("read-progress", (e) => {
+    const [done, total, key, mm, rapid] = e.payload;
+    progress.value = [done, total];
+    if (key == null || mm == null) return;
+    baseline.value[key] = mm;
+    if (rapid) rapidBase.value[key] = rapid;
+  });
   unlistenStatus = await listen<DeviceStatus>("status", (e) => {
     void onStatus(e.payload);
   });
@@ -471,6 +475,7 @@ onUnmounted(() => {
   unlistenStatus?.();
   unlistenClose?.();
   unlistenError?.();
+  unlistenProgress?.();
   clearTimeout(errorTimer);
 });
 </script>
@@ -561,7 +566,7 @@ onUnmounted(() => {
           :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
           :rapid-edited="rapidEdited"
           :single="section === 'bindings'"
-          :loaded="progress?.[0] ?? null"
+          :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
         />
         <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
           <div class="px-4 py-3 card flex flex-col gap-3">

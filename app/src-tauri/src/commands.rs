@@ -125,12 +125,15 @@ pub fn lighting_layout() -> Vec<KeyView> {
     key_views(kb_layout::lighting_keys())
 }
 
+/// The window fills the key map from these while a slot is read.
+pub fn emit_progress(app: &AppHandle, done: usize, total: usize, a: Option<&KeyAssignment>) {
+    let _ = app.emit("read-progress", (done, total, a.map(|a| a.key), a.map(|a| mm(a.threshold_low)), None::<Rapid>));
+}
+
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
     let mut device = state.device();
-    let all = device.read_all(|done, total, a| {
-        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), None::<Rapid>));
-    })?;
+    let all = device.read_all(|done, total, a| emit_progress(&app, done, total, a))?;
     let (unsaved, unsaved_bindings) = device.unsaved();
     Ok(Actuation {
         values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),

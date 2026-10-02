@@ -12,6 +12,8 @@ const KIND: Record<string, string> = { info: "bg-panel", warn: "bg-warn-bg text-
 const view = computed(() => {
   const s = props.status;
   if (props.error) return { kind: "warn", text: props.error };
+  if (props.progress)
+    return { kind: "info", text: t("status.reading", { percent: Math.floor((props.progress[0] / props.progress[1]) * 100) }) };
   if (!s) return { kind: "info", text: t("status.searching") };
   if (s.synapse)
     return {
@@ -23,7 +25,6 @@ const view = computed(() => {
     return { kind: "warn", text: t("status.unsupported", { pid }) };
   }
   if (!s.device) return { kind: "warn", text: t("status.notFound") };
-  if (props.progress) return { kind: "info", text: t("status.reading", { done: props.progress[0], total: props.progress[1] }) };
   if (props.message) return { kind: "info", text: props.message };
   return { kind: "ok", text: t("status.connected", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
 });

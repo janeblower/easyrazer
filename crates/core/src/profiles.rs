@@ -153,18 +153,19 @@ fn store(slot: u8) -> Store {
     if slot == LIVE { Store::Temporary } else { Store::Slot(slot) }
 }
 
-/// `progress` follows the Normal layer, the one the window shows.
+/// `progress` counts the reads of both layers; only the Normal ones, which the window shows, carry the key.
 pub fn read_snapshot(
     t: &impl Transport,
     d: &DeviceSpec,
     slot: u8,
     keys: &[u8],
-    progress: impl FnMut(usize, &KeyAssignment),
+    mut progress: impl FnMut(usize, Option<&KeyAssignment>),
 ) -> Result<Snapshot, Error> {
-    let normal = actuation::read_all(t, slot, keys, progress)?;
+    let normal = actuation::read_all(t, slot, keys, |n, a| progress(n, Some(a)))?;
     let mut hypershift = BTreeMap::new();
-    for &k in keys {
+    for (i, &k) in keys.iter().enumerate() {
         hypershift.insert(k, RawKey::of(&actuation::read_layer(t, slot, k, Layer::Hypershift)?));
+        progress(keys.len() + i + 1, None);
     }
     // An effect the description does not know is kept by the slot as it is.
     let look = lighting::get_look(t, d, store(slot)).ok().flatten();
@@ -290,8 +291,8 @@ mod tests {
         let kb = FakeKeyboard::new(&[A, S]);
         kb.edit(2, 1, A, |a| a.fn_id = 0x07);
         let mut seen = Vec::new();
-        let s = read_snapshot(&kb, spec(), 2, &[A, S], |n, a| seen.push((n, a.key))).unwrap();
-        assert_eq!(seen, [(1, A), (2, S)]);
+        let s = read_snapshot(&kb, spec(), 2, &[A, S], |n, a| seen.push((n, a.map(|a| a.key)))).unwrap();
+        assert_eq!(seen, [(1, Some(A)), (2, Some(S)), (3, None), (4, None)]);
         assert_eq!(s.hypershift[&A].fn_id, 0x07);
         assert_eq!(s.normal[&A].fn_data, [0, A]);
         assert!(s.look.is_some());

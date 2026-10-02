@@ -189,7 +189,7 @@
     "synapse": "Synapse (RazerAppEngine) is running. Close it, including its tray icon, or it will overwrite the settings.",
     "unsupported": "This Razer keyboard model is not supported (PID {pid}).",
     "notFound": "No supported Razer keyboard found.",
-    "reading": "Reading the keyboard: {done} of {total}",
+    "reading": "Reading the keyboard: {percent}%",
     "connected": "Connected: {model}, profile “{profile}”"
   },
   "backend": {

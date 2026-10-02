@@ -28,7 +28,7 @@ const props = withDefaults(
     fit?: boolean;
     /** One key at a time: no Ctrl+click and no box. */
     single?: boolean;
-    /** Editable keys read so far, in layout order; `null` when the map is not being read. */
+    /** Editable keys shown as read, in layout order; `null` when the map is not being read. */
     loaded?: number | null;
   }>(),
   {
@@ -85,7 +85,7 @@ const bandStyle = computed(() => {
   return { left: `${b.x0}px`, top: `${b.y0}px`, width: `${b.x1 - b.x0}px`, height: `${b.y1 - b.y0}px` };
 });
 
-// The device reads the editable keys in layout order and reports only how many are done.
+// The editable keys light up in layout order as the whole read goes on.
 const readOrder = computed(() => new Map(props.layout.filter((k) => k.editable).map((k, i) => [k.key, i])));
 function isRead(key: number) {
   const i = readOrder.value.get(key);

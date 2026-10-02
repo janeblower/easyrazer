@@ -41,6 +41,11 @@ fn main() {
             }
             let handle = app.handle().clone();
             let sink_handle = handle.clone();
+            let progress_handle = handle.clone();
+            // A connect reads the slots before the window asks for them.
+            app.state::<commands::AppState>()
+                .device()
+                .set_progress(Arc::new(move |done, total, a| commands::emit_progress(&progress_handle, done, total, a)));
             app.state::<commands::AppState>().device().set_sink(Arc::new(move |o| {
                 if let Output::Depth { depth, travel, down } = o {
                     // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
