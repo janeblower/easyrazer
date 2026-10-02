@@ -86,6 +86,8 @@ pub struct Device {
     restore_error: Option<String>,
     /// Runs in driver mode; the keyboard only reports depth meanwhile.
     engine: Option<EngineHandle>,
+    /// Injected keys cannot reach the focused window, so the firmware types meanwhile.
+    blocked: bool,
     /// What profile 0 holds; `None` once the firmware reloaded it from the startup slot.
     ram: Option<Snapshot>,
     /// The slot the keyboard starts with, as last read or set.
@@ -115,6 +117,7 @@ impl Device {
             last_spec: None,
             restore_error: None,
             engine: None,
+            blocked: false,
             ram: None,
             startup: None,
             synced: false,
@@ -710,12 +713,21 @@ impl Device {
         settings::save(&self.settings)
     }
 
-    /// Runs the engine, and driver mode with it, while the app is in driver mode and Synapse is away.
+    /// Falls back to hardware mode while the focused window cannot take injected keys.
+    pub fn set_input_blocked(&mut self, blocked: bool) {
+        if self.blocked != blocked {
+            self.blocked = blocked;
+            self.sync_engine();
+        }
+    }
+
+    /// Runs the engine, and driver mode with it, while the app is in driver mode, Synapse is away
+    /// and injected keys reach the focused window.
     fn sync_engine(&mut self) {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if self.synapse || !self.settings.driver_mode || self.control.is_none() {
+        if self.synapse || self.blocked || !self.settings.driver_mode || self.control.is_none() {
             self.stop_engine();
             return;
         }
@@ -955,7 +967,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse(|| true));
         assert!(!d.synapse);
     }

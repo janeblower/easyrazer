@@ -5,6 +5,7 @@ mod commands;
 mod device;
 mod dynamic_lighting;
 mod engine;
+mod focus;
 mod i18n;
 mod profiles;
 mod settings;
@@ -68,6 +69,16 @@ fn main() {
                     _ => {}
                 });
             }));
+            let blocked = focus::watch();
+            let focus_handle = handle.clone();
+            std::thread::spawn(move || {
+                while let Ok(b) = blocked.recv() {
+                    // A switch waits for the device lock; by then only the latest state matters.
+                    let b = blocked.try_iter().last().unwrap_or(b);
+                    let state = focus_handle.state::<commands::AppState>();
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| state.device().set_input_blocked(b)));
+                }
+            });
             std::thread::spawn(move || {
                 // The first connect reads the keyboard; a shown window should see it. The timeout keeps
                 // the keyboard restored if the page never loads.

@@ -56,6 +56,11 @@ mode when it exits, fails, or sees Synapse start.
 The trade-off: in HW mode the firmware clamps actuation to 1.62–3.56 mm; the full
 1.5–3.6 mm range needs driver mode.
 
+Windows drops keys that an ordinary app injects into windows run as administrator and
+into the lock screen or UAC prompts. While one of those has focus, EasyRazer hands
+typing back to the firmware (HW mode) and returns to driver mode afterwards; Rapid
+Trigger does not work there.
+
 ### Flash wear
 
 The keyboard's MCU (STM32L4+) is rated for 10,000 erases per 4 KB flash page. The
