@@ -5,6 +5,7 @@ edition.workspace = true
 
 [features]
 hid = ["dep:hidapi"]
+fake = []
 
 [dependencies]
 hidapi = { version = "2", optional = true }

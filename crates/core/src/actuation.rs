@@ -11,12 +11,11 @@ use crate::transport::{Error, Transport, exchange};
 pub const LIVE: u8 = 0;
 
 pub fn read_key(t: &impl Transport, profile: u8, key: u8) -> Result<KeyAssignment, Error> {
-    let r = exchange(
-        t,
-        analog::GET_KEY_ASSIGNMENT,
-        analog::KEY_ASSIGNMENT_SIZE,
-        &[profile, key, Layer::Normal as u8],
-    )?;
+    read_layer(t, profile, key, Layer::Normal)
+}
+
+pub fn read_layer(t: &impl Transport, profile: u8, key: u8, layer: Layer) -> Result<KeyAssignment, Error> {
+    let r = exchange(t, analog::GET_KEY_ASSIGNMENT, analog::KEY_ASSIGNMENT_SIZE, &[profile, key, layer as u8])?;
     analog::parse(r.data()).ok_or(Error::ShortReply(analog::GET_KEY_ASSIGNMENT))
 }
 
@@ -152,7 +151,7 @@ mod tests {
     #[test]
     fn apply_changes_only_the_press_point() {
         let kb = FakeKeyboard::new(&[A]);
-        kb.keys.borrow_mut().get_mut(&A).unwrap().threshold_high = 77;
+        kb.edit(1, 0, A, |a| a.threshold_high = 77);
         let before = kb.key(A);
         let expected = KeyAssignment { threshold_low: 109, ..before };
         assert_eq!(apply(&kb, 1, &[(A, 2.4)]), [(A, Outcome::Ok(expected.clone()))]);

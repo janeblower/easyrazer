@@ -59,7 +59,6 @@ pub struct Protocol {
 #[derive(Debug, Deserialize)]
 pub struct Stores {
     pub temporary: u8,
-    pub saved: u8,
 }
 
 /// Effect bytes after `store led`: hex literals and `{rgb1}`, `{rgb2}`, `{dir}`, `{speed}`.

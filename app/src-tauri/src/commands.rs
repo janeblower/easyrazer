@@ -66,6 +66,8 @@ pub struct Actuation {
     /// `null` for a binding the app cannot show, such as Hypershift.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
+    /// Id of the loaded profile the table belongs to.
+    profile: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -126,17 +128,17 @@ pub fn lighting_layout() -> Vec<KeyView> {
 #[tauri::command]
 pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
     let mut device = state.device();
-    let rapid = device.settings().rapid.clone();
     let all = device.read_all(|done, total, a| {
-        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), rapid.get(&a.key)));
+        let _ = app.emit("read-progress", (done, total, a.key, mm(a.threshold_low), None::<Rapid>));
     })?;
-    let s = device.settings();
+    let (unsaved, unsaved_bindings) = device.unsaved();
     Ok(Actuation {
         values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
-        unsaved: s.actuation.keys().copied().collect(),
-        rapid: s.rapid.clone(),
-        unsaved_bindings: s.bindings.keys().copied().collect(),
+        unsaved,
+        rapid: device.rapid(),
+        unsaved_bindings,
         bindings: device.bindings(),
+        profile: device.loaded(),
     })
 }
 
@@ -284,6 +286,91 @@ pub fn hide_window(window: WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+#[derive(Serialize)]
+pub struct ProfileView {
+    id: u32,
+    name: String,
+    slot: Option<u8>,
+    /// Differs from its slot.
+    unsaved: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProfilesView {
+    profiles: Vec<ProfileView>,
+    loaded: Option<u32>,
+    /// The slot the keyboard starts with without the app.
+    startup: Option<u8>,
+    free_slot: bool,
+}
+
+fn view(device: &Device) -> ProfilesView {
+    let (list, loaded, startup, free_slot) = device.profiles_view();
+    let profiles = list.into_iter().map(|(id, name, slot, unsaved)| ProfileView { id, name, slot, unsaved }).collect();
+    ProfilesView { profiles, loaded, startup, free_slot }
+}
+
+#[tauri::command]
+pub async fn profiles(state: State<'_, AppState>) -> Result<ProfilesView, String> {
+    Ok(view(&state.device()))
+}
+
+#[tauri::command]
+pub async fn load_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.load_profile(id)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn create_profile(state: State<'_, AppState>) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.create_profile()?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn duplicate_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.duplicate_profile(id)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn rename_profile(state: State<'_, AppState>, id: u32, name: String) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.rename_profile(id, &name)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn delete_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.delete_profile(id)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn set_startup(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.set_startup(id)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn free_slot(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.free_slot(id)?;
+    Ok(view(&d))
+}
+
+#[tauri::command]
+pub async fn write_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
+    let mut d = state.device();
+    d.write_profile(id)?;
+    Ok(view(&d))
 }
 
 #[cfg(test)]

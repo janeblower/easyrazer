@@ -26,10 +26,12 @@ cd app && bun run lint              # фронтенд
 | `crates/core/src/keymap.rs` | Имена клавиш → `fwID` |
 | `crates/core/src/layout.rs` | Геометрия клавиш для карты и ячейки сетки подсветки |
 | `crates/core/src/analog.rs`, `actuation.rs` | Назначение клавиши `02:12`/`02:92`, чтение и запись порогов |
+| `crates/core/src/profiles.rs` | Слоты `05:xx`, снимок профиля, дифф и запись одной пачкой |
 | `crates/core/src/rapid.rs` | Движок RT: разбор потока глубины, пороги, автоповтор, Fn-слой |
 | `crates/core/src/lighting.rs` | Кодирование эффектов из шаблонов протокола |
 | `crates/probe` | `razer-probe` — CLI для исследования протокола |
 | `app/src-tauri` | Tauri 2: устройство, фоновый поток, трей, автозапуск, движок на Windows (`engine.rs`) |
+| `app/src-tauri/src/profiles.rs` | Профили программы над слотами: импорт, загрузка в профиль 0, управление |
 | `app/src` | Vue: вкладки, карта клавиатуры, локали `locales/*.json` (общие с Rust) |
 
 Протокол и всё найденное на железе — [protocol.md](protocol.md).

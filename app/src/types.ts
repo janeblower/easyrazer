@@ -6,7 +6,8 @@ export interface Status {
   device: boolean;
   synapse: boolean;
   driver_mode: boolean;
-  profile: number | null;
+  profile: number | null; // id of the loaded profile
+  profile_name: string | null;
   model: string | null;
   unsupported: number | null;
   error: string | null;
@@ -79,6 +80,8 @@ export interface Actuation {
   // null: a binding the app does not edit, such as Hypershift.
   bindings: KeyMap<Action | null>;
   unsaved_bindings: number[];
+  // id of the profile loaded after the read
+  profile: number | null;
 }
 
 export interface Effect {
@@ -124,3 +127,19 @@ export interface AppSettings {
 
 // fwID -> value
 export type KeyMap<T> = Record<number, T>;
+
+export interface ProfileView {
+  id: number;
+  name: string;
+  slot: number | null;
+  // Differs from its slot.
+  unsaved: boolean;
+}
+
+export interface ProfilesView {
+  profiles: ProfileView[];
+  loaded: number | null;
+  // Slot the keyboard starts with without the app.
+  startup: number | null;
+  free_slot: boolean;
+}

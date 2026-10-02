@@ -12,6 +12,7 @@ import type {
   KeyMap,
   KeyView,
   MacroState,
+  ProfilesView,
   Rapid,
   WriteResult,
 } from "./types";
@@ -26,6 +27,7 @@ import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
 import CloseDialog from "./components/CloseDialog.vue";
+import ProfileMenu from "./components/ProfileMenu.vue";
 import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
@@ -52,6 +54,9 @@ const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null);
 const busy = ref(false);
+const profiles = ref<ProfilesView | null>(null);
+const removing = ref<number | null>(null); // asked before deleting
+const switching = ref<number | null>(null); // asked before dropping edits
 const message = ref("");
 const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
@@ -173,6 +178,14 @@ async function loadMacros() {
   }
 }
 
+async function loadProfiles() {
+  try {
+    profiles.value = await invoke<ProfilesView>("profiles");
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function load() {
   busy.value = true;
   progress.value = [0, layout.value.filter((k) => k.editable).length];
@@ -183,8 +196,7 @@ async function load() {
     if (rapid) rapidBase.value[key] = rapid;
   });
   try {
-    const profile = status.value?.profile ?? null;
-    const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings } = await invoke<Actuation>("read_all");
+    const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings, profile } = await invoke<Actuation>("read_all");
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -200,6 +212,7 @@ async function load() {
     loadedProfile = profile;
     message.value = "";
     await loadMacros();
+    await loadProfiles();
   } catch (error) {
     message.value = String(error);
   } finally {
@@ -207,6 +220,14 @@ async function load() {
     progress.value = null;
     busy.value = false;
   }
+}
+
+function revert() {
+  edits.value = {};
+  rapidEdits.value = {};
+  errors.value = {};
+  bindEdits.value = {};
+  bindErrors.value = {};
 }
 
 async function onStatus(s: DeviceStatus) {
@@ -218,7 +239,8 @@ async function onStatus(s: DeviceStatus) {
     loadedProfile = null;
     return;
   }
-  if (loadedProfile !== s.profile) await load();
+  if (loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile) revert();
+  if (loadedProfile === null || loadedProfile !== s.profile) await load();
 }
 
 async function refresh() {
@@ -255,12 +277,34 @@ function selectAll() {
   selection.value = new Set(layout.value.filter((k) => k.editable).map((k) => k.key));
 }
 
-function revert() {
-  edits.value = {};
-  rapidEdits.value = {};
-  errors.value = {};
-  bindEdits.value = {};
-  bindErrors.value = {};
+async function profileOp(command: string, args: Record<string, unknown> = {}) {
+  busy.value = true;
+  try {
+    profiles.value = await invoke<ProfilesView>(command, args);
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
+  await refresh();
+}
+
+function onLoad(id: number) {
+  if (dirty.value > 0) switching.value = id;
+  else void profileOp("load_profile", { id });
+}
+
+function confirmSwitch() {
+  const id = switching.value;
+  switching.value = null;
+  revert();
+  if (id != null) void profileOp("load_profile", { id });
+}
+
+function confirmRemove() {
+  const id = removing.value;
+  removing.value = null;
+  if (id != null) void profileOp("delete_profile", { id });
 }
 
 type Written = { status: "ok" | "unconfirmed"; key: number };
@@ -433,7 +477,20 @@ onUnmounted(() => {
       >
         {{ $t(`tabs.${name}`) }}
       </button>
-      <span class="ml-auto inline-flex" :title="$t('mode.hint')">
+      <ProfileMenu
+        class="ml-auto"
+        :view="profiles"
+        :writable="writable"
+        @load="onLoad"
+        @create="profileOp('create_profile')"
+        @duplicate="(id) => profileOp('duplicate_profile', { id })"
+        @rename="(id, name) => profileOp('rename_profile', { id, name })"
+        @remove="(id) => (removing = id)"
+        @startup="(id) => profileOp('set_startup', { id })"
+        @free="(id) => profileOp('free_slot', { id })"
+        @write="(id) => profileOp('write_profile', { id })"
+      />
+      <span class="inline-flex" :title="$t('mode.hint')">
         <button
           v-for="on in [false, true]"
           :key="String(on)"
@@ -532,6 +589,23 @@ onUnmounted(() => {
       @no="macrosToWrite = []"
     />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
+    <ModalDialog
+      v-if="removing != null"
+      :title="$t('profiles.removeTitle', { name: profiles?.profiles.find((p) => p.id === removing)?.name ?? '' })"
+      @cancel="removing = null"
+    >
+      <p>{{ $t("profiles.removeText") }}</p>
+      <template #actions>
+        <button autofocus @click="removing = null">{{ $t("profiles.cancel") }}</button>
+        <button class="primary" @click="confirmRemove">{{ $t("profiles.remove") }}</button>
+      </template>
+    </ModalDialog>
+    <ModalDialog v-if="switching != null" :title="$t('profiles.dropTitle')" @cancel="switching = null">
+      <template #actions>
+        <button autofocus @click="switching = null">{{ $t("profiles.cancel") }}</button>
+        <button class="primary" @click="confirmSwitch">{{ $t("profiles.drop") }}</button>
+      </template>
+    </ModalDialog>
     <ModalDialog v-if="offering && !closing" :title="$t('dialogs.autostart.title')" @cancel="offering = false">
       <p>{{ $t("dialogs.autostart.text") }}</p>
       <template #actions>
