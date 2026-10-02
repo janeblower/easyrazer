@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
     tags: ["[0-9]*"]
+    paths-ignore: ["docs/**", "**.md"]
 
 permissions:
   contents: write
