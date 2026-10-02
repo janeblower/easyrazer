@@ -32,6 +32,7 @@ import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
 import { useConfirmWrite } from "./confirmWrite";
+import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
 
 const { t } = useI18n();
@@ -63,11 +64,13 @@ const message = ref("");
 const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
+const hiding = ref(false); // asked before dropping edits with the window
 const offering = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 let loadedProfile: number | null = null; // profile the baseline was read from
 let unlistenStatus: UnlistenFn | undefined;
 let unlistenClose: UnlistenFn | undefined;
+let unlistenHide: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
 let unlistenProgress: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -75,6 +78,7 @@ let errorTimer: ReturnType<typeof setTimeout> | undefined;
 const dirty = computed(
   () => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size,
 );
+trackUnapplied(() => dirty.value > 0);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
 const driver = computed(() => !!status.value?.driver_mode);
 const canApply = computed(() => writable.value && dirty.value > 0);
@@ -431,6 +435,11 @@ async function onClose(action: CloseAction, remember: boolean) {
   await invoke(action === "tray" ? "hide_window" : "quit").catch(showError);
 }
 
+async function hide() {
+  hiding.value = false;
+  await invoke("hide_window").catch(showError);
+}
+
 async function onOffer(on: boolean) {
   offering.value = false;
   try {
@@ -444,6 +453,10 @@ onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
   unlistenClose = await listen("close-requested", () => (closing.value = true));
+  unlistenHide = await listen("hide-requested", () => {
+    if (hasUnapplied()) hiding.value = true;
+    else void hide();
+  });
   unlistenError = await listen<string>("app-error", (e) => {
     showError(e.payload);
   });
@@ -476,6 +489,7 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenStatus?.();
   unlistenClose?.();
+  unlistenHide?.();
   unlistenError?.();
   unlistenProgress?.();
   clearTimeout(errorTimer);
@@ -609,6 +623,13 @@ onUnmounted(() => {
       @no="macrosToWrite = []"
     />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
+    <ModalDialog v-if="hiding" :title="$t('dialogs.close.title')" @cancel="hiding = false">
+      <p>{{ $t("dialogs.close.unapplied") }}</p>
+      <template #actions>
+        <button autofocus @click="hiding = false">{{ $t("profiles.cancel") }}</button>
+        <button class="primary" @click="hide">{{ $t("dialogs.close.tray") }}</button>
+      </template>
+    </ModalDialog>
     <ModalDialog
       v-if="removing != null"
       :title="$t('profiles.removeTitle', { name: profiles?.profiles.find((p) => p.id === removing)?.name ?? '' })"

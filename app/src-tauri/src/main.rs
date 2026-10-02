@@ -34,9 +34,6 @@ fn main() {
         .manage(commands::AppState { device: Mutex::new(device), window_ready: Mutex::new(Some(window_ready)) })
         .setup(move |app| {
             tray::build(app)?;
-            if let Some(w) = app.get_webview_window("main") {
-                no_alt_menu(w.hwnd()?.0);
-            }
             let shown = !std::env::args().any(|a| a == autostart::TRAY_ARG);
             if shown {
                 tray::show(app.handle());
@@ -96,9 +93,10 @@ fn main() {
                         api.prevent_close();
                         let _ = w.emit("close-requested", ());
                     }
+                    // The page knows whether it holds edits that the window would take with it.
                     CloseAction::Tray => {
                         api.prevent_close();
-                        let _ = w.hide();
+                        let _ = w.emit("hide-requested", ());
                     }
                     CloseAction::Exit => w.app_handle().exit(0),
                 }
@@ -143,10 +141,11 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("tauri build")
-        .run(|app, e| {
-            if let tauri::RunEvent::Exit = e {
-                app.state::<commands::AppState>().device().shutdown();
-            }
+        .run(|app, e| match e {
+            // The last window closing leaves the app in the tray; only an explicit exit carries a code.
+            tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+            tauri::RunEvent::Exit => app.state::<commands::AppState>().device().shutdown(),
+            _ => {}
         });
 }
 

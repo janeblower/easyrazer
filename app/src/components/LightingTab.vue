@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
 import { useConfirmWrite } from "../confirmWrite";
+import { trackUnapplied } from "../unapplied";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
@@ -164,6 +165,7 @@ function same(a?: Look | null, b?: Look | null) {
 
 const draft = computed(() => ui.value && resolve(ui.value));
 const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
+trackUnapplied(() => dirty.value);
 const isCustom = computed(() => ui.value?.group === "custom");
 const canSave = computed(() => connected.value && !busy.value && !!draft.value && !isCustom.value && !same(draft.value, saved.value));
 
