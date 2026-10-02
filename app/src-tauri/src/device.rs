@@ -320,6 +320,9 @@ impl Device {
 
     pub fn rename_profile(&mut self, id: u32, name: &str) -> Result<(), String> {
         let old = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
+        if slots::fit_name(name) == old {
+            return Ok(());
+        }
         let slot = profiles::rename(&mut self.settings, id, name).map_err(|e| e.to_string())?;
         let written = match slot {
             Some(k) => self.write_slot_name(id, k),

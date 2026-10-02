@@ -59,9 +59,20 @@ pub fn read_name(t: &impl Transport, slot: u8) -> Result<String, Error> {
     Ok(String::from_utf16_lossy(&units))
 }
 
+/// Trimmed and cut to `NAME_CHARS` UTF-16 units without splitting a surrogate pair.
+pub fn fit_name(name: &str) -> String {
+    let mut units = 0;
+    name.trim()
+        .chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= NAME_CHARS
+        })
+        .collect()
+}
+
 pub fn write_name(t: &impl Transport, slot: u8, name: &str) -> Result<(), Error> {
-    let short: String = name.chars().take(NAME_CHARS).collect();
-    let bytes: Vec<u8> = short.encode_utf16().take(NAME_CHARS).flat_map(u16::to_be_bytes).collect();
+    let bytes: Vec<u8> = fit_name(name).encode_utf16().flat_map(u16::to_be_bytes).collect();
     let len = (bytes.len() as u16).to_be_bytes();
     let args = [&[slot, 0, 0][..], &len, &bytes].concat();
     exchange(t, SET_NAME, packet::ARGS_LEN as u8, &args).map(|_| ())
@@ -233,6 +244,18 @@ mod tests {
         assert_eq!(read_name(&kb, 1).unwrap(), "Игры");
         write_name(&kb, 1, &"x".repeat(40)).unwrap();
         assert_eq!(read_name(&kb, 1).unwrap(), "x".repeat(NAME_CHARS));
+    }
+
+    #[test]
+    fn names_fit_in_utf16_units_without_splitting_pairs() {
+        let kb = FakeKeyboard::new(&[A]);
+        let emoji = "😀".repeat(40);
+        assert!(fit_name(&emoji).encode_utf16().count() <= NAME_CHARS);
+        write_name(&kb, 1, &emoji).unwrap();
+        let back = read_name(&kb, 1).unwrap();
+        assert!(!back.contains('\u{FFFD}') && back == fit_name(&emoji), "{back}");
+        assert_eq!(fit_name(&"ы".repeat(40)).chars().count(), NAME_CHARS);
+        assert_eq!(fit_name("  a  "), "a");
     }
 
     #[test]

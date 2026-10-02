@@ -92,6 +92,10 @@ fn missing(id: u32) -> Error {
 
 fn insert_copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
     let i = s.profiles.iter().position(|p| p.id == from)?;
+    let mut name = slots::fit_name(&name);
+    if name.is_empty() {
+        name = slots::fit_name(&s.profiles[i].name);
+    }
     let id = s.new_profile_id();
     let copy = Profile { id, name, slot: None, ..s.profiles[i].clone() };
     s.profiles.insert(i + 1, copy);
@@ -108,9 +112,9 @@ pub fn duplicate(s: &mut Settings, id: u32, name: String) -> Option<u32> {
     insert_copy(s, id, name)
 }
 
-/// Trimmed and cut to `NAME_CHARS`; returns the slot whose name must be written too.
+/// Fitted to the slot's name; returns the slot whose name must be written too.
 pub fn rename(s: &mut Settings, id: u32, name: &str) -> Result<Option<u8>, Error> {
-    let name: String = name.trim().chars().take(slots::NAME_CHARS).collect();
+    let name = slots::fit_name(name);
     if name.is_empty() {
         return Err(Error::BadArgument("empty profile name".into()));
     }
@@ -177,7 +181,7 @@ pub fn write_slot(t: &impl Transport, d: &DeviceSpec, s: &mut Settings, id: u32,
     // Read afresh: Synapse may have changed the slot, and a new one holds an old page.
     let base = slots::read_snapshot(t, d, k, keys, |_, _| {})?;
     let after = slots::write(t, d, k, &base, &p.data)?;
-    if slots::read_name(t, k)? != p.name {
+    if slots::read_name(t, k)? != slots::fit_name(&p.name) {
         slots::write_name(t, k, &p.name)?;
     }
     s.slots.insert(k, after);
@@ -340,6 +344,31 @@ mod tests {
         assert!(rename(&mut s, id, "   ").is_err());
         rename(&mut s, id, &"x".repeat(40)).unwrap();
         assert_eq!(s.profile(id).unwrap().name.chars().count(), slots::NAME_CHARS);
+    }
+
+    #[test]
+    fn a_copy_of_a_long_name_still_fits() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let id = s.loaded.unwrap();
+        s.profile_mut(id).unwrap().name = "😀".repeat(15);
+        let copy = duplicate(&mut s, id, format!("{} (copy)", "😀".repeat(15))).unwrap();
+        assert!(s.profile(copy).unwrap().name.encode_utf16().count() <= slots::NAME_CHARS);
+        let empty = duplicate(&mut s, id, "  ".into()).unwrap();
+        assert_eq!(s.profile(empty).unwrap().name, s.profile(id).unwrap().name);
+    }
+
+    #[test]
+    fn an_unchanged_profile_writes_no_name_the_second_time() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let id = s.loaded.unwrap();
+        s.profile_mut(id).unwrap().name = "Ж".repeat(40);
+        write_slot(&kb, spec(), &mut s, id, KEYS).unwrap();
+        let sent = kb.sent.borrow().len();
+        write_slot(&kb, spec(), &mut s, id, KEYS).unwrap();
+        let names = kb.sent.borrow()[sent..].iter().filter(|&&c| c == razer_core::packet::Command::new(0x05, 0x08)).count();
+        assert_eq!(names, 0);
     }
 
     #[test]
