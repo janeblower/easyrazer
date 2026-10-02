@@ -326,6 +326,9 @@ impl Device {
 
     pub fn rename_profile(&mut self, id: u32, name: &str) -> Result<(), String> {
         let old = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
+        if slots::fit_name(name).is_empty() {
+            return Err(self.msg("backend.emptyName"));
+        }
         if slots::fit_name(name) == old {
             return Ok(());
         }
@@ -382,6 +385,12 @@ impl Device {
 
     pub fn delete_profile(&mut self, id: u32) -> Result<(), String> {
         let slotted = self.settings.profile(id).ok_or_else(|| format!("no profile {id}"))?.slot.is_some();
+        if self.settings.profiles.len() <= 1 {
+            return Err(self.msg("backend.onlyProfile"));
+        }
+        if slotted && self.slots_used() <= 1 {
+            return Err(self.msg("backend.lastSlot"));
+        }
         if !slotted {
             let was_loaded = self.settings.loaded == Some(id);
             profiles::remove(&mut self.settings, id).map_err(|e| e.to_string())?;
@@ -396,6 +405,9 @@ impl Device {
     }
 
     pub fn free_slot(&mut self, id: u32) -> Result<(), String> {
+        if self.slots_used() <= 1 {
+            return Err(self.msg("backend.lastSlot"));
+        }
         self.slot_op(false, |t, s, startup| profiles::free_slot(t, s, id, startup))
     }
 
@@ -415,11 +427,14 @@ impl Device {
         self.restore();
     }
 
+    fn slots_used(&self) -> usize {
+        self.settings.profiles.iter().filter(|p| p.slot.is_some()).count()
+    }
+
     pub fn profiles_view(&self) -> ProfileList {
         let s = &self.settings;
         let list = s.profiles.iter().map(|p| (p.id, p.name.clone(), p.slot, profiles::is_unsaved(p, &s.slots))).collect();
-        let used = s.profiles.iter().filter(|p| p.slot.is_some()).count();
-        (list, s.loaded, self.startup, used < slots::MAX_SLOTS as usize)
+        (list, s.loaded, self.startup, self.slots_used() < slots::MAX_SLOTS as usize)
     }
 
     /// Applies press points and bindings to the loaded profile and profile 0 until the next replug,
@@ -506,6 +521,9 @@ impl Device {
     pub fn write_profile(&mut self, id: u32) -> Result<(), String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
+        }
+        if self.settings.profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
+            return Err(self.msg("backend.noFreeSlot"));
         }
         let keys = editable_keys();
         let bound: Vec<(u8, Action)> = self

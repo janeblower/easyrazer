@@ -195,15 +195,16 @@
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
     "noKeyboard": "No supported Razer keyboard found",
-    "restoreLighting": "Could not restore the lighting: {error}",
-    "restoreActuation": "Could not restore the actuation of keys: {keys}",
     "macroUnwritten": "The macro is not in the keyboard: write it in Macros, or write the binding",
-    "restoreBindings": "Could not restore the bindings of keys: {keys}",
     "autostart": "Autostart: {error}",
     "engine": "Rapid Trigger did not start: {error}",
     "profileSlot": "Slot {n}",
     "customNotSaved": "The custom layout cannot be saved to the keyboard",
-    "restoreProfile": "Could not load the profile: {error}"
+    "restoreProfile": "Could not load the profile: {error}",
+    "noFreeSlot": "All 5 slots are taken",
+    "lastSlot": "The last slot cannot be freed",
+    "onlyProfile": "The only profile cannot be deleted",
+    "emptyName": "A profile name cannot be empty"
   },
   "profiles": {
     "new": "New profile",
