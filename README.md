@@ -41,7 +41,7 @@ runs; opening it adds 6 × WebView2 processes, ~350 MB.
 | Stack | Electron (`RazerAppEngine`) plus Windows services | Rust core, Tauri 2, Vue UI on the system WebView2 |
 | Install | installer, ~1.2 GB on disk | one 8 MB `.exe`, no installer |
 | Processes | 13: 11 × `RazerAppEngine`, Elevation Service, Game Manager Service | 1: `easyrazer` |
-| RAM, working set / private | ~1.75 GB / ~1.07 GB | ~33 MB / ~8 MB |
+| RAM, working set / private | ~1.75 GB / ~1.07 GB | ~33 MB / ~8 MB in the tray (+200–300 MB for WebView2 while the window is open) |
 | Network | loads device modules from `apps.razer.com` | none, works offline |
 | Who detects key presses | the host, always: Synapse sets every key to `0/0` and runs the keyboard in driver mode | the keyboard firmware by default (HW mode); the host only in driver mode, when you want Rapid Trigger |
 
