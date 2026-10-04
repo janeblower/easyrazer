@@ -23,6 +23,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{WHEEL_DELTA, XBUTTON1, XBUTTON2};
 use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW};
 
+use crate::wheel::Wheel;
+
 /// Actions the engine cannot perform itself: they need the control channel or the OS.
 pub type Sink = Arc<dyn Fn(Output) + Send + Sync>;
 
@@ -38,6 +40,7 @@ pub struct EngineHandle {
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     sink: Sink,
+    _wheel: Wheel,
 }
 
 fn lock(e: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
@@ -116,7 +119,7 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, feed_depth), spawn(razer, feed_razer)];
-        Ok(Self { engine, stop, threads, sink })
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(pid) })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
@@ -229,7 +232,7 @@ fn send_key(key: u8, down: bool) {
     }
 }
 
-fn send_media(m: Media) {
+pub(crate) fn send_media(m: Media) {
     let vk = match m {
         Media::Prev => VK_MEDIA_PREV_TRACK,
         Media::Play => VK_MEDIA_PLAY_PAUSE,

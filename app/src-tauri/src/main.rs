@@ -10,11 +10,13 @@ mod i18n;
 mod profiles;
 mod settings;
 mod tray;
+mod wheel;
 
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use razer_core::control::{LED_GAME, LED_MACRO};
 use razer_core::rapid::Output;
 use settings::CloseAction;
 use tauri::{Emitter, Manager, WindowEvent};
@@ -66,6 +68,12 @@ fn main() {
                         state.device().next_profile();
                         let _ = h.emit("status", &commands::poll(&state));
                     }
+                    Output::MacroLed => {
+                        h.state::<commands::AppState>().device().set_led(LED_MACRO, true, true);
+                        std::thread::sleep(Duration::from_secs(1));
+                        h.state::<commands::AppState>().device().set_led(LED_MACRO, false, false);
+                    }
+                    Output::GameMode(on) => h.state::<commands::AppState>().device().set_led(LED_GAME, on, false),
                     _ => {}
                 });
             }));
