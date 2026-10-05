@@ -1,20 +1,35 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { useI18n } from "vue-i18n";
-import type { Action, KeyView, Macro, MacroMode, Media, Mouse } from "../types";
-import { MEDIA, MODS, MOUSE, factory, keyName } from "../bindings";
+import type { Action, KeyView, Macro, MacroMode, Media, Mouse, System } from "../types";
+import { MEDIA, MODS, MOUSE, SYSTEM, keyName } from "../bindings";
+import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
+  title: string;
   /** Selected key, and what it does now; `action` is null for a binding the app does not edit. */
   keyId: number | null;
   action: Action | null;
   layout: KeyView[];
   macros: Record<number, Macro>;
+  /** What the reset button restores. */
+  factoryAction: Action | null;
+  /** The Hypershift layer: offers system actions. */
+  hypershift?: boolean;
+  /** Other keys holding a unique system action, as "Fn+LShift". */
+  taken?: Partial<Record<System, string>>;
 }>();
 const emit = defineEmits<{ set: [action: Action] }>();
 const { t } = useI18n();
+const listId = useId();
 
-const TYPES = ["key", "mouse", "media", "macro", "disabled"] as const;
+const ICONS = { key: "keyboard", mouse: "mouse", media: "music", macro: "macro", system: "cog", disabled: "ban" } as const;
+const types = computed(() =>
+  props.hypershift
+    ? (["key", "mouse", "media", "macro", "system", "disabled"] as const)
+    : (["key", "mouse", "media", "macro", "disabled"] as const),
+);
+type Type = keyof typeof ICONS;
 const MODES: MacroMode[] = ["times", "hold", "toggle"];
 const type = computed(() => props.action?.type ?? "other");
 const keyAction = computed(() => (props.action?.type === "key" ? props.action : null));
@@ -27,11 +42,11 @@ const targetName = computed(() => targets.value.find((o) => o.key === keyAction.
 const sides = (bit: number) => (1 << bit) | (1 << (bit + 4));
 const value = (e: Event) => (e.target as HTMLSelectElement).value;
 
-function setType(ty: (typeof TYPES)[number]) {
+function setType(ty: Type) {
   if (props.keyId == null || type.value === ty) return;
   switch (ty) {
     case "key": {
-      emit("set", factory(props.keyId));
+      emit("set", { type: "key", key: props.keyId, mods: 0 });
       break;
     }
     case "mouse": {
@@ -45,6 +60,10 @@ function setType(ty: (typeof TYPES)[number]) {
     case "macro": {
       const first = macroList.value[0];
       if (first) emit("set", { type: "macro", id: first.id, mode: "times", count: 1 });
+      break;
+    }
+    case "system": {
+      emit("set", { type: "system", action: "brightness_down" });
       break;
     }
     default: {
@@ -73,22 +92,35 @@ function setMod(bit: number, on: boolean) {
 
 <template>
   <div class="flex flex-col">
-    <div class="field">
-      <span class="field-label">{{ $t("bindings.action") }}</span>
+    <div class="flex gap-2 items-center">
+      <span class="text-sm flex-1">{{ title }}</span>
+      <button
+        class="icon-btn"
+        :disabled="keyId == null || !factoryAction"
+        :title="$t('bindings.factory')"
+        :aria-label="$t('bindings.factory')"
+        @click="emit('set', factoryAction!)"
+      >
+        <AppIcon name="revert" />
+      </button>
+    </div>
+    <div class="flex gap-2 items-center">
       <span class="inline-flex">
         <button
-          v-for="ty in TYPES"
+          v-for="ty in types"
           :key="ty"
-          class="seg-btn"
-          :class="{ 'seg-on': keyId != null && type === ty }"
+          class="icon-btn seg-btn"
+          :class="keyId != null && type === ty ? (hypershift ? 'border-hs bg-hs text-ink' : 'seg-on') : ''"
           :disabled="keyId == null || (ty === 'macro' && macroList.length === 0)"
-          :title="ty === 'macro' && macroList.length === 0 ? $t('bindings.noMacros') : ''"
+          :title="ty === 'macro' && macroList.length === 0 ? $t('bindings.noMacros') : $t(`bindings.types.${ty}`)"
+          :aria-label="$t(`bindings.types.${ty}`)"
+          :aria-pressed="keyId != null && type === ty"
           @click="setType(ty)"
         >
-          {{ $t(`bindings.types.${ty}`) }}
+          <AppIcon :name="ICONS[ty]" />
         </button>
       </span>
-      <button :disabled="keyId == null" @click="emit('set', factory(keyId!))">{{ $t("bindings.factory") }}</button>
+      <span class="hint">{{ keyId != null && type !== "other" ? $t(`bindings.types.${type}`) : "" }}</span>
     </div>
     <p v-if="keyId != null && type === 'other'" class="hint">{{ $t("bindings.other") }}</p>
     <template v-if="keyAction">
@@ -96,13 +128,13 @@ function setMod(bit: number, on: boolean) {
         <span class="field-label">{{ $t("bindings.key") }}</span>
         <input
           :value="targetName"
-          list="bind-targets"
+          :list="listId"
           :placeholder="targetName || $t('bindings.search')"
           @focus="($event.target as HTMLInputElement).value = ''"
           @change="pickTarget"
           @blur="($event.target as HTMLInputElement).value = targetName"
         />
-        <datalist id="bind-targets">
+        <datalist :id="listId">
           <option v-for="o in targets" :key="o.key" :value="o.name" />
         </datalist>
       </div>
@@ -152,6 +184,12 @@ function setMod(bit: number, on: boolean) {
       <span class="field-label">{{ $t("bindings.media") }}</span>
       <select :value="action.media" @change="emit('set', { type: 'media', media: value($event) as Media })">
         <option v-for="m in MEDIA" :key="m" :value="m">{{ $t(`bindings.mediaNames.${m}`) }}</option>
+      </select>
+    </div>
+    <div v-else-if="action?.type === 'system'" class="field">
+      <span class="field-label">{{ $t("bindings.function") }}</span>
+      <select :value="action.action" @change="emit('set', { type: 'system', action: value($event) as System })">
+        <option v-for="s in SYSTEM" :key="s" :value="s">{{ $t(`bindings.system.${s}`) }}{{ taken?.[s] ? ` — ${taken[s]}` : "" }}</option>
       </select>
     </div>
   </div>

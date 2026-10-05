@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch 
 import type { ProfilesView } from "../types";
 import AppIcon from "./AppIcon.vue";
 
-const props = defineProps<{ view: ProfilesView | null; writable: boolean }>();
+const props = defineProps<{ view: ProfilesView | null; writable: boolean; nextCombo: string | null }>();
 const emit = defineEmits<{
   load: [id: number];
   create: [];
@@ -215,7 +215,9 @@ function act(e: "duplicate" | "remove" | "startup" | "free" | "write", id: numbe
         <span class="ic text-accent">＋</span>{{ $t("profiles.new") }}
       </button>
       <div class="sep" />
-      <div class="text-[11px] text-muted px-2 py-1">{{ $t("profiles.legend") }}</div>
+      <div class="text-[11px] text-muted px-2 py-1">
+        {{ $t("profiles.legend", { combo: nextCombo ?? $t("profiles.noCombo") }) }}
+      </div>
     </div>
   </div>
 </template>

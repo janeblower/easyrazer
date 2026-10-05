@@ -16,6 +16,7 @@ import type {
   ProfilesView,
   Rapid,
   SnapTap,
+  System,
   WriteResult,
 } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
@@ -26,7 +27,7 @@ import SnapTapCard from "./components/SnapTapCard.vue";
 import { sameSnap, snapColors } from "./snap";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
-import { common, factory, keyName, sameAction, shortLabel } from "./bindings";
+import { UNIQUE, common, factory, hsFactory, keyName, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
@@ -203,6 +204,60 @@ function setBinding(a: Action) {
   if (sameAction(a, bindBase.value[k])) delete next[k];
   else next[k] = a;
   bindEdits.value = next;
+}
+
+const hsBindingOf = (k: number) => hsBindEdits.value[k] ?? hsBindBase.value[k] ?? null;
+const combo = (k: number | null) => (k == null ? null : `Fn+${keyName(byKey.value.get(k)!, t)}`);
+
+// The key holding a unique system action, unapplied edits included.
+function holder(s: System): number | null {
+  for (const { key: k } of layout.value) {
+    const a = hsBindingOf(k);
+    if (a?.type === "system" && a.action === s) return k;
+  }
+  return null;
+}
+
+const taken = computed(() =>
+  Object.fromEntries(
+    UNIQUE.flatMap((s) => {
+      const k = holder(s);
+      return k != null && k !== bindKey.value ? [[s, combo(k)!]] : [];
+    }),
+  ),
+);
+const snapCombo = computed(() => combo(holder("snap_tap")));
+const nextCombo = computed(() => combo(holder("next_profile")));
+const moving = ref<{ from: number; action: System } | null>(null); // asked before moving a unique action
+
+function putHs(next: KeyMap<Action>, k: number, a: Action) {
+  if (sameAction(a, hsBindBase.value[k])) delete next[k];
+  else next[k] = a;
+}
+
+function setHsBinding(a: Action) {
+  const k = bindKey.value;
+  if (k == null) return;
+  const from = a.type === "system" && UNIQUE.includes(a.action) ? holder(a.action) : null;
+  if (from != null && from !== k && a.type === "system") {
+    moving.value = { from, action: a.action };
+    return;
+  }
+  const next = { ...hsBindEdits.value };
+  putHs(next, k, a);
+  hsBindEdits.value = next;
+}
+
+// The old combination goes back to its own key, not to its factory system action.
+function confirmMove() {
+  const m = moving.value;
+  const k = bindKey.value;
+  moving.value = null;
+  if (!m || k == null) return;
+  const next = { ...hsBindEdits.value };
+  putHs(next, m.from, factory(m.from));
+  putHs(next, k, { type: "system", action: m.action });
+  hsBindEdits.value = next;
 }
 
 // What the key caps show in the open section.
@@ -625,6 +680,7 @@ onUnmounted(() => {
         class="ml-auto"
         :view="profiles"
         :writable="writable"
+        :next-combo="nextCombo"
         @load="onLoad"
         @create="onCreate"
         @duplicate="(id) => profileOp('duplicate_profile', { id })"
@@ -697,7 +753,7 @@ onUnmounted(() => {
           :single="section === 'bindings'"
           :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
         />
-        <div class="gap-4 grid" :class="{ 'grid-cols-2': section === 'actuation' }">
+        <div class="gap-4 grid grid-cols-2">
           <div class="px-4 py-3 card flex flex-col gap-3">
             <ActuationCard
               v-if="section === 'actuation'"
@@ -718,15 +774,37 @@ onUnmounted(() => {
             />
             <BindingCard
               v-else
+              :title="$t('bindings.main')"
               :key-id="bindKey"
               :action="bindKey == null ? null : bindingOf(bindKey)"
+              :factory-action="bindKey == null ? null : factory(bindKey)"
               :layout="layout"
               :macros="macroState?.macros ?? {}"
               @set="setBinding"
             />
           </div>
-          <div v-if="section === 'actuation'" class="px-4 py-3 card flex flex-col gap-3">
-            <SnapTapCard :snap="snap" :selection="selection" :layout="layout" :driver="driver" @update="setSnap" />
+          <div class="px-4 py-3 card flex flex-col gap-3">
+            <SnapTapCard
+              v-if="section === 'actuation'"
+              :snap="snap"
+              :selection="selection"
+              :layout="layout"
+              :driver="driver"
+              :combo="snapCombo"
+              @update="setSnap"
+            />
+            <BindingCard
+              v-else
+              hypershift
+              :title="bindKey == null ? 'Hypershift' : `Hypershift · ${combo(bindKey)}`"
+              :key-id="bindKey"
+              :action="bindKey == null ? null : hsBindingOf(bindKey)"
+              :factory-action="bindKey == null ? null : hsFactory(bindKey)"
+              :taken="taken"
+              :layout="layout"
+              :macros="macroState?.macros ?? {}"
+              @set="setHsBinding"
+            />
           </div>
         </div>
         <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
@@ -742,6 +820,17 @@ onUnmounted(() => {
       @no="macrosToWrite = []"
     />
     <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
+    <ModalDialog
+      v-if="moving"
+      :title="$t('bindings.moveTitle', { action: $t(`bindings.system.${moving.action}`), to: combo(bindKey) })"
+      @cancel="moving = null"
+    >
+      <p>{{ $t("bindings.moveText", { from: combo(moving.from) }) }}</p>
+      <template #actions>
+        <button autofocus @click="moving = null">{{ $t("profiles.cancel") }}</button>
+        <button class="primary" @click="confirmMove">{{ $t("bindings.move") }}</button>
+      </template>
+    </ModalDialog>
     <ModalDialog v-if="hiding" :title="$t('dialogs.close.title')" @cancel="hiding = false">
       <p>{{ $t("dialogs.close.unapplied") }}</p>
       <template #actions>

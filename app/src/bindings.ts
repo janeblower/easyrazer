@@ -1,4 +1,4 @@
-import type { Action, KeyView, Macro, MacroEvent, Media, Mouse } from "./types";
+import type { Action, KeyView, Macro, MacroEvent, Media, Mouse, System } from "./types";
 
 type T = (key: string, args?: Record<string, unknown>) => string;
 
@@ -13,6 +13,22 @@ export function common<V>(values: V[]): V | null {
 }
 
 export const factory = (key: number): Action => ({ type: "key", key, mods: 0 });
+
+export const SYSTEM: System[] = ["brightness_down", "brightness_up", "sleep", "game_mode", "macro_led", "next_profile", "snap_tap"];
+// The app reacts to these itself, so one key at most carries each.
+export const UNIQUE: System[] = ["next_profile", "snap_tap"];
+// Synapse's factory Hypershift layer on V2, plus the app's Snap Tap switch on LShift.
+const HS_FACTORY: Record<number, System> = {
+  44: "snap_tap",
+  120: "macro_led",
+  121: "game_mode",
+  122: "brightness_down",
+  123: "brightness_up",
+  126: "sleep",
+  129: "next_profile",
+};
+
+export const hsFactory = (key: number): Action => (key in HS_FACTORY ? { type: "system", action: HS_FACTORY[key] } : factory(key));
 
 export function sameAction(a: Action | null | undefined, b: Action | null | undefined): boolean {
   if (!a || !b) return (a ?? null) === (b ?? null);
