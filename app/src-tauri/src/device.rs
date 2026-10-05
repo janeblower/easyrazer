@@ -25,7 +25,7 @@ use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
-use crate::settings::{self, Macro, Rapid, Settings};
+use crate::settings::{self, Macro, Rapid, Settings, SnapTap};
 
 /// Marks a key of `ram` as unknown so the next load writes it; the firmware takes no `fnId` 0xFF.
 const UNKNOWN_FN: u8 = 0xFF;
@@ -303,6 +303,17 @@ impl Device {
         self.settings.loaded_profile().map(|p| p.rapid.clone()).unwrap_or_default()
     }
 
+    pub fn snap_tap(&self) -> SnapTap {
+        self.settings.loaded_profile().map(|p| p.snap_tap.clone()).unwrap_or_default()
+    }
+
+    /// Fn+LShift: the engine has switched already; the profile follows so the window and the next start agree.
+    pub fn set_snap_tap(&mut self, on: bool) -> Result<(), String> {
+        let Some(p) = self.settings.loaded_mut() else { return Ok(()) };
+        p.snap_tap.enabled = on;
+        settings::save(&self.settings)
+    }
+
     /// Id of the loaded profile.
     pub fn loaded(&self) -> Option<u32> {
         self.settings.loaded
@@ -462,8 +473,8 @@ impl Device {
     }
 
     /// Applies press points and bindings to the loaded profile and profile 0 until the next replug,
-    /// and Rapid Trigger, which lives only here.
-    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>, bindings: &[(u8, Action)]) -> Result<Written, String> {
+    /// and Rapid Trigger and Snap Tap, which live only here.
+    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>, snap: Option<&SnapTap>, bindings: &[(u8, Action)]) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -500,6 +511,9 @@ impl Device {
             }
         }
         p.rapid.extend(rapid.iter().map(|(&k, &r)| (k, r)));
+        if let Some(s) = snap {
+            p.snap_tap = s.clone();
+        }
         if let Some(ram) = &mut self.ram {
             for (k, o) in &results {
                 if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
@@ -534,7 +548,7 @@ impl Device {
         let applied = if edits.is_empty() && bind_edits.is_empty() {
             self.written(Vec::new(), Vec::new())
         } else {
-            self.apply(edits, &BTreeMap::new(), bind_edits)?
+            self.apply(edits, &BTreeMap::new(), None, bind_edits)?
         };
         let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.write_profile(id)?;
@@ -733,7 +747,7 @@ impl Device {
         }
         let Some(p) = self.settings.loaded_profile() else { return };
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
-        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.rapid, engine::repeat_timing());
+        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
@@ -904,9 +918,10 @@ fn engine_config(
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
     rapid: &BTreeMap<u8, Rapid>,
+    snap: &SnapTap,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: Vec::new(), snap_on: false };
+    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
@@ -962,6 +977,7 @@ pub fn synapse_running() -> bool {
 #[cfg(test)]
 mod tests {
     use razer_core::lighting::Effect;
+    use razer_core::rapid::{SnapGroup, SnapRule};
     use super::*;
 
     #[test]
@@ -993,6 +1009,14 @@ mod tests {
     }
 
     #[test]
+    fn engine_config_keeps_snap_groups_while_off() {
+        let snap = SnapTap { enabled: false, groups: vec![SnapGroup { keys: vec![31, 33], rule: SnapRule::Last }] };
+        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
+        assert_eq!(c.snap, snap.groups);
+        assert!(!c.snap_on);
+    }
+
+    #[test]
     fn engine_config_from_press_points_and_rapid_trigger() {
         let thresholds = BTreeMap::from([(31, 43), (33, 0)]);
         let rapid = BTreeMap::from([
@@ -1001,7 +1025,7 @@ mod tests {
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
-        let c = engine_config(&thresholds, &bindings, &rapid, t);
+        let c = engine_config(&thresholds, &bindings, &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
@@ -1032,10 +1056,10 @@ mod tests {
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
         dev.read_all(|_, _, _| {}).unwrap();
-        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), &[]).unwrap();
+        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, &[]).unwrap();
         let (t, _) = dev.connect().unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
-        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), &[]).unwrap();
+        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), None, &[]).unwrap();
         assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)), "{:?}", w.results);
         assert_eq!(w.unsaved, [a]);
         assert_eq!(profile_after, saved);

@@ -8,6 +8,7 @@ use razer_core::binding::{self, Action};
 use razer_core::lighting::{Look, Rgb};
 use razer_core::macros::Event;
 use razer_core::profiles::Snapshot;
+use razer_core::rapid::SnapGroup;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -33,6 +34,14 @@ pub struct Rapid {
     pub release: f32,
 }
 
+/// Snap Tap of a profile; the groups stay while it is off, so Fn+LShift brings them back.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnapTap {
+    pub enabled: bool,
+    pub groups: Vec<SnapGroup>,
+}
+
 /// A macro of the app's library; the keyboard keeps only its body, under the library's id.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Macro {
@@ -54,6 +63,8 @@ pub struct Profile {
     pub data: Snapshot,
     /// Rapid Trigger per fwID; works only in driver mode.
     pub rapid: BTreeMap<u8, Rapid>,
+    /// Works only in driver mode.
+    pub snap_tap: SnapTap,
     /// Last painted custom layout, kept while another effect is applied.
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
@@ -187,6 +198,7 @@ pub fn save(s: &Settings) -> Result<(), String> {
 mod tests {
     use super::*;
     use razer_core::profiles::RawKey;
+    use razer_core::rapid::SnapRule;
 
     fn snap(keys: &[u8]) -> Snapshot {
         let raw = |k| RawKey { thr_low: 0, thr_high: 0, fn_id: 2, fn_data: vec![0, k] };
@@ -194,7 +206,7 @@ mod tests {
     }
 
     fn profile(id: u32, slot: Option<u8>) -> Profile {
-        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), custom: None }
+        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None }
     }
 
     #[test]
@@ -299,5 +311,19 @@ mod tests {
     fn reads_close_action() {
         assert_eq!(parse("{\"close_action\": \"tray\"}").close_action, CloseAction::Tray);
         assert_eq!(parse("{\"close_action\": \"exit\"}").close_action, CloseAction::Exit);
+    }
+
+    #[test]
+    fn profile_without_snap_tap_reads_as_off() {
+        let p: Profile = serde_json::from_str(r#"{"id": 1, "name": "p"}"#).unwrap();
+        assert_eq!(p.snap_tap, SnapTap::default());
+        assert!(!p.snap_tap.enabled);
+    }
+
+    #[test]
+    fn snap_tap_groups_in_the_profile() {
+        let p: Profile = serde_json::from_str(r#"{"snap_tap": {"enabled": true, "groups": [{"keys": [31, 33], "rule": "deeper"}]}}"#).unwrap();
+        assert!(p.snap_tap.enabled);
+        assert_eq!(p.snap_tap.groups, [SnapGroup { keys: vec![31, 33], rule: SnapRule::Deeper }]);
     }
 }
