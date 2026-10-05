@@ -45,7 +45,9 @@ pub fn sync_slots(
             let name = slots::read_name(t, k).ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| fallback_name(k));
             let name = free_name(s, &name, numbered);
             let id = s.new_profile_id();
-            s.profiles.push(Profile { id, name, slot: Some(k), data: s.slots[&k].clone(), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None });
+            let mut data = s.slots[&k].clone();
+            data.bind_snap_tap();
+            s.profiles.push(Profile { id, name, slot: Some(k), data, rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None });
         }
     }
     if s.loaded_profile().is_none() {
@@ -282,6 +284,17 @@ mod tests {
         assert_eq!(names, [("default", Some(1)), ("Slot 3", Some(3))]);
         assert_eq!(s.loaded_profile().unwrap().slot, Some(1));
         assert_eq!(s.slots.len(), 2);
+    }
+
+    #[test]
+    fn an_imported_profile_gets_the_snap_tap_switch() {
+        let keys = &[A, slots::LEFT_SHIFT];
+        let kb = FakeKeyboard::new(keys);
+        let mut s = Settings::default();
+        sync_slots(&kb, spec(), &mut s, keys, 1, &name, |_, _, _| {}).unwrap();
+        let p = s.loaded_profile().unwrap();
+        assert_eq!(p.data.hypershift[&slots::LEFT_SHIFT].fn_data, [razer_core::binding::SNAP_TAP_CODE]);
+        assert_eq!(s.slots[&1].hypershift[&slots::LEFT_SHIFT].fn_id, 0x02, "the cache keeps what the flash holds");
     }
 
     #[test]

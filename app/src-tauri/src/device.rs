@@ -208,6 +208,7 @@ impl Device {
             self.settings.slots.remove(&startup);
         }
         profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
+        self.settings.bind_snap_tap_once();
         if let Some(id) = self.settings.loaded {
             self.settings.take_legacy(id);
         }
