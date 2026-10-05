@@ -201,7 +201,7 @@ fn media(code: u8) -> Option<Media> {
 
 fn press(a: Action, out: &mut Vec<Output>) {
     match a {
-        Action::Disabled => {}
+        Action::Disabled | Action::System { .. } => {}
         Action::Key { key, mods } => {
             out.extend(bits(mods).map(|m| Output::Key { key: m, down: true }));
             out.push(Output::Key { key, down: true });
@@ -220,7 +220,7 @@ fn release(a: Action, out: &mut Vec<Output>) {
             out.extend(bits(mods).rev().map(|m| Output::Key { key: m, down: false }));
         }
         Action::Mouse { button } => out.push(Output::Mouse { button, down: false }),
-        Action::Disabled | Action::Media { .. } | Action::Macro { .. } => {}
+        Action::Disabled | Action::Media { .. } | Action::Macro { .. } | Action::System { .. } => {}
     }
 }
 
