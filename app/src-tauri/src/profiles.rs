@@ -290,6 +290,8 @@ mod tests {
     fn an_imported_profile_gets_the_snap_tap_switch() {
         let keys = &[A, slots::LEFT_SHIFT];
         let kb = FakeKeyboard::new(keys);
+        let (fn_id, fn_data) = razer_core::binding::encode(razer_core::binding::factory(slots::LEFT_SHIFT)).unwrap();
+        kb.edit(1, 1, slots::LEFT_SHIFT, |a| (a.fn_id, a.fn_data) = (fn_id, fn_data.clone()));
         let mut s = Settings::default();
         sync_slots(&kb, spec(), &mut s, keys, 1, &name, |_, _, _| {}).unwrap();
         let p = s.loaded_profile().unwrap();

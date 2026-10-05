@@ -226,6 +226,8 @@ mod tests {
     fn snap_tap_switch_is_bound_once() {
         let mut p = profile(1, None);
         p.data = snap(&[31, 44]);
+        let (fn_id, fn_data) = binding::encode(binding::factory(44)).unwrap();
+        p.data.hypershift.insert(44, RawKey { thr_low: 0, thr_high: 0, fn_id, fn_data });
         let mut s = Settings { profiles: vec![p], ..Default::default() };
         s.bind_snap_tap_once();
         assert_eq!(s.profiles[0].data.hypershift[&44].fn_data, [binding::SNAP_TAP_CODE]);

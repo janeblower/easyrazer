@@ -154,7 +154,10 @@ impl Snapshot {
         if self.hypershift.values().any(|r| binding::decode(r.fn_id, &r.fn_data) == Some(snap)) {
             return;
         }
-        if let (Some(r), Some((fn_id, fn_data))) = (self.hypershift.get_mut(&LEFT_SHIFT), binding::encode(snap)) {
+        let plain = Some(binding::factory(LEFT_SHIFT));
+        if let (Some(r), Some((fn_id, fn_data))) = (self.hypershift.get_mut(&LEFT_SHIFT), binding::encode(snap))
+            && binding::decode(r.fn_id, &r.fn_data) == plain
+        {
             (r.fn_id, r.fn_data) = (fn_id, fn_data);
         }
     }
@@ -376,6 +379,10 @@ mod tests {
     fn snap_tap_goes_to_left_shift_unless_bound() {
         let kb = FakeKeyboard::new(&[A, LEFT_SHIFT]);
         let mut s = read_snapshot(&kb, spec(), 0, &[A, LEFT_SHIFT], |_, _| {}).unwrap();
+        let (fn_id, fn_data) = binding::encode(binding::factory(LEFT_SHIFT)).unwrap();
+        let r = s.hypershift.get_mut(&LEFT_SHIFT).unwrap();
+        (r.fn_id, r.fn_data) = (fn_id, fn_data);
+        let plain = s.clone();
         s.bind_snap_tap();
         assert_eq!((s.hypershift[&LEFT_SHIFT].fn_id, s.hypershift[&LEFT_SHIFT].fn_data.as_slice()), (0x11, &[SNAP_TAP_CODE][..]));
         let mut moved = s.clone();
@@ -384,6 +391,11 @@ mod tests {
         let before = moved.clone();
         moved.bind_snap_tap();
         assert_eq!(moved, before, "a moved switch stays where it is");
+        let mut custom = plain;
+        custom.hypershift.get_mut(&LEFT_SHIFT).unwrap().fn_id = 0x00;
+        let before = custom.clone();
+        custom.bind_snap_tap();
+        assert_eq!(custom, before, "a custom Fn+LShift binding stays");
     }
 
     #[test]
