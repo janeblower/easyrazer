@@ -15,7 +15,7 @@ use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
-use razer_core::profiles::{self as slots, Snapshot};
+use razer_core::profiles::{self as slots, RawKey, Snapshot};
 use razer_core::{control, layout};
 use serde::Serialize;
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -747,7 +747,7 @@ impl Device {
         }
         let Some(p) = self.settings.loaded_profile() else { return };
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
-        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.rapid, &p.snap_tap, engine::repeat_timing());
+        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
@@ -917,16 +917,21 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
 fn engine_config(
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
+    fn_layer: &BTreeMap<u8, RawKey>,
     rapid: &BTreeMap<u8, Rapid>,
     snap: &SnapTap,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
+    let mut c = Config { act: [0; 256], fn_act: [0; 256], rapid: [None; 256], bind: [None; 256], fn_bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
     for (&k, &a) in bindings {
         c.bind[k as usize] = a;
+    }
+    for (&k, r) in fn_layer {
+        c.fn_act[k as usize] = r.thr_low;
+        c.fn_bind[k as usize] = binding::decode(r.fn_id, &r.fn_data);
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
         c.rapid[k as usize] = Some(Trigger { press: rapid::mm_to_depth(r.press), release: rapid::mm_to_depth(r.release) });
@@ -976,6 +981,7 @@ pub fn synapse_running() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use razer_core::binding::System;
     use razer_core::lighting::Effect;
     use razer_core::rapid::{SnapGroup, SnapRule};
     use super::*;
@@ -1011,9 +1017,21 @@ mod tests {
     #[test]
     fn engine_config_keeps_snap_groups_while_off() {
         let snap = SnapTap { enabled: false, groups: vec![SnapGroup { keys: vec![31, 33], rule: SnapRule::Last }] };
-        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
+        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
         assert_eq!(c.snap, snap.groups);
         assert!(!c.snap_on);
+    }
+
+    #[test]
+    fn engine_config_takes_the_hypershift_layer() {
+        let fn_layer = BTreeMap::from([
+            (31, RawKey { thr_low: 200, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] }),
+            (32, RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x01] }),
+        ]);
+        let t = (Duration::from_millis(500), Duration::from_millis(33));
+        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &fn_layer, &BTreeMap::new(), &SnapTap::default(), t);
+        assert_eq!((c.fn_act[31], c.fn_act[32]), (200, 0));
+        assert_eq!((c.fn_bind[31], c.fn_bind[32]), (Some(Action::System { action: System::SnapTap }), None));
     }
 
     #[test]
@@ -1025,7 +1043,7 @@ mod tests {
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
-        let c = engine_config(&thresholds, &bindings, &rapid, &SnapTap::default(), t);
+        let c = engine_config(&thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));

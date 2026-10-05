@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::analog::{MAX_MM, MIN_MM};
-use crate::binding::{self, Action, MODIFIERS, MacroMode, Mouse};
+use crate::binding::{self, Action, MODIFIERS, MacroMode, Mouse, System};
 use crate::macros::Event;
 
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
@@ -80,6 +80,8 @@ struct KeyState {
     extreme: u8,
     /// What the press did, so the release undoes that even if the binding changed meanwhile.
     sent: Option<Action>,
+    /// Went down while Fn was held: the Hypershift layer's point and action, no Rapid Trigger or Snap Tap.
+    fn_layer: bool,
 }
 
 /// One depth sample of a key; `Some(down)` on a transition.
@@ -115,16 +117,9 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>) -> Option<boo
     (k.down != was).then_some(k.down)
 }
 
-const F9: u8 = 120;
-const F10: u8 = 121;
-const F11: u8 = 122;
-const F12: u8 = 123;
-const PAUSE: u8 = 126;
 const LEFT_WIN: u8 = 127;
-const MENU: u8 = 129;
 /// Fn reports depth under `RIGHT_GUI`'s fwID; only the firmware's Fn layer uses it.
 const FN: u8 = 59;
-const LEFT_SHIFT: u8 = 44;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -146,13 +141,13 @@ pub enum Output {
     /// One brightness step down (-1) or up (+1).
     Brightness(i8),
     Sleep,
-    /// Fn+Menu: the app loads its next profile.
+    /// The app loads its next profile.
     NextProfile,
-    /// Fn+F9: the firmware only blinks the M indicator, there is no on-the-fly recording.
+    /// The firmware only blinks the M indicator, there is no on-the-fly recording.
     MacroLed,
-    /// Fn+F10 turned game mode on or off; it blocks the Win key.
+    /// Game mode turned on or off; it blocks the Win key.
     GameMode(bool),
-    /// Fn+LShift turned Snap Tap on or off.
+    /// Snap Tap turned on or off.
     SnapTap(bool),
     /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
     /// since its last extreme — what Rapid Trigger measures — and whether it is down.
@@ -163,29 +158,20 @@ pub enum Output {
 pub struct Config {
     /// Press point per fwID, the key's onboard `thrL`.
     pub act: [u8; 256],
+    /// Press point per fwID while Fn is held, the key's Hypershift `thrL`.
+    pub fn_act: [u8; 256],
     pub rapid: [Option<Trigger>; 256],
     /// `None` types the key itself.
     pub bind: [Option<Action>; 256],
+    /// Hypershift layer; `None` types the key itself.
+    pub fn_bind: [Option<Action>; 256],
     pub repeat_delay: Duration,
     pub repeat_interval: Duration,
     /// Bodies the macro bindings play, by id.
     pub macros: BTreeMap<u16, Vec<Event>>,
-    /// Kept while Snap Tap is off, so Fn+LShift has groups to turn back on.
+    /// Kept while Snap Tap is off, so the Hypershift Snap Tap key has groups to turn back on.
     pub snap: Vec<SnapGroup>,
     pub snap_on: bool,
-}
-
-/// What the firmware's Fn layer does on V2 (Synapse defaults); an empty slice swallows the key.
-fn fn_layer(key: u8) -> Option<&'static [Output]> {
-    Some(match key {
-        F11 => &[Output::Brightness(-1)],
-        F12 => &[Output::Brightness(1)],
-        PAUSE => &[Output::Sleep],
-        F9 => &[Output::MacroLed],
-        MENU => &[Output::NextProfile],
-        F10 => &[],
-        _ => return None,
-    })
 }
 
 /// Razer report codes, taken from one capture of the keys pressed left to right.
@@ -307,26 +293,31 @@ impl Engine {
 
     pub fn set_config(&mut self, cfg: Config) {
         if cfg.snap != self.cfg.snap {
-            self.order = cfg.snap.iter().map(|g| g.keys.iter().copied().filter(|&k| self.keys[k as usize].down).collect()).collect();
+            self.order = cfg.snap.iter().map(|g| g.keys.iter().copied().filter(|&k| self.keys[k as usize].down && !self.keys[k as usize].fn_layer).collect()).collect();
         }
         self.cfg = cfg;
     }
 
     pub fn feed_depth(&mut self, depth: &[u8; 256], now: Instant) -> Vec<Output> {
         let mut out = Vec::new();
+        let fn_held = self.held.contains(&RAZER_FN);
         for id in 1..256 {
-            if let Some(down) = step(&mut self.keys[id], depth[id], self.cfg.act[id], self.cfg.rapid[id]) {
-                let key = id as u8;
-                match self.group(key) {
-                    Some(g) => {
-                        let order = &mut self.order[g];
-                        order.retain(|&k| k != key);
-                        if down {
-                            order.push(key);
-                        }
+            let k = &mut self.keys[id];
+            // A key keeps the layer it went down in until it is up again.
+            let fn_layer = if k.down { k.fn_layer } else { fn_held };
+            let (act, rt) = if fn_layer { (self.cfg.fn_act[id], None) } else { (self.cfg.act[id], self.cfg.rapid[id]) };
+            let Some(down) = step(k, depth[id], act, rt) else { continue };
+            k.fn_layer = fn_layer;
+            let key = id as u8;
+            match self.group(key).filter(|_| !fn_layer) {
+                Some(g) => {
+                    let order = &mut self.order[g];
+                    order.retain(|&k| k != key);
+                    if down {
+                        order.push(key);
                     }
-                    None => self.transition(key, down, now, &mut out),
                 }
+                None => self.transition(key, down, now, &mut out),
             }
         }
         for g in 0..self.cfg.snap.len() {
@@ -360,8 +351,8 @@ impl Engine {
                 }
             }
         };
-        // A key listed in an earlier group belongs to that one.
-        let keys: Vec<u8> = self.cfg.snap[g].keys.iter().copied().filter(|&k| self.group(k) == Some(g)).collect();
+        // A key listed in an earlier group belongs to that one; a key down in the Fn layer to none.
+        let keys: Vec<u8> = self.cfg.snap[g].keys.iter().copied().filter(|&k| self.group(k) == Some(g) && !self.keys[k as usize].fn_layer).collect();
         let lift: Vec<u8> = keys.iter().copied().filter(|&k| !want.contains(&k) && typing(k)).collect();
         let press: Vec<u8> = keys.iter().copied().filter(|&k| want.contains(&k) && !typing(k)).collect();
         // Releases first, so two keys of a group never type at once.
@@ -401,20 +392,30 @@ impl Engine {
             }
             return;
         }
-        let fn_held = self.held.contains(&RAZER_FN);
         let action = if key == FN || (self.game && key == LEFT_WIN) {
             Action::Disabled
-        } else if fn_held && key == F10 {
-            self.game = !self.game;
-            out.push(Output::GameMode(self.game));
-            Action::Disabled
-        } else if fn_held && key == LEFT_SHIFT {
-            self.cfg.snap_on = !self.cfg.snap_on;
-            out.push(Output::SnapTap(self.cfg.snap_on));
-            Action::Disabled
-        } else if fn_held && let Some(fn_out) = fn_layer(key) {
-            out.extend_from_slice(fn_out);
-            Action::Disabled
+        } else if k.fn_layer {
+            match self.cfg.fn_bind[key as usize].unwrap_or(binding::factory(key)) {
+                Action::System { action } => {
+                    out.push(match action {
+                        System::BrightnessDown => Output::Brightness(-1),
+                        System::BrightnessUp => Output::Brightness(1),
+                        System::Sleep => Output::Sleep,
+                        System::MacroLed => Output::MacroLed,
+                        System::NextProfile => Output::NextProfile,
+                        System::GameMode => {
+                            self.game = !self.game;
+                            Output::GameMode(self.game)
+                        }
+                        System::SnapTap => {
+                            self.cfg.snap_on = !self.cfg.snap_on;
+                            Output::SnapTap(self.cfg.snap_on)
+                        }
+                    });
+                    Action::Disabled
+                }
+                a => a,
+            }
         } else {
             self.cfg.bind[key as usize].unwrap_or(binding::factory(key))
         };
@@ -507,6 +508,13 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const F9: u8 = 120;
+    const F10: u8 = 121;
+    const F11: u8 = 122;
+    const F12: u8 = 123;
+    const PAUSE: u8 = 126;
+    const MENU: u8 = 129;
+    const LEFT_SHIFT: u8 = 44;
 
     fn run(depths: &[u8], act: u8, rt: Option<Trigger>) -> Vec<bool> {
         let mut k = KeyState::default();
@@ -578,16 +586,88 @@ mod tests {
     const D: u8 = 33;
 
     fn engine() -> Engine {
+        let mut fn_bind = [None; 256];
+        for (k, action) in [
+            (F9, System::MacroLed),
+            (F10, System::GameMode),
+            (F11, System::BrightnessDown),
+            (F12, System::BrightnessUp),
+            (PAUSE, System::Sleep),
+            (MENU, System::NextProfile),
+            (LEFT_SHIFT, System::SnapTap),
+        ] {
+            fn_bind[k as usize] = Some(Action::System { action });
+        }
         Engine::new(Config {
             act: [100; 256],
+            fn_act: [100; 256],
             rapid: [None; 256],
             bind: [None; 256],
+            fn_bind,
             repeat_delay: Duration::from_millis(500),
             repeat_interval: Duration::from_millis(33),
             macros: BTreeMap::new(),
             snap: Vec::new(),
             snap_on: false,
         })
+    }
+
+    #[test]
+    fn fn_layer_has_its_own_point_and_no_rapid_trigger() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.cfg.fn_act[A as usize] = 200;
+        e.cfg.rapid[A as usize] = RT10;
+        e.feed_razer(&[RAZER_FN]);
+        assert!(e.feed_depth(&depth(&[(A, 150)]), t).is_empty(), "the Hypershift point is deeper");
+        assert_eq!(e.feed_depth(&depth(&[(A, 210)]), t), [key(A, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 190)]), t).is_empty(), "Rapid Trigger would have released here");
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(A, false)]);
+    }
+
+    #[test]
+    fn fn_layer_types_its_binding() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.cfg.fn_bind[A as usize] = Some(Action::Key { key: S, mods: 0 });
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(S, true)]);
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(S, false)]);
+        e.feed_razer(&[]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+    }
+
+    #[test]
+    fn a_key_keeps_the_layer_it_went_down_in() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.cfg.fn_bind[A as usize] = Some(Action::Key { key: S, mods: 0 });
+        e.cfg.fn_act[A as usize] = 200;
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        e.feed_razer(&[RAZER_FN]);
+        assert!(e.feed_depth(&depth(&[(A, 150)]), t).is_empty(), "still the normal layer and point");
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(A, false)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 210)]), t), [key(S, true)]);
+        e.feed_razer(&[]);
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(S, false)], "released in the layer it went down in");
+    }
+
+    #[test]
+    fn snap_tap_switch_follows_its_binding() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.cfg.fn_bind[LEFT_SHIFT as usize] = None;
+        e.cfg.fn_bind[F12 as usize] = Some(Action::System { action: System::SnapTap });
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(LEFT_SHIFT, 150)]), t), [key(LEFT_SHIFT, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(LEFT_SHIFT, 150), (F12, 150)]), t), [Output::SnapTap(true)]);
+    }
+
+    #[test]
+    fn a_group_key_pressed_with_fn_leaves_the_group_alone() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.cfg.fn_bind[A as usize] = Some(Action::Key { key: S, mods: 0 });
+        assert_eq!(e.feed_depth(&depth(&[(D, 150)]), t), [key(D, true)]);
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(S, true)], "D keeps typing");
+        e.feed_razer(&[]);
+        assert_eq!(e.feed_depth(&depth(&[(D, 150)]), t), [key(S, false)]);
     }
 
     fn depth(keys: &[(u8, u8)]) -> [u8; 256] {
