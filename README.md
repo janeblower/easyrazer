@@ -21,6 +21,7 @@ memory, after which it works with no software running at all.
 - key remapping: another key with modifiers, mouse buttons, media, disable;
 - per-key Rapid Trigger with separate press and release sensitivity
   (computed by the app while it runs);
+- Snap Tap: key groups of any size, a rule per group, Fn+LShift toggle (driver mode);
 - macros: keys, mouse, delays, recording;
 - built-in lighting effects with live preview and a custom per-key and per-zone colour layout;
 - Windows Dynamic Lighting toggle;
@@ -78,7 +79,7 @@ Firmware analysis: [firmware.md](docs/firmware.md) (in Russian).
 
 ### What Synapse still has
 
-Snap Tap, the Hypershift layer, game mode and gamepad emulation — see the roadmap.
+The Hypershift layer, game mode and gamepad emulation — see the roadmap.
 
 ## Synapse
 
@@ -117,7 +118,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 - [x] Custom colour layout
 - [x] English and Russian UI
 - [x] Rapid Trigger and the HW / Driver switch
-- [ ] Snap Tap
+- [x] Snap Tap
 - [ ] ~~Driver mode in admin windows, on the lock screen and for Ctrl+Alt+Del, through Razer's kernel driver~~ — too troublesome and unsafe
 - [x] Volume wheel and Fn+F9/F10/Menu
 - [x] Profiles: in the app and in keyboard memory
