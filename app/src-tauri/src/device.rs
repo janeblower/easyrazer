@@ -569,7 +569,7 @@ impl Device {
                     (r.thr_low, r.thr_high) = (a.threshold_low, a.threshold_high);
                 }
             }
-            // In driver mode bindings never reach profile 0: the engine plays them.
+            // In driver mode this path does not write the Normal bindings to profile 0: the engine plays them.
             if !host {
                 for (k, o) in &bound {
                     if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
@@ -947,6 +947,10 @@ fn host_bound(key: u8, a: Action) -> Outcome {
 
 /// Applies `hs` to a copy of the layer; refused whole, so nothing is written on a bad request.
 fn edit_layer(layer: &mut BTreeMap<u8, RawKey>, hs: &HypershiftEdits) -> Result<(), String> {
+    let editable = editable_keys();
+    if let Some(k) = hs.values.iter().map(|v| v.0).chain(hs.bindings.iter().map(|b| b.0)).find(|k| !editable.contains(k)) {
+        return Err(format!("key {k} is not editable"));
+    }
     for &(k, mm) in &hs.values {
         let thr = actuation::threshold(mm).map_err(|e| e.to_string())?;
         layer.get_mut(&k).ok_or_else(|| format!("no key {k}"))?.thr_low = thr;
@@ -956,10 +960,14 @@ fn edit_layer(layer: &mut BTreeMap<u8, RawKey>, hs: &HypershiftEdits) -> Result<
         let r = layer.get_mut(&k).ok_or_else(|| format!("no key {k}"))?;
         (r.fn_id, r.fn_data) = (fn_id, fn_data);
     }
-    match binding::clash(layer.values().filter_map(|r| binding::decode(r.fn_id, &r.fn_data))) {
-        Some(s) => Err(format!("{s:?} is bound to more than one key")),
-        None => Ok(()),
+    // A clash the profile already holds must not block edits that do not touch it.
+    for &(_, a) in &hs.bindings {
+        let same = layer.values().filter(|r| binding::decode(r.fn_id, &r.fn_data) == Some(a)).count();
+        if let (Action::System { action }, true) = (a, same > 1 && binding::clash([a, a]).is_some()) {
+            return Err(format!("{action:?} is bound to more than one key"));
+        }
     }
+    Ok(())
 }
 
 fn editable_keys() -> Vec<u8> {
@@ -1076,6 +1084,25 @@ mod tests {
         assert!(edit_layer(&mut layer.clone(), &deep).is_err());
         let missing = HypershiftEdits { values: vec![(200, 2.0)], bindings: Vec::new() };
         assert!(edit_layer(&mut layer.clone(), &missing).is_err());
+    }
+
+    #[test]
+    fn hypershift_edits_ignore_a_clash_already_in_the_layer() {
+        let snap = RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] };
+        let layer = BTreeMap::from([(31, snap.clone()), (44, snap), (30, plain(0x05))]);
+        let thr = HypershiftEdits { values: vec![(30, 2.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &thr).is_ok());
+        let again = HypershiftEdits { values: Vec::new(), bindings: vec![(30, Action::System { action: System::SnapTap })] };
+        assert!(edit_layer(&mut layer.clone(), &again).is_err());
+    }
+
+    #[test]
+    fn hypershift_edits_refuse_the_fn_key() {
+        let layer = BTreeMap::from([(59, plain(0x04))]);
+        let thr = HypershiftEdits { values: vec![(59, 2.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &thr).is_err());
+        let bind = HypershiftEdits { values: Vec::new(), bindings: vec![(59, Action::System { action: System::GameMode })] };
+        assert!(edit_layer(&mut layer.clone(), &bind).is_err());
     }
 
     #[test]
