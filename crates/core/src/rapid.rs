@@ -14,6 +14,9 @@ use crate::macros::Event;
 /// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
 /// without it a key resting at the point chatters on sensor noise.
 const HYSTERESIS: u8 = 12;
+/// Under `SnapRule::Deeper` the typing key gives way only to a key this much deeper (0.1 mm),
+/// so two keys held level do not trade places on sensor noise.
+const SNAP_MARGIN: u8 = 12;
 
 /// MI_01 Col06: `07 (fwID depth)* 00`; keys missing from a report are up.
 const DEPTH_REPORT: u8 = 0x07;
@@ -28,6 +31,25 @@ const DEPTH_STEP: u8 = 3;
 pub struct Trigger {
     pub press: u8,
     pub release: u8,
+}
+
+/// How a Snap Tap group picks the key that types while several of its keys are held.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapRule {
+    /// The newest press; releasing it brings back the newest key still held.
+    #[default]
+    Last,
+    /// None of them.
+    Neutral,
+    /// The deepest key.
+    Deeper,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapGroup {
+    pub keys: Vec<u8>,
+    pub rule: SnapRule,
 }
 
 pub fn mm_to_depth(mm: f32) -> u8 {
@@ -102,6 +124,7 @@ const LEFT_WIN: u8 = 127;
 const MENU: u8 = 129;
 /// Fn reports depth under `RIGHT_GUI`'s fwID; only the firmware's Fn layer uses it.
 const FN: u8 = 59;
+const LEFT_SHIFT: u8 = 44;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,6 +152,8 @@ pub enum Output {
     MacroLed,
     /// Fn+F10 turned game mode on or off; it blocks the Win key.
     GameMode(bool),
+    /// Fn+LShift turned Snap Tap on or off.
+    SnapTap(bool),
     /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
     /// since its last extreme — what Rapid Trigger measures — and whether it is down.
     Depth { depth: u8, travel: u8, down: bool },
@@ -145,6 +170,9 @@ pub struct Config {
     pub repeat_interval: Duration,
     /// Bodies the macro bindings play, by id.
     pub macros: BTreeMap<u16, Vec<Event>>,
+    /// Kept while Snap Tap is off, so Fn+LShift has groups to turn back on.
+    pub snap: Vec<SnapGroup>,
+    pub snap_on: bool,
 }
 
 /// What the firmware's Fn layer does on V2 (Synapse defaults); an empty slice swallows the key.
@@ -267,14 +295,20 @@ pub struct Engine {
     lead: Option<u8>,
     shown: (u8, bool),
     game: bool,
+    /// Held keys of each `cfg.snap` group, oldest press first.
+    order: Vec<Vec<u8>>,
 }
 
 impl Engine {
     pub fn new(cfg: Config) -> Self {
-        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: (0, false), game: false }
+        let order = vec![Vec::new(); cfg.snap.len()];
+        Self { cfg, keys: [KeyState::default(); 256], held: Vec::new(), repeat: None, plays: Vec::new(), lead: None, shown: (0, false), game: false, order }
     }
 
     pub fn set_config(&mut self, cfg: Config) {
+        if cfg.snap != self.cfg.snap {
+            self.order = cfg.snap.iter().map(|g| g.keys.iter().copied().filter(|&k| self.keys[k as usize].down).collect()).collect();
+        }
         self.cfg = cfg;
     }
 
@@ -282,10 +316,61 @@ impl Engine {
         let mut out = Vec::new();
         for id in 1..256 {
             if let Some(down) = step(&mut self.keys[id], depth[id], self.cfg.act[id], self.cfg.rapid[id]) {
-                self.transition(id as u8, down, now, &mut out);
+                let key = id as u8;
+                match self.group(key) {
+                    Some(g) => {
+                        let order = &mut self.order[g];
+                        order.retain(|&k| k != key);
+                        if down {
+                            order.push(key);
+                        }
+                    }
+                    None => self.transition(key, down, now, &mut out),
+                }
             }
         }
+        for g in 0..self.cfg.snap.len() {
+            self.snap(g, depth, now, &mut out);
+        }
         out
+    }
+
+    fn group(&self, key: u8) -> Option<usize> {
+        self.cfg.snap.iter().position(|g| g.keys.contains(&key))
+    }
+
+    /// Presses and releases the group's keys so that only what its rule picks types, or, with
+    /// Snap Tap off, every key held.
+    fn snap(&mut self, g: usize, depth: &[u8; 256], now: Instant, out: &mut Vec<Output>) {
+        let held = &self.order[g];
+        let typing = |k: u8| self.keys[k as usize].sent.is_some();
+        let want: Vec<u8> = if !self.cfg.snap_on || held.len() < 2 {
+            held.clone()
+        } else {
+            match self.cfg.snap[g].rule {
+                SnapRule::Last => held.last().copied().into_iter().collect(),
+                SnapRule::Neutral => Vec::new(),
+                SnapRule::Deeper => {
+                    // max_by_key keeps the last of equals: a tie goes to the newest press.
+                    let deepest = held.iter().copied().max_by_key(|&k| depth[k as usize]).unwrap_or_default();
+                    match held.iter().copied().find(|&k| typing(k)) {
+                        Some(c) if depth[deepest as usize] < depth[c as usize].saturating_add(SNAP_MARGIN) => vec![c],
+                        _ => vec![deepest],
+                    }
+                }
+            }
+        };
+        // A key listed in an earlier group belongs to that one.
+        let keys: Vec<u8> = self.cfg.snap[g].keys.iter().copied().filter(|&k| self.group(k) == Some(g)).collect();
+        let lift: Vec<u8> = keys.iter().copied().filter(|&k| !want.contains(&k) && typing(k)).collect();
+        let press: Vec<u8> = keys.iter().copied().filter(|&k| want.contains(&k) && !typing(k)).collect();
+        // Releases first, so two keys of a group never type at once.
+        for k in lift {
+            self.transition(k, false, now, out);
+        }
+        for k in press {
+            self.transition(k, true, now, out);
+        }
     }
 
     /// `Output::Depth` for the depth report just fed, unless the lead key barely moved.
@@ -322,6 +407,10 @@ impl Engine {
         } else if fn_held && key == F10 {
             self.game = !self.game;
             out.push(Output::GameMode(self.game));
+            Action::Disabled
+        } else if fn_held && key == LEFT_SHIFT {
+            self.cfg.snap_on = !self.cfg.snap_on;
+            out.push(Output::SnapTap(self.cfg.snap_on));
             Action::Disabled
         } else if fn_held && let Some(fn_out) = fn_layer(key) {
             out.extend_from_slice(fn_out);
@@ -407,6 +496,9 @@ impl Engine {
         }
         self.keys = [KeyState::default(); 256];
         self.held.clear();
+        for o in &mut self.order {
+            o.clear();
+        }
         self.repeat = None;
         out
     }
@@ -483,6 +575,7 @@ mod tests {
 
     const A: u8 = 31;
     const S: u8 = 32;
+    const D: u8 = 33;
 
     fn engine() -> Engine {
         Engine::new(Config {
@@ -492,6 +585,8 @@ mod tests {
             repeat_delay: Duration::from_millis(500),
             repeat_interval: Duration::from_millis(33),
             macros: BTreeMap::new(),
+            snap: Vec::new(),
+            snap_on: false,
         })
     }
 
@@ -795,5 +890,151 @@ mod tests {
         let t = Instant::now();
         assert_eq!(step_at(&mut e, t, Some(true)), [key(C, true), key(C, false)]);
         assert_eq!(e.deadline(), Some(at(t, 1)));
+    }
+
+    fn snapped(keys: &[u8], rule: SnapRule) -> Engine {
+        let mut e = engine();
+        let mut cfg = e.cfg.clone();
+        cfg.snap = vec![SnapGroup { keys: keys.to_vec(), rule }];
+        cfg.snap_on = true;
+        e.set_config(cfg);
+        e
+    }
+
+    #[test]
+    fn snap_last_types_the_newest_and_returns_to_the_held() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, false), key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(D, false), key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(A, false)]);
+    }
+
+    #[test]
+    fn snap_last_with_three_keys_falls_back_in_order() {
+        let (mut e, t) = (snapped(&[A, S, D], SnapRule::Last), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (S, 150)]), t), [key(A, false), key(S, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (S, 150), (D, 150)]), t), [key(S, false), key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (S, 150)]), t), [key(D, false), key(S, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(S, false), key(A, true)]);
+    }
+
+    #[test]
+    fn snap_neutral_types_nothing_while_both_are_held() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Neutral), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, false)]);
+        assert_eq!(e.feed_depth(&depth(&[(D, 150)]), t), [key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[]), t), [key(D, false)]);
+    }
+
+    #[test]
+    fn snap_deeper_switches_only_past_the_margin() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Deeper), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 150), (D, 155)]), t).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 170)]), t), [key(A, false), key(D, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 175), (D, 170)]), t).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[(A, 190), (D, 170)]), t), [key(D, false), key(A, true)]);
+    }
+
+    #[test]
+    fn snap_with_rapid_trigger_brings_back_the_other_key() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        let mut cfg = e.cfg.clone();
+        cfg.rapid[D as usize] = Some(Trigger { press: 10, release: 10 });
+        e.set_config(cfg);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 200)]), t), [key(A, false), key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 185)]), t), [key(D, false), key(A, true)]);
+    }
+
+    #[test]
+    fn snap_types_the_binding_of_the_active_key() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.cfg.bind[D as usize] = Some(Action::Key { key: S, mods: 0 });
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, false), key(S, true)]);
+    }
+
+    #[test]
+    fn fn_left_shift_toggles_snap_tap() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        let toggle = |e: &mut Engine| {
+            e.feed_razer(&[RAZER_FN]);
+            let out = e.feed_depth(&depth(&[(LEFT_SHIFT, 150)]), t);
+            e.feed_depth(&depth(&[]), t);
+            e.feed_razer(&[]);
+            out
+        };
+        assert_eq!(toggle(&mut e), [Output::SnapTap(false)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, true), key(D, true)]);
+        e.feed_depth(&depth(&[]), t);
+        assert_eq!(toggle(&mut e), [Output::SnapTap(true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(D, true)]);
+    }
+
+    #[test]
+    fn turning_snap_tap_off_types_every_held_key() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(D, true)]);
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150), (LEFT_SHIFT, 150)]), t), [Output::SnapTap(false), key(A, true)]);
+    }
+
+    #[test]
+    fn fn_left_shift_toggles_without_groups() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(LEFT_SHIFT, 150)]), t), [Output::SnapTap(true)]);
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+    }
+
+    #[test]
+    fn new_snap_groups_take_held_keys() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
+        let mut cfg = e.cfg.clone();
+        cfg.snap = vec![SnapGroup { keys: vec![A, D], rule: SnapRule::Last }];
+        cfg.snap_on = true;
+        e.set_config(cfg);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, false)]);
+    }
+
+    #[test]
+    fn a_key_leaving_its_group_still_releases() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
+        let mut cfg = e.cfg.clone();
+        cfg.snap.clear();
+        e.set_config(cfg);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(D, false)]);
+    }
+
+    #[test]
+    fn a_key_in_two_groups_follows_the_first() {
+        let (mut e, t) = (engine(), Instant::now());
+        let mut cfg = e.cfg.clone();
+        cfg.snap = vec![SnapGroup { keys: vec![A, D], rule: SnapRule::Last }, SnapGroup { keys: vec![D, S], rule: SnapRule::Last }];
+        cfg.snap_on = true;
+        e.set_config(cfg);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t), [key(A, false), key(D, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t).is_empty());
+    }
+
+    #[test]
+    fn release_all_forgets_snap_presses() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
+        assert_eq!(e.release_all(), [key(D, false)]);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+    }
+
+    #[test]
+    fn snap_rules_in_json() {
+        let g: SnapGroup = serde_json::from_str(r#"{"keys": [31, 33], "rule": "deeper"}"#).unwrap();
+        assert_eq!(g, SnapGroup { keys: vec![A, D], rule: SnapRule::Deeper });
     }
 }

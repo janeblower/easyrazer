@@ -906,7 +906,7 @@ fn engine_config(
     rapid: &BTreeMap<u8, Rapid>,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new() };
+    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: Vec::new(), snap_on: false };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
