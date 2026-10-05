@@ -118,7 +118,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 - [x] English and Russian UI
 - [x] Rapid Trigger and the HW / Driver switch
 - [ ] Snap Tap
-- [ ] Driver mode in admin windows, on the lock screen and for Ctrl+Alt+Del, through Razer's kernel driver
+- [ ] ~~Driver mode in admin windows, on the lock screen and for Ctrl+Alt+Del, through Razer's kernel driver~~ — too troublesome and unsafe
 - [x] Volume wheel and Fn+F9/F10/Menu
 - [x] Profiles: in the app and in keyboard memory
 - [ ] Host-driven lighting animations
