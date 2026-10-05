@@ -23,6 +23,8 @@
   "actuation": {
     "mm": "{v} mm",
     "title": "Actuation",
+    "hsSplit": "Separate for Hypershift",
+    "normal": "normal",
     "mixed": "mixed",
     "unconfirmed": "Not confirmed: the keyboard has {v} mm",
     "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
@@ -88,6 +90,15 @@
       "volume_down": "Volume down"
     },
     "mediaShort": { "play": "⏯", "prev": "⏮", "next": "⏭", "stop": "⏹", "mute": "🔇", "volume_up": "Vol+", "volume_down": "Vol−" },
+    "system": {
+      "brightness_down": "Brightness −",
+      "brightness_up": "Brightness +",
+      "sleep": "Sleep",
+      "game_mode": "Game mode",
+      "macro_led": "M indicator",
+      "next_profile": "Next profile",
+      "snap_tap": "Snap Tap on/off"
+    },
     "space": "Space",
     "left": "Left {k}",
     "right": "Right {k}",

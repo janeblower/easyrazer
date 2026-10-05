@@ -23,6 +23,8 @@
   "actuation": {
     "mm": "{v} мм",
     "title": "Срабатывание",
+    "hsSplit": "Раздельно для Hypershift",
+    "normal": "обычное",
     "mixed": "разные",
     "unconfirmed": "Не подтверждено: в клавиатуре {v} мм",
     "failed": "Не применено или не подтверждено клавиш: {n} (наведите на красные)",
@@ -88,6 +90,15 @@
       "volume_down": "Тише"
     },
     "mediaShort": { "play": "⏯", "prev": "⏮", "next": "⏭", "stop": "⏹", "mute": "🔇", "volume_up": "Vol+", "volume_down": "Vol−" },
+    "system": {
+      "brightness_down": "Яркость −",
+      "brightness_up": "Яркость +",
+      "sleep": "Сон",
+      "game_mode": "Игровой режим",
+      "macro_led": "Индикатор M",
+      "next_profile": "Следующий профиль",
+      "snap_tap": "Snap Tap вкл/выкл"
+    },
     "space": "Пробел",
     "left": "Левый {k}",
     "right": "Правый {k}",

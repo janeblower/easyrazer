@@ -33,12 +33,15 @@ export type Media = "play" | "prev" | "next" | "stop" | "mute" | "volume_up" | "
 // `key` is a fwID; `mods` is the HID modifier byte, bit 0 left Ctrl to bit 3 left Win.
 export type MacroMode = "times" | "hold" | "toggle";
 
+export type System = "brightness_down" | "brightness_up" | "sleep" | "game_mode" | "macro_led" | "next_profile" | "snap_tap";
+
 export type Action =
   | { type: "disabled" }
   | { type: "key"; key: number; mods: number }
   | { type: "mouse"; button: Mouse }
   | { type: "media"; media: Media }
-  | { type: "macro"; id: number; mode: MacroMode; count: number };
+  | { type: "macro"; id: number; mode: MacroMode; count: number }
+  | { type: "system"; action: System };
 
 // A wheel turns on `down` and ignores the release.
 export type MacroEvent =
@@ -60,11 +63,21 @@ export interface MacroState {
 export type BindResult =
   { status: "ok" | "unconfirmed"; key: number; action: Action | null } | { status: "error"; key: number; message: string };
 
+// The loaded profile's Hypershift layer.
+export interface Hypershift {
+  values: KeyMap<number>;
+  // null: what the app does not edit, such as the Fn key.
+  bindings: KeyMap<Action | null>;
+  // Differ from the profile's slot.
+  unsaved: number[];
+}
+
 export interface WriteResult {
   results: ApplyResult[];
   unsaved: number[];
   bindings: BindResult[];
   unsaved_bindings: number[];
+  hypershift: Hypershift;
 }
 
 export interface Rapid {
@@ -90,9 +103,10 @@ export interface Actuation {
   unsaved: number[];
   rapid: KeyMap<Rapid>;
   snap: SnapTap;
-  // null: a binding the app does not edit, such as Hypershift.
+  // null: a binding the app does not edit, such as a service code.
   bindings: KeyMap<Action | null>;
   unsaved_bindings: number[];
+  hypershift: Hypershift;
   // id of the profile loaded after the read
   profile: number | null;
 }

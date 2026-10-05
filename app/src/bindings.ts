@@ -41,6 +41,9 @@ export function shortLabel(a: Action | null, keys: Map<number, KeyView>, t: T, m
     case "macro": {
       return `▶${macros[a.id]?.name ?? a.id}`;
     }
+    case "system": {
+      return t(`bindings.system.${a.action}`);
+    }
   }
 }
 

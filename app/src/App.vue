@@ -9,6 +9,7 @@ import type {
   AppSettings,
   CloseAction,
   Status as DeviceStatus,
+  Hypershift,
   KeyMap,
   KeyView,
   MacroState,
@@ -57,6 +58,12 @@ const bindBase = ref<KeyMap<Action | null>>({}); // as last read or applied
 const bindEdits = ref<KeyMap<Action>>({}); // not applied yet
 const bindErrors = ref<KeyMap<string>>({});
 const bindUnsaved = ref(new Set<number>());
+const hsBase = ref<KeyMap<number>>({}); // Hypershift mm, as last read or applied
+const hsEdits = ref<KeyMap<number>>({});
+const hsSplitOn = ref(false);
+const hsBindBase = ref<KeyMap<Action | null>>({});
+const hsBindEdits = ref<KeyMap<Action>>({});
+const hsUnsaved = ref(new Set<number>());
 const section = ref<"actuation" | "bindings" | "macros">("actuation");
 const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
@@ -84,8 +91,13 @@ let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dirty = computed(
   () =>
-    new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size +
-    (snapEdit.value ? 1 : 0),
+    new Set([
+      ...Object.keys(edits.value),
+      ...Object.keys(rapidEdits.value),
+      ...Object.keys(bindEdits.value),
+      ...Object.keys(hsEdits.value),
+      ...Object.keys(hsBindEdits.value),
+    ]).size + (snapEdit.value ? 1 : 0),
 );
 trackUnapplied(() => dirty.value > 0);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
@@ -98,7 +110,10 @@ const canSave = computed(
     (Object.keys(edits.value).length > 0 ||
       unsaved.value.size > 0 ||
       Object.keys(bindEdits.value).length > 0 ||
-      bindUnsaved.value.size > 0),
+      bindUnsaved.value.size > 0 ||
+      Object.keys(hsEdits.value).length > 0 ||
+      Object.keys(hsBindEdits.value).length > 0 ||
+      hsUnsaved.value.size > 0),
 );
 const actions = computed(() => ({
   pending: dirty.value ? t("common.notAppliedN", { n: dirty.value }) : "",
@@ -107,6 +122,43 @@ const actions = computed(() => ({
   canWrite: canSave.value,
 }));
 const selectedValue = computed(() => common(Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k])) ?? null);
+const valueOf = (k: number) => edits.value[k] ?? baseline.value[k];
+const hsOf = (k: number) => hsEdits.value[k] ?? hsBase.value[k];
+const selectedHs = computed(() => common(Array.from(selection.value, hsOf)) ?? null);
+const hsSplit = computed(() => hsSplitOn.value || [...selection.value].some((k) => hsOf(k) !== valueOf(k)));
+
+function setHs(mm: (k: number) => number) {
+  const next = { ...hsEdits.value };
+  for (const k of selection.value) {
+    const v = mm(k);
+    if (hsBase.value[k] === v) delete next[k];
+    else next[k] = v;
+  }
+  hsEdits.value = next;
+}
+
+function onHsSplit(on: boolean) {
+  hsSplitOn.value = on;
+  if (!on) setHs(valueOf);
+}
+
+// On keys where it differs from the normal one.
+const mapHs = computed(() => {
+  const out: KeyMap<string> = {};
+  if (section.value !== "actuation") return out;
+  for (const { key: k } of layout.value) {
+    const v = hsOf(k);
+    if (v != null && v !== valueOf(k)) out[k] = v.toFixed(1);
+  }
+  return out;
+});
+const hsEdited = computed(() => new Set(Object.keys(hsEdits.value).map(Number)));
+
+function takeHypershift(h: Hypershift) {
+  hsBase.value = h.values;
+  hsBindBase.value = h.bindings;
+  hsUnsaved.value = new Set(h.unsaved);
+}
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
 const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;
@@ -212,7 +264,16 @@ async function load() {
   busy.value = true;
   progress.value = [0, 1];
   try {
-    const { values: base, unsaved: keys, rapid, snap: snapRead, bindings, unsaved_bindings, profile } = await invoke<Actuation>("read_all");
+    const {
+      values: base,
+      unsaved: keys,
+      rapid,
+      snap: snapRead,
+      bindings,
+      unsaved_bindings,
+      hypershift,
+      profile,
+    } = await invoke<Actuation>("read_all");
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -226,6 +287,11 @@ async function load() {
     bindBase.value = bindings;
     bindEdits.value = Object.fromEntries(Object.entries(bindEdits.value).filter(([k, a]) => !sameAction(a, bindings[Number(k)])));
     bindUnsaved.value = new Set(unsaved_bindings);
+    takeHypershift(hypershift);
+    hsEdits.value = Object.fromEntries(Object.entries(hsEdits.value).filter(([k, mm]) => hypershift.values[Number(k)] !== mm));
+    hsBindEdits.value = Object.fromEntries(
+      Object.entries(hsBindEdits.value).filter(([k, a]) => !sameAction(a, hypershift.bindings[Number(k)])),
+    );
     bindErrors.value = {};
     loadedProfile = profile;
     message.value = "";
@@ -245,6 +311,8 @@ function revert() {
   snapEdit.value = null;
   errors.value = {};
   bindEdits.value = {};
+  hsEdits.value = {};
+  hsBindEdits.value = {};
   bindErrors.value = {};
 }
 
@@ -284,12 +352,14 @@ async function setMode(on: boolean) {
 }
 
 function setValue(mm: number) {
+  const together = !hsSplit.value;
   const next = { ...edits.value };
   for (const k of selection.value) {
     if (baseline.value[k] === mm) delete next[k];
     else next[k] = mm;
   }
   edits.value = next;
+  if (together) setHs(() => mm);
 }
 
 function selectAll() {
@@ -371,12 +441,24 @@ async function write(command: "apply" | "save", done: string) {
     const rapid = command === "apply" ? rapidEdits.value : null;
     const snapNext = command === "apply" ? snapEdit.value : null;
     const bindings = Object.entries(bindEdits.value).map(([k, a]) => [Number(k), a]);
+    const hypershift = {
+      values: Object.entries(hsEdits.value).map(([k, mm]) => [Number(k), mm]),
+      bindings: Object.entries(hsBindEdits.value).map(([k, a]) => [Number(k), a]),
+    };
     const {
       results,
       unsaved: keys,
       bindings: bound,
       unsaved_bindings,
-    } = await invoke<WriteResult>(command, rapid ? { changes, rapid, snap: snapNext, bindings } : { changes, bindings });
+      hypershift: layer,
+    } = await invoke<WriteResult>(
+      command,
+      rapid ? { changes, rapid, snap: snapNext, bindings, hypershift } : { changes, bindings, hypershift },
+    );
+    // The backend takes the layer whole or refuses it, so a result means every edit is in.
+    takeHypershift(layer);
+    hsEdits.value = {};
+    hsBindEdits.value = {};
     if (rapid) {
       rapidBase.value = { ...rapidBase.value, ...rapid };
       rapidEdits.value = {};
@@ -420,7 +502,9 @@ async function write(command: "apply" | "save", done: string) {
 async function apply() {
   const ids = driver.value
     ? []
-    : Object.values(bindEdits.value).flatMap((a) => (a.type === "macro" && !macroState.value?.macros[a.id]?.written ? [a.id] : []));
+    : [...Object.values(bindEdits.value), ...Object.values(hsBindEdits.value)].flatMap((a) =>
+        a.type === "macro" && !macroState.value?.macros[a.id]?.written ? [a.id] : [],
+      );
   macrosToWrite.value = [...new Set(ids)];
   if (macrosToWrite.value.length === 0) await write("apply", "actuation.applied");
 }
@@ -608,6 +692,8 @@ onUnmounted(() => {
           :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
           :snap="driver && section === 'actuation' ? snapColors(snap) : {}"
           :rapid-edited="rapidEdited"
+          :hs-values="mapHs"
+          :hs-edited="hsEdited"
           :single="section === 'bindings'"
           :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
         />
@@ -619,12 +705,16 @@ onUnmounted(() => {
               :value="selectedValue"
               :rapid="selectedRapid"
               :split="split"
+              :hs="selectedHs"
+              :hs-split="hsSplit"
               :driver="driver"
               @set="setValue"
               @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
               @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
               @release="(v) => setRapid((r) => ({ ...r, release: v }))"
               @split="onSplit"
+              @hs="(v) => setHs(() => v)"
+              @hs-split="onHsSplit"
             />
             <BindingCard
               v-else
