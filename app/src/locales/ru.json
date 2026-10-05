@@ -56,7 +56,6 @@
   "keys": { "actuation": "Срабатывание", "bindings": "Назначения", "macros": "Макросы" },
   "bindings": {
     "selectHint": "Выберите клавишу",
-    "action": "Действие",
     "types": { "key": "Клавиша", "mouse": "Мышь", "media": "Медиа", "macro": "Макрос", "system": "Система", "disabled": "Отключена" },
     "main": "Основное действие",
     "function": "Функция",

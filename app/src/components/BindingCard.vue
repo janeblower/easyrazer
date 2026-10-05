@@ -24,12 +24,12 @@ const { t } = useI18n();
 const listId = useId();
 
 const ICONS = { key: "keyboard", mouse: "mouse", media: "music", macro: "macro", system: "cog", disabled: "ban" } as const;
+type Type = keyof typeof ICONS;
 const types = computed(() =>
   props.hypershift
     ? (["key", "mouse", "media", "macro", "system", "disabled"] as const)
     : (["key", "mouse", "media", "macro", "disabled"] as const),
 );
-type Type = keyof typeof ICONS;
 const MODES: MacroMode[] = ["times", "hold", "toggle"];
 const type = computed(() => props.action?.type ?? "other");
 const keyAction = computed(() => (props.action?.type === "key" ? props.action : null));
@@ -77,6 +77,14 @@ function pickTarget(e: Event) {
   const name = input.value.trim().toLowerCase();
   const found = targets.value.find((o) => o.name.toLowerCase() === name);
   if (found && keyAction.value) emit("set", { ...keyAction.value, key: found.key });
+}
+
+// A refused pick leaves the prop as it was, so the element is put back by hand.
+function pickSystem(e: Event) {
+  const el = e.target as HTMLSelectElement;
+  const picked = el.value as System;
+  if (props.action?.type === "system") el.value = props.action.action;
+  emit("set", { type: "system", action: picked });
 }
 
 function setMacro(change: Partial<{ id: number; mode: MacroMode; count: number }>) {
@@ -188,7 +196,7 @@ function setMod(bit: number, on: boolean) {
     </div>
     <div v-else-if="action?.type === 'system'" class="field">
       <span class="field-label">{{ $t("bindings.function") }}</span>
-      <select :value="action.action" @change="emit('set', { type: 'system', action: value($event) as System })">
+      <select :value="action.action" @change="pickSystem">
         <option v-for="s in SYSTEM" :key="s" :value="s">{{ $t(`bindings.system.${s}`) }}{{ taken?.[s] ? ` — ${taken[s]}` : "" }}</option>
       </select>
     </div>

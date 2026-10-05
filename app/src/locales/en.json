@@ -56,7 +56,6 @@
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros" },
   "bindings": {
     "selectHint": "Pick a key",
-    "action": "Action",
     "types": { "key": "Key", "mouse": "Mouse", "media": "Media", "macro": "Macro", "system": "System", "disabled": "Disabled" },
     "main": "Main action",
     "function": "Function",
