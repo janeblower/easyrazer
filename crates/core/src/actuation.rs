@@ -92,13 +92,19 @@ pub fn unsaved(t: &impl Transport, profile: u8, keys: &[u8]) -> Result<Vec<KeyAs
     Ok(out)
 }
 
-fn set_mm(t: &impl Transport, profile: u8, key: u8, &mm: &f32) -> Result<Outcome, Error> {
+/// The `thrL` of a press point picked in the window.
+pub fn threshold(mm: f32) -> Result<u8, Error> {
     // The UI works in 0.1 mm steps; rounding absorbs float drift from the slider.
     let mm = (mm * 10.0).round() / 10.0;
     if !(MIN_MM..=MAX_MM).contains(&mm) {
         return Err(Error::BadArgument(format!("{mm} mm is outside {MIN_MM}..={MAX_MM}")));
     }
-    update(t, profile, key, |a| a.threshold_low = analog::mm_to_threshold(mm))
+    Ok(analog::mm_to_threshold(mm))
+}
+
+fn set_mm(t: &impl Transport, profile: u8, key: u8, &mm: &f32) -> Result<Outcome, Error> {
+    let thr = threshold(mm)?;
+    update(t, profile, key, |a| a.threshold_low = thr)
 }
 
 /// Changes one key's assignment and reads it back to confirm.

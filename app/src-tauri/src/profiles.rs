@@ -77,6 +77,12 @@ pub fn unsaved(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> (Vec<u8>, Vec<u8>
     (thr, bind)
 }
 
+/// Hypershift keys that differ from the profile's slot; none without a slot.
+pub fn unsaved_hypershift(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> Vec<u8> {
+    let Some(slot) = p.slot.and_then(|k| slots.get(&k)) else { return Vec::new() };
+    p.data.hypershift.iter().filter(|&(k, r)| slot.hypershift.get(k) != Some(r)).map(|(&k, _)| k).collect()
+}
+
 /// Whether the profile differs from its slot in anything the slot holds.
 pub fn is_unsaved(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> bool {
     p.slot.is_some_and(|k| slots.get(&k).is_none_or(|slot| !p.data.matches(slot)))
@@ -345,6 +351,15 @@ mod tests {
         let free = Profile { slot: None, ..p.clone() };
         assert_eq!(unsaved(&free, &s.slots), (vec![], vec![]));
         assert!(!is_unsaved(&free, &s.slots));
+    }
+
+    #[test]
+    fn unsaved_hypershift_lists_changed_keys() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let id = s.loaded.unwrap();
+        s.profile_mut(id).unwrap().data.hypershift.get_mut(&S).unwrap().thr_low = 99;
+        assert_eq!(unsaved_hypershift(s.profile(id).unwrap(), &s.slots), [S]);
     }
 
     #[test]
