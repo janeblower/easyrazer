@@ -304,6 +304,8 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let id = s.loaded.unwrap();
+        let menu = s.profile_mut(id).unwrap().data.hypershift.get_mut(&slots::MENU).unwrap();
+        (menu.fn_id, menu.fn_data) = (0x07, vec![0x04]);
         s.profile_mut(id).unwrap().data.normal.get_mut(&S).unwrap().thr_low = 99;
         let base = s.slots[&1].clone();
         let after = load(&kb, spec(), &s, id, &base, true).unwrap();
