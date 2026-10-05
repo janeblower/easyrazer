@@ -24,6 +24,8 @@ const props = withDefaults(
     /** Keys with Rapid Trigger on, and those whose Rapid Trigger is not applied yet. */
     rapid?: Set<number>;
     rapidEdited?: Set<number>;
+    /** Snap Tap group color per key, shown as a bar along the top edge. */
+    snap?: KeyMap<string>;
     /** Shrink the whole map to the container width instead of scrolling. */
     fit?: boolean;
     /** One key at a time: no Ctrl+click and no box. */
@@ -39,6 +41,7 @@ const props = withDefaults(
     colors: undefined,
     rapid: () => new Set(),
     rapidEdited: () => new Set(),
+    snap: () => ({}),
     fit: false,
     single: false,
     loaded: null,
@@ -129,7 +132,14 @@ function keyClass(k: KeyView) {
 
 // Painted keys keep their label readable on light and dark colors.
 function keyStyle(k: KeyView) {
-  const box = { left: `${k.x * U}px`, top: `${k.y * U}px`, width: `${k.w * U - GAP}px`, height: `${k.h * U - GAP}px` };
+  const bar = props.snap[k.key];
+  const box = {
+    left: `${k.x * U}px`,
+    top: `${k.y * U}px`,
+    width: `${k.w * U - GAP}px`,
+    height: `${k.h * U - GAP}px`,
+    boxShadow: bar ? `inset 0 3px 0 ${bar}` : undefined,
+  };
   if (!props.colors) return box;
   const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
   const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;

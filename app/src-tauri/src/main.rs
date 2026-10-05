@@ -74,6 +74,12 @@ fn main() {
                         h.state::<commands::AppState>().device().set_led(LED_MACRO, false, false);
                     }
                     Output::GameMode(on) => h.state::<commands::AppState>().device().set_led(LED_GAME, on, false),
+                    Output::SnapTap(on) => {
+                        if let Err(e) = h.state::<commands::AppState>().device().set_snap_tap(on) {
+                            let _ = h.emit("app-error", e);
+                        }
+                        let _ = h.emit("snap-tap", on);
+                    }
                     _ => {}
                 });
             }));

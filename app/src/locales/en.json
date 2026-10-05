@@ -4,7 +4,7 @@
   "mode": {
     "hw": "HW",
     "driver": "Driver",
-    "hint": "HW: the keyboard types by itself.\nDriver: EasyRazer types for it; the keyboard types only while the app runs.\n\nDriver mode only:\n• Rapid Trigger\n• Live key depth\n• Macros not written to the keyboard"
+    "hint": "HW: the keyboard types by itself.\nDriver: EasyRazer types for it; the keyboard types only while the app runs.\n\nDriver mode only:\n• Rapid Trigger\n• Snap Tap\n• Live key depth\n• Macros not written to the keyboard"
   },
   "footer": "EasyRazer is an unofficial project, not affiliated with Razer Inc.",
   "common": {
@@ -36,6 +36,19 @@
     "release": "Release",
     "split": "Separate press and release",
     "hwOnly": "(not available in HW mode)"
+  },
+  "snap": {
+    "title": "Snap Tap",
+    "add": "Group the selected ({n})",
+    "empty": "Select two or more keys on the map, such as A and D, and group them.",
+    "rule": "Rule",
+    "remove": "Remove group",
+    "rules": { "last": "Last", "neutral": "Neutral", "deeper": "Deeper" },
+    "hints": {
+      "last": "While several are held, the newest press types. Release it and the previous one types again.",
+      "neutral": "While several are held, none types. When one is left, it types again.",
+      "deeper": "While several are held, the deepest one types."
+    }
   },
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros" },
   "bindings": {

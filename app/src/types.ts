@@ -73,10 +73,23 @@ export interface Rapid {
   release: number;
 }
 
+export type SnapRule = "last" | "neutral" | "deeper";
+
+export interface SnapGroup {
+  keys: number[];
+  rule: SnapRule;
+}
+
+export interface SnapTap {
+  enabled: boolean;
+  groups: SnapGroup[];
+}
+
 export interface Actuation {
   values: KeyMap<number>;
   unsaved: number[];
   rapid: KeyMap<Rapid>;
+  snap: SnapTap;
   // null: a binding the app does not edit, such as Hypershift.
   bindings: KeyMap<Action | null>;
   unsaved_bindings: number[];

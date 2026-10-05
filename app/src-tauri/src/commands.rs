@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, State, WebviewWindow};
 use crate::device::{self, Device, LightingState, MacroState, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
-use crate::settings::{CloseAction, Rapid};
+use crate::settings::{CloseAction, Rapid, SnapTap};
 use crate::{autostart, i18n, tray};
 
 pub struct AppState {
@@ -66,6 +66,8 @@ pub struct Actuation {
     unsaved: Vec<u8>,
     /// Rapid Trigger per key, from the app's settings.
     rapid: BTreeMap<u8, Rapid>,
+    /// Snap Tap of the loaded profile.
+    snap: SnapTap,
     /// `null` for a binding the app cannot show, such as Hypershift.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
@@ -149,6 +151,7 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actu
         values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
         unsaved,
         rapid: device.rapid(),
+        snap: device.snap_tap(),
         unsaved_bindings,
         bindings: device.bindings(),
         profile: device.loaded(),
@@ -160,9 +163,10 @@ pub async fn apply(
     state: State<'_, AppState>,
     changes: Vec<(u8, f32)>,
     rapid: BTreeMap<u8, Rapid>,
+    snap: Option<SnapTap>,
     bindings: Vec<(u8, Action)>,
 ) -> Result<WriteResult, String> {
-    state.device().apply(&changes, &rapid, &bindings).map(Into::into)
+    state.device().apply(&changes, &rapid, snap.as_ref(), &bindings).map(Into::into)
 }
 
 #[tauri::command]

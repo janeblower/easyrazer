@@ -9,7 +9,7 @@ use razer_core::devices::DeviceSpec;
 use razer_core::profiles::{self as slots, Snapshot};
 use razer_core::transport::{Error, Transport};
 
-use crate::settings::{Profile, Settings};
+use crate::settings::{Profile, Settings, SnapTap};
 
 /// Reads uncached listed slots, drops gone ones, imports slots no profile owns; returns the listed slots.
 pub fn sync_slots(
@@ -45,7 +45,7 @@ pub fn sync_slots(
             let name = slots::read_name(t, k).ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| fallback_name(k));
             let name = free_name(s, &name, numbered);
             let id = s.new_profile_id();
-            s.profiles.push(Profile { id, name, slot: Some(k), data: s.slots[&k].clone(), rapid: BTreeMap::new(), custom: None });
+            s.profiles.push(Profile { id, name, slot: Some(k), data: s.slots[&k].clone(), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None });
         }
     }
     if s.loaded_profile().is_none() {

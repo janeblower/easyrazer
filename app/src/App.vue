@@ -14,12 +14,15 @@ import type {
   MacroState,
   ProfilesView,
   Rapid,
+  SnapTap,
   WriteResult,
 } from "./types";
 import KeyboardMap from "./components/KeyboardMap.vue";
 import SelectionBar from "./components/SelectionBar.vue";
 import ActionBar from "./components/ActionBar.vue";
 import ActuationCard from "./components/ActuationCard.vue";
+import SnapTapCard from "./components/SnapTapCard.vue";
+import { sameSnap, snapColors } from "./snap";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
 import { common, factory, keyName, sameAction, shortLabel } from "./bindings";
@@ -45,6 +48,9 @@ const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4 };
 const rapidBase = ref<KeyMap<Rapid>>({}); // as last applied
 const rapidEdits = ref<KeyMap<Rapid>>({}); // not applied yet
 const splitOn = ref(false);
+const SNAP_OFF: SnapTap = { enabled: false, groups: [] };
+const snapBase = ref<SnapTap>(SNAP_OFF); // as last applied
+const snapEdit = ref<SnapTap | null>(null); // not applied yet
 const errors = ref<KeyMap<string>>({}); // message from the last apply
 const unsaved = ref(new Set<number>()); // applied, lost on replug unless saved
 const bindBase = ref<KeyMap<Action | null>>({}); // as last read or applied
@@ -73,10 +79,13 @@ let unlistenClose: UnlistenFn | undefined;
 let unlistenHide: UnlistenFn | undefined;
 let unlistenError: UnlistenFn | undefined;
 let unlistenProgress: UnlistenFn | undefined;
+let unlistenSnap: UnlistenFn | undefined;
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dirty = computed(
-  () => new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size,
+  () =>
+    new Set([...Object.keys(edits.value), ...Object.keys(rapidEdits.value), ...Object.keys(bindEdits.value)]).size +
+    (snapEdit.value ? 1 : 0),
 );
 trackUnapplied(() => dirty.value > 0);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
@@ -118,6 +127,12 @@ function setRapid(change: (r: Rapid) => Rapid) {
     else next[k] = r;
   }
   rapidEdits.value = next;
+}
+
+const snap = computed(() => snapEdit.value ?? snapBase.value);
+
+function setSnap(s: SnapTap) {
+  snapEdit.value = sameSnap(s, snapBase.value) ? null : s;
 }
 
 const bindingOf = (k: number) => bindEdits.value[k] ?? bindBase.value[k] ?? null;
@@ -197,12 +212,14 @@ async function load() {
   busy.value = true;
   progress.value = [0, 1];
   try {
-    const { values: base, unsaved: keys, rapid, bindings, unsaved_bindings, profile } = await invoke<Actuation>("read_all");
+    const { values: base, unsaved: keys, rapid, snap: snapRead, bindings, unsaved_bindings, profile } = await invoke<Actuation>("read_all");
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
       Object.entries(rapidEdits.value).filter(([k, r]) => !sameRapid(r, rapid[Number(k)] ?? DEFAULT_RAPID)),
     );
+    snapBase.value = snapRead;
+    if (snapEdit.value && sameSnap(snapEdit.value, snapRead)) snapEdit.value = null;
     unsaved.value = new Set(keys);
     edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[Number(k)] !== mm));
     errors.value = {};
@@ -225,6 +242,7 @@ async function load() {
 function revert() {
   edits.value = {};
   rapidEdits.value = {};
+  snapEdit.value = null;
   errors.value = {};
   bindEdits.value = {};
   bindErrors.value = {};
@@ -351,16 +369,19 @@ async function write(command: "apply" | "save", done: string) {
   try {
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
     const rapid = command === "apply" ? rapidEdits.value : null;
+    const snapNext = command === "apply" ? snapEdit.value : null;
     const bindings = Object.entries(bindEdits.value).map(([k, a]) => [Number(k), a]);
     const {
       results,
       unsaved: keys,
       bindings: bound,
       unsaved_bindings,
-    } = await invoke<WriteResult>(command, rapid ? { changes, rapid, bindings } : { changes, bindings });
+    } = await invoke<WriteResult>(command, rapid ? { changes, rapid, snap: snapNext, bindings } : { changes, bindings });
     if (rapid) {
       rapidBase.value = { ...rapidBase.value, ...rapid };
       rapidEdits.value = {};
+      if (snapNext) snapBase.value = snapNext;
+      snapEdit.value = null;
     }
     unsaved.value = new Set(keys);
     const applied = merge(
@@ -480,6 +501,10 @@ onMounted(async () => {
   });
   await invoke("window_ready");
   await loadMacros();
+  unlistenSnap = await listen<boolean>("snap-tap", (e) => {
+    snapBase.value = { ...snapBase.value, enabled: e.payload };
+    if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: e.payload });
+  });
   unlistenStatus = await listen<DeviceStatus>("status", (e) => {
     void onStatus(e.payload);
   });
@@ -492,6 +517,7 @@ onUnmounted(() => {
   unlistenHide?.();
   unlistenError?.();
   unlistenProgress?.();
+  unlistenSnap?.();
   clearTimeout(errorTimer);
 });
 </script>
@@ -580,6 +606,7 @@ onUnmounted(() => {
           :errors="section === 'actuation' ? errors : bindErrors"
           :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
           :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
+          :snap="driver && section === 'actuation' ? snapColors(snap) : {}"
           :rapid-edited="rapidEdited"
           :single="section === 'bindings'"
           :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
@@ -608,7 +635,9 @@ onUnmounted(() => {
               @set="setBinding"
             />
           </div>
-          <div v-if="section === 'actuation'" class="card"></div>
+          <div v-if="section === 'actuation'" class="px-4 py-3 card flex flex-col gap-3">
+            <SnapTapCard :snap="snap" :selection="selection" :layout="layout" :driver="driver" @update="setSnap" />
+          </div>
         </div>
         <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
       </template>
