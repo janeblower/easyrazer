@@ -5,12 +5,10 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD, RegGetValueW, RegSetKeyValueW};
 
+use crate::autostart::{check, wide};
+
 const KEY: &str = r"Software\Microsoft\Lighting";
 const VALUE: &str = "AmbientLightingEnabled";
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(Some(0)).collect()
-}
 
 /// Anything but a clear `0` counts as enabled: a false warning beats an effect that silently stays hidden.
 pub fn enabled() -> bool {
@@ -24,9 +22,5 @@ pub fn enabled() -> bool {
 pub fn set(on: bool) -> Result<(), String> {
     let data = on as u32;
     let status = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, wide(KEY).as_ptr(), wide(VALUE).as_ptr(), REG_DWORD, (&data as *const u32).cast(), 4) };
-    if status == ERROR_SUCCESS {
-        Ok(())
-    } else {
-        Err(format!("registry: {}", std::io::Error::from_raw_os_error(status as i32)))
-    }
+    check(status)
 }

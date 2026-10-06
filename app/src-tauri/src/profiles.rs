@@ -11,7 +11,7 @@ use razer_core::transport::{Error, Transport};
 
 use crate::settings::{Profile, Settings, SnapTap};
 
-/// Reads uncached listed slots, drops gone ones, imports slots no profile owns; returns the listed slots.
+/// Reads uncached listed slots, drops gone ones, imports slots no profile owns.
 pub fn sync_slots(
     t: &impl Transport,
     d: &DeviceSpec,
@@ -20,7 +20,7 @@ pub fn sync_slots(
     startup: u8,
     fallback_name: &dyn Fn(u8) -> String,
     mut progress: impl FnMut(usize, usize, Option<&KeyAssignment>),
-) -> Result<Vec<u8>, Error> {
+) -> Result<(), Error> {
     let listed = slots::list(t)?;
     s.slots.retain(|k, _| listed.contains(k));
     for p in &mut s.profiles {
@@ -29,7 +29,7 @@ pub fn sync_slots(
         }
     }
     // The startup slot first: its keys are what the window shows while it reads.
-    let mut order = listed.clone();
+    let mut order = listed;
     order.sort_by_key(|&k| k != startup);
     // Both layers of every slot not cached yet; the window shows this as one progress.
     let per_slot = 2 * keys.len();
@@ -53,7 +53,7 @@ pub fn sync_slots(
     if s.loaded_profile().is_none() {
         s.loaded = s.profiles.iter().find(|p| p.slot == Some(startup)).or(s.profiles.first()).map(|p| p.id);
     }
-    Ok(listed)
+    Ok(())
 }
 
 /// Profile `id` into profile 0, from what it holds now (`base`); returns what it holds after.
@@ -128,7 +128,8 @@ pub fn free_name(s: &Settings, base: &str, suffix: impl Fn(usize) -> String) -> 
         .expect("numbered suffixes never run out")
 }
 
-fn insert_copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
+/// Copy of `from` without a slot, right after it.
+pub fn copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
     let i = s.profiles.iter().position(|p| p.id == from)?;
     let mut name = slots::fit_name(&name);
     if name.is_empty() {
@@ -140,27 +141,10 @@ fn insert_copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
     Some(id)
 }
 
-/// Copy of the loaded profile without a slot, after it in the list.
-pub fn create(s: &mut Settings, name: String) -> Option<u32> {
-    insert_copy(s, s.loaded?, name)
-}
-
-/// Copy of `id` without a slot, right after it.
-pub fn duplicate(s: &mut Settings, id: u32, name: String) -> Option<u32> {
-    insert_copy(s, id, name)
-}
-
 /// Fitted to the slot's name; returns the slot whose name must be written too.
 pub fn rename(s: &mut Settings, id: u32, name: &str) -> Result<Option<u8>, Error> {
-    let name = slots::fit_name(name);
-    if name.is_empty() {
-        return Err(Error::BadArgument("empty profile name".into()));
-    }
-    if name_taken(s, &name, Some(id)) {
-        return Err(Error::BadArgument(format!("profile name {name} is taken")));
-    }
     let p = s.profile_mut(id).ok_or_else(|| missing(id))?;
-    p.name = name;
+    p.name = slots::fit_name(name);
     Ok(p.slot)
 }
 
@@ -190,17 +174,6 @@ pub fn free_slot(t: &impl Transport, s: &mut Settings, id: u32, startup: u8) -> 
     if let Some(p) = s.profile_mut(id) {
         p.slot = None;
     }
-    Ok(startup)
-}
-
-/// Frees its slot, removes it, loads a neighbour if it was loaded; returns the startup slot after.
-pub fn delete(t: &impl Transport, s: &mut Settings, id: u32, startup: u8) -> Result<u8, Error> {
-    if s.profiles.len() <= 1 {
-        return Err(Error::BadArgument("the only profile cannot be deleted".into()));
-    }
-    let slotted = s.profile(id).ok_or_else(|| missing(id))?.slot.is_some();
-    let startup = if slotted { free_slot(t, s, id, startup)? } else { startup };
-    remove(s, id)?;
     Ok(startup)
 }
 
@@ -262,6 +235,11 @@ mod tests {
         format!("Slot {k}")
     }
 
+    fn create(s: &mut Settings, name: &str) -> Option<u32> {
+        let from = s.loaded?;
+        copy(s, from, name.into())
+    }
+
     fn synced(kb: &FakeKeyboard) -> Settings {
         let mut s = Settings::default();
         sync_slots(kb, spec(), &mut s, KEYS, 1, &name, |_, _, _| {}).unwrap();
@@ -275,8 +253,7 @@ mod tests {
         kb.names.borrow_mut().insert(3, vec![0x41; 200]);
         let mut seen = Vec::new();
         let mut s = Settings::default();
-        let listed = sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |n, total, a| seen.push((n, total, a.is_some()))).unwrap();
-        assert_eq!(listed, [1, 3]);
+        sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |n, total, a| seen.push((n, total, a.is_some()))).unwrap();
         let all = 2 * 2 * KEYS.len();
         assert_eq!(seen.last(), Some(&(all, all, false)), "progress covers both slots");
         assert_eq!(seen.iter().filter(|s| s.2).count(), KEYS.len(), "keys come from the startup slot only");
@@ -404,8 +381,8 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let first = s.loaded.unwrap();
-        let a = create(&mut s, "New".into()).unwrap();
-        let b = duplicate(&mut s, first, "default (copy)".into()).unwrap();
+        let a = create(&mut s, "New").unwrap();
+        let b = copy(&mut s, first, "default (copy)".into()).unwrap();
         let order: Vec<(u32, Option<u8>)> = s.profiles.iter().map(|p| (p.id, p.slot)).collect();
         assert_eq!(order, [(first, Some(1)), (b, None), (a, None)]);
         assert_eq!(s.profile(a).unwrap().data, s.profile(first).unwrap().data);
@@ -418,7 +395,6 @@ mod tests {
         let id = s.loaded.unwrap();
         assert_eq!(rename(&mut s, id, "  Игры  ").unwrap(), Some(1));
         assert_eq!(s.profile(id).unwrap().name, "Игры");
-        assert!(rename(&mut s, id, "   ").is_err());
         rename(&mut s, id, &"x".repeat(40)).unwrap();
         assert_eq!(s.profile(id).unwrap().name.chars().count(), slots::NAME_CHARS);
     }
@@ -428,12 +404,12 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         assert_eq!(free_name(&s, "New", numbered), "New");
-        create(&mut s, "New".into()).unwrap();
+        create(&mut s, "New").unwrap();
         assert_eq!(free_name(&s, "new", numbered), "new 2");
         assert_eq!(free_name(&s, "  New  ", numbered), "New 2");
         let copy = |n: usize| if n == 1 { " (copy)".to_string() } else { format!(" (copy {n})") };
         assert_eq!(free_name(&s, "default", copy), "default (copy)");
-        create(&mut s, "default (copy)".into()).unwrap();
+        create(&mut s, "default (copy)").unwrap();
         assert_eq!(free_name(&s, "default", copy), "default (copy 2)");
     }
 
@@ -442,21 +418,19 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let long = "x".repeat(40);
-        create(&mut s, long.clone()).unwrap();
+        create(&mut s, &long).unwrap();
         let next = free_name(&s, &long, numbered);
         assert!(next.ends_with(" 2") && next.encode_utf16().count() <= slots::NAME_CHARS, "{next}");
     }
 
     #[test]
-    fn rename_refuses_a_name_in_use() {
+    fn names_in_use_are_case_blind() {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let first = s.loaded.unwrap();
-        let other = create(&mut s, "Game".into()).unwrap();
-        assert!(rename(&mut s, other, " DEFAULT ").is_err());
-        assert_eq!(s.profile(other).unwrap().name, "Game");
-        rename(&mut s, first, "Default").unwrap();
-        assert_eq!(s.profile(first).unwrap().name, "Default", "its own name in another case is fine");
+        let other = create(&mut s, "Game").unwrap();
+        assert!(name_taken(&s, " DEFAULT ", Some(other)));
+        assert!(!name_taken(&s, "Default", Some(first)), "its own name in another case is fine");
     }
 
     #[test]
@@ -476,9 +450,9 @@ mod tests {
         let mut s = synced(&kb);
         let id = s.loaded.unwrap();
         s.profile_mut(id).unwrap().name = "😀".repeat(15);
-        let copy = duplicate(&mut s, id, format!("{} (copy)", "😀".repeat(15))).unwrap();
-        assert!(s.profile(copy).unwrap().name.encode_utf16().count() <= slots::NAME_CHARS);
-        let empty = duplicate(&mut s, id, "  ".into()).unwrap();
+        let long = copy(&mut s, id, format!("{} (copy)", "😀".repeat(15))).unwrap();
+        assert!(s.profile(long).unwrap().name.encode_utf16().count() <= slots::NAME_CHARS);
+        let empty = copy(&mut s, id, "  ".into()).unwrap();
         assert_eq!(s.profile(empty).unwrap().name, s.profile(id).unwrap().name);
     }
 
@@ -500,7 +474,7 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         kb.edit(2, 0, A, |a| a.threshold_low = 200);
         let mut s = synced(&kb);
-        let id = create(&mut s, "Game".into()).unwrap();
+        let id = create(&mut s, "Game").unwrap();
         s.profile_mut(id).unwrap().data.normal.get_mut(&S).unwrap().thr_low = 77;
         let sent = kb.sent.borrow().len();
         assert_eq!(write_slot(&kb, spec(), &mut s, id, KEYS).unwrap(), 2);
@@ -520,7 +494,7 @@ mod tests {
             slots::create(&kb, k).unwrap();
         }
         let mut s = synced(&kb);
-        let id = create(&mut s, "Sixth".into()).unwrap();
+        let id = create(&mut s, "Sixth").unwrap();
         assert!(write_slot(&kb, spec(), &mut s, id, KEYS).is_err());
         assert_eq!(s.profile(id).unwrap().slot, None);
     }
@@ -554,10 +528,11 @@ mod tests {
         let mut s = synced(&kb);
         let ids: Vec<u32> = s.profiles.iter().map(|p| p.id).collect();
         s.loaded = Some(ids[1]);
-        assert_eq!(delete(&kb, &mut s, ids[1], 1).unwrap(), 1);
+        assert_eq!(free_slot(&kb, &mut s, ids[1], 1).unwrap(), 1);
+        remove(&mut s, ids[1]).unwrap();
         assert_eq!(s.loaded, Some(ids[0]));
         assert_eq!(slots::list(&kb).unwrap(), [1]);
-        assert!(delete(&kb, &mut s, ids[0], 1).is_err(), "the only profile stays");
+        assert!(remove(&mut s, ids[0]).is_err(), "the only profile stays");
     }
 
     #[test]

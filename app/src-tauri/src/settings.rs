@@ -3,9 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use razer_core::analog;
-use razer_core::binding::{self, Action};
-use razer_core::lighting::{Look, Rgb};
+use razer_core::lighting::Rgb;
 use razer_core::macros::Event;
 use razer_core::profiles::Snapshot;
 use razer_core::rapid::SnapGroup;
@@ -93,22 +91,11 @@ pub struct Settings {
     pub language: Option<String>,
     /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
     pub snap_tap_bound: bool,
-    /// Before profiles: applied but unsaved settings, moved into the loaded profile once.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub applied: Option<Look>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub actuation: BTreeMap<u8, f32>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub bindings: BTreeMap<u8, Action>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub rapid: BTreeMap<u8, Rapid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, applied: None, actuation: BTreeMap::new(), bindings: BTreeMap::new(), rapid: BTreeMap::new(), custom: None }
+        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false }
     }
 }
 
@@ -145,39 +132,14 @@ impl Settings {
         self.next_profile_id += 1;
         self.next_profile_id
     }
+}
 
-    pub fn take_legacy(&mut self, id: u32) {
-        if self.profile(id).is_none() {
-            return;
-        }
-        let actuation = std::mem::take(&mut self.actuation);
-        let bindings = std::mem::take(&mut self.bindings);
-        let rapid = std::mem::take(&mut self.rapid);
-        let (applied, custom) = (self.applied.take(), self.custom.take());
-        let Some(p) = self.profile_mut(id) else { return };
-        for (k, mm) in actuation {
-            if let Some(r) = p.data.normal.get_mut(&k) {
-                r.thr_low = analog::mm_to_threshold(mm);
-            }
-        }
-        for (k, a) in bindings {
-            if let (Some(r), Some((fn_id, fn_data))) = (p.data.normal.get_mut(&k), binding::encode(a)) {
-                r.fn_id = fn_id;
-                r.fn_data = fn_data;
-            }
-        }
-        p.rapid.extend(rapid);
-        if applied.is_some() {
-            p.data.look = applied;
-        }
-        if custom.is_some() {
-            p.custom = custom;
-        }
-    }
+pub fn dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer"))
 }
 
 fn path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer").join("settings.json"))
+    dir().map(|d| d.join("settings.json"))
 }
 
 /// A damaged file is set aside, not overwritten: the next save would destroy the only copy of the app-only profiles.
@@ -210,6 +172,7 @@ pub fn save(s: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use razer_core::binding;
     use razer_core::profiles::RawKey;
     use razer_core::rapid::SnapRule;
 
@@ -245,30 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_fields_move_into_the_profile_and_are_not_written_back() {
-        let mut s = parse(
-            r#"{"actuation": {"31": 3.6}, "bindings": {"32": {"type": "disabled"}},
-                "rapid": {"31": {"enabled": true, "press": 0.4, "release": 0.2}},
-                "applied": {"effect": {"name": "spectrum"}, "brightness": 9}}"#,
-        );
-        s.profiles.push(profile(1, Some(1)));
-        s.take_legacy(1);
-        let p = s.profile(1).unwrap();
-        assert_eq!(p.data.normal[&31].thr_low, 255);
-        assert_eq!((p.data.normal[&32].fn_id, p.data.normal[&32].fn_data.len()), (0, 0));
-        assert!(p.rapid[&31].enabled);
-        assert_eq!(p.data.look.as_ref().unwrap().brightness, 9);
-        let text = serde_json::to_string(&s).unwrap();
-        assert!(!text.contains("\"actuation\"") && !text.contains("\"applied\""), "{text}");
-    }
-
-    #[test]
-    fn legacy_fields_survive_a_save_before_migration() {
-        let s = parse(r#"{"actuation": {"31": 3.6}}"#);
-        assert_eq!(parse(&serde_json::to_string(&s).unwrap()).actuation[&31], 3.6);
-    }
-
-    #[test]
     fn a_profile_missing_new_fields_still_parses() {
         let s = parse(r#"{"profiles": [{"id": 3, "name": "a", "slot": 2, "data": {"normal": {}, "hypershift": {}, "look": null}}]}"#);
         assert_eq!((s.profiles.len(), s.profiles[0].id, s.profiles[0].slot), (1, 3, Some(2)));
@@ -289,16 +228,9 @@ mod tests {
     }
 
     #[test]
-    fn file_without_rapid_trigger_keeps_the_rest() {
-        let s = parse(r#"{"confirm_write": false}"#);
-        assert!(s.rapid.is_empty());
-        assert!(!s.confirm_write);
-    }
-
-    #[test]
     fn missing_fields_keep_their_defaults() {
         let s = parse("{\"confirm_write\": false}");
-        assert_eq!((s.applied, s.confirm_write), (None, false));
+        assert_eq!((s.driver_mode, s.confirm_write), (false, false));
     }
 
     #[test]
@@ -316,11 +248,6 @@ mod tests {
             autostart_offered: true,
             language: Some("ru".into()),
             snap_tap_bound: true,
-            applied: None,
-            actuation: BTreeMap::new(),
-            bindings: BTreeMap::new(),
-            rapid: BTreeMap::new(),
-            custom: None,
         };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
     }

@@ -12,7 +12,7 @@ use razer_core::layout as kb_layout;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
-use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, Status, Written, mm};
+use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
 use crate::settings::{CloseAction, Rapid, SnapTap};
@@ -113,8 +113,8 @@ impl From<Written> for WriteResult {
 /// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
 pub fn poll(state: &AppState) -> Status {
     let watch = state.device().settings().watch_synapse;
-    let synapse = device::synapse_check(watch, device::synapse_running);
-    state.device().status(Some(synapse))
+    let synapse = watch && device::synapse_running();
+    state.device().status(synapse)
 }
 
 #[tauri::command]
@@ -141,7 +141,7 @@ pub fn lighting_layout() -> Vec<KeyView> {
 
 /// The window fills the key map from these while a slot is read.
 pub fn emit_progress(app: &AppHandle, done: usize, total: usize, a: Option<&KeyAssignment>) {
-    let _ = app.emit("read-progress", (done, total, a.map(|a| a.key), a.map(|a| mm(a.threshold_low)), None::<Rapid>));
+    let _ = app.emit("read-progress", (done, total, a.map(|a| a.key), a.map(|a| mm(a.threshold_low))));
 }
 
 #[tauri::command]
@@ -315,89 +315,65 @@ pub fn quit(app: AppHandle) {
     app.exit(0);
 }
 
-#[derive(Serialize)]
-pub struct ProfileView {
-    id: u32,
-    name: String,
-    slot: Option<u8>,
-    /// Differs from its slot.
-    unsaved: bool,
-}
-
-#[derive(Serialize)]
-pub struct ProfilesView {
-    profiles: Vec<ProfileView>,
-    loaded: Option<u32>,
-    /// The slot the keyboard starts with without the app.
-    startup: Option<u8>,
-    free_slot: bool,
-}
-
-fn view(device: &Device) -> ProfilesView {
-    let (list, loaded, startup, free_slot) = device.profiles_view();
-    let profiles = list.into_iter().map(|(id, name, slot, unsaved)| ProfileView { id, name, slot, unsaved }).collect();
-    ProfilesView { profiles, loaded, startup, free_slot }
-}
-
 #[tauri::command]
 pub async fn profiles(state: State<'_, AppState>) -> Result<ProfilesView, String> {
-    Ok(view(&state.device()))
+    Ok(state.device().profiles_view())
 }
 
 #[tauri::command]
 pub async fn load_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.load_profile(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn create_profile(state: State<'_, AppState>) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.create_profile()?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn duplicate_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.duplicate_profile(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn rename_profile(state: State<'_, AppState>, id: u32, name: String) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.rename_profile(id, &name)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn delete_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.delete_profile(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn set_startup(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.set_startup(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn free_slot(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.free_slot(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[tauri::command]
 pub async fn write_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
     let mut d = state.device();
     d.write_profile(id)?;
-    Ok(view(&d))
+    Ok(d.profiles_view())
 }
 
 #[cfg(test)]
