@@ -3,7 +3,7 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
-export interface RapidView {
+interface RapidView {
   enabled: boolean | null;
   press: number | null;
   release: number | null;
@@ -81,32 +81,19 @@ function rtFill(v: number, down: boolean) {
 const shown = computed(() => mid(MIN, MAX, props.value, MIN));
 const hsShown = computed(() => mid(MIN, MAX, props.hs, MIN));
 const rtShown = computed(() => [mid(RT_MIN, RT_MAX, props.rapid.press, 0.4), mid(RT_MIN, RT_MAX, props.rapid.release, 0.4)]);
-const rtSliders = computed(
-  () =>
-    [
-      {
-        kind: "press",
-        value: props.rapid.press,
-        shown: rtShown.value[0],
-        // Unsplit, the one slider stands for both.
-        fill: rtFill(rtShown.value[0], props.split ? false : lead.value[2]),
-        hidden: false,
-        input: (v: number) => {
-          emit("press", v);
-        },
-      },
-      {
-        kind: "release",
-        value: props.rapid.release,
-        shown: rtShown.value[1],
-        fill: rtFill(rtShown.value[1], true),
-        hidden: !props.split,
-        input: (v: number) => {
-          emit("release", v);
-        },
-      },
-    ] as const,
-);
+const rtSliders = computed(() => {
+  const both = [
+    // Unsplit, the one slider stands for both.
+    {
+      kind: "press",
+      value: props.rapid.press,
+      shown: rtShown.value[0],
+      fill: rtFill(rtShown.value[0], props.split ? false : lead.value[2]),
+    },
+    { kind: "release", value: props.rapid.release, shown: rtShown.value[1], fill: rtFill(rtShown.value[1], true) },
+  ] as const;
+  return props.split ? both : both.slice(0, 1);
+});
 </script>
 
 <template>
@@ -195,7 +182,7 @@ const rtSliders = computed(
         {{ $t("rapid.title") }}
       </label>
       <div class="flex w-[192px]" :class="split ? 'justify-between' : 'justify-center'">
-        <div v-for="s in rtSliders.filter((s) => !s.hidden)" :key="s.kind" class="flex flex-col gap-1 items-center">
+        <div v-for="s in rtSliders" :key="s.kind" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">0.1</span>
           <div class="mx-10 relative">
             <input
@@ -207,7 +194,7 @@ const rtSliders = computed(
               :value="s.shown"
               :disabled="!rtOn"
               :style="s.fill"
-              @input="s.input(mm($event))"
+              @input="s.kind === 'press' ? emit('press', mm($event)) : emit('release', mm($event))"
             />
             <span class="thumb-value" :style="{ top: at((s.shown - RT_MIN) / (RT_MAX - RT_MIN)) }">{{ label(s.value) }}</span>
           </div>

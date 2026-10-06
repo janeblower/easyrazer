@@ -179,8 +179,6 @@
     "color": "Color",
     "colorHex": "Color {hex}",
     "none": "No color",
-    "open": "Pick a color",
-    "other": "Custom…",
     "noColor": "⊘ No color"
   },
   "dialogs": {

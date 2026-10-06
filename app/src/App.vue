@@ -31,7 +31,6 @@ import { UNIQUE, common, factory, hsFactory, keyName, sameAction, shortLabel } f
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
-import CloseDialog from "./components/CloseDialog.vue";
 import ProfileMenu from "./components/ProfileMenu.vue";
 import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
@@ -78,16 +77,12 @@ const message = ref("");
 const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
 const closing = ref(false);
+const closeRemember = ref(false);
 const hiding = ref(false); // asked before dropping edits with the window
 const offering = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 let loadedProfile: number | null = null; // profile the baseline was read from
-let unlistenStatus: UnlistenFn | undefined;
-let unlistenClose: UnlistenFn | undefined;
-let unlistenHide: UnlistenFn | undefined;
-let unlistenError: UnlistenFn | undefined;
-let unlistenProgress: UnlistenFn | undefined;
-let unlistenSnap: UnlistenFn | undefined;
+const unlisten: UnlistenFn[] = [];
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dirty = computed(
@@ -122,10 +117,10 @@ const actions = computed(() => ({
   canApply: canApply.value,
   canWrite: canSave.value,
 }));
-const selectedValue = computed(() => common(Array.from(selection.value, (k) => edits.value[k] ?? baseline.value[k])) ?? null);
 const valueOf = (k: number) => edits.value[k] ?? baseline.value[k];
 const hsOf = (k: number) => hsEdits.value[k] ?? hsBase.value[k];
-const selectedHs = computed(() => common(Array.from(selection.value, hsOf)) ?? null);
+const selectedValue = computed(() => common(Array.from(selection.value, valueOf)));
+const selectedHs = computed(() => common(Array.from(selection.value, hsOf)));
 const hsSplit = computed(() => hsSplitOn.value || [...selection.value].some((k) => hsOf(k) !== valueOf(k)));
 
 function setHs(mm: (k: number) => number) {
@@ -439,18 +434,6 @@ function switchTo(op: () => void) {
   else op();
 }
 
-function onLoad(id: number) {
-  switchTo(() => {
-    void profileOp("load_profile", { id });
-  });
-}
-
-function onCreate() {
-  switchTo(() => {
-    void profileOp("create_profile");
-  });
-}
-
 function confirmSwitch() {
   const op = switching.value;
   switching.value = null;
@@ -588,10 +571,10 @@ const {
   (error) => (message.value = String(error)),
 );
 
-async function onClose(action: CloseAction, remember: boolean) {
+async function onClose(action: CloseAction) {
   closing.value = false;
   // The choice still applies this session even if it could not be saved.
-  if (remember) await invoke("set_close_action", { action }).catch(showError);
+  if (closeRemember.value) await invoke("set_close_action", { action }).catch(showError);
   await invoke(action === "tray" ? "hide_window" : "quit").catch(showError);
 }
 
@@ -612,14 +595,19 @@ async function onOffer(on: boolean) {
 onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
-  unlistenClose = await listen("close-requested", () => (closing.value = true));
-  unlistenHide = await listen("hide-requested", () => {
-    if (hasUnapplied()) hiding.value = true;
-    else void hide();
-  });
-  unlistenError = await listen<string>("app-error", (e) => {
-    showError(e.payload);
-  });
+  unlisten.push(
+    await listen("close-requested", () => {
+      closeRemember.value = false;
+      closing.value = true;
+    }),
+    await listen("hide-requested", () => {
+      if (hasUnapplied()) hiding.value = true;
+      else void hide();
+    }),
+    await listen<string>("app-error", (e) => {
+      showError(e.payload);
+    }),
+  );
   try {
     const settings = await invoke<AppSettings>("app_settings");
     offering.value = !settings.autostart_offered;
@@ -631,32 +619,29 @@ onMounted(async () => {
     message.value = String(error);
   }
   // A connect reads the keyboard on its own, before the status that starts load() arrives.
-  unlistenProgress = await listen<[number, number, number | null, number | null, Rapid | null]>("read-progress", (e) => {
-    const [done, total, key, mm, rapid] = e.payload;
-    progress.value = [done, total];
-    if (key == null || mm == null) return;
-    baseline.value[key] = mm;
-    if (rapid) rapidBase.value[key] = rapid;
-  });
+  unlisten.push(
+    await listen<[number, number, number | null, number | null]>("read-progress", (e) => {
+      const [done, total, key, mm] = e.payload;
+      progress.value = [done, total];
+      if (key != null && mm != null) baseline.value[key] = mm;
+    }),
+  );
   await invoke("window_ready");
   await loadMacros();
-  unlistenSnap = await listen<boolean>("snap-tap", (e) => {
-    snapBase.value = { ...snapBase.value, enabled: e.payload };
-    if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: e.payload });
-  });
-  unlistenStatus = await listen<DeviceStatus>("status", (e) => {
-    void onStatus(e.payload);
-  });
+  unlisten.push(
+    await listen<boolean>("snap-tap", (e) => {
+      snapBase.value = { ...snapBase.value, enabled: e.payload };
+      if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: e.payload });
+    }),
+    await listen<DeviceStatus>("status", (e) => {
+      void onStatus(e.payload);
+    }),
+  );
   await refresh();
 });
 
 onUnmounted(() => {
-  unlistenStatus?.();
-  unlistenClose?.();
-  unlistenHide?.();
-  unlistenError?.();
-  unlistenProgress?.();
-  unlistenSnap?.();
+  for (const f of unlisten) f();
   clearTimeout(errorTimer);
 });
 </script>
@@ -681,8 +666,8 @@ onUnmounted(() => {
         :view="profiles"
         :writable="writable"
         :next-combo="nextCombo"
-        @load="onLoad"
-        @create="onCreate"
+        @load="(id) => switchTo(() => profileOp('load_profile', { id }))"
+        @create="switchTo(() => profileOp('create_profile'))"
         @duplicate="(id) => profileOp('duplicate_profile', { id })"
         @rename="(id, name) => profileOp('rename_profile', { id, name })"
         @remove="(id) => (removing = id)"
@@ -819,7 +804,15 @@ onUnmounted(() => {
       @yes="onWriteMacros"
       @no="macrosToWrite = []"
     />
-    <CloseDialog v-if="closing" @choose="onClose" @cancel="closing = false" />
+    <ModalDialog v-if="closing" :title="$t('dialogs.close.title')" @cancel="closing = false">
+      <p>{{ $t("dialogs.close.text") }}</p>
+      <p v-if="hasUnapplied()">{{ $t("dialogs.close.unapplied") }}</p>
+      <label class="dlg-check"><input v-model="closeRemember" type="checkbox" /> {{ $t("common.dontAsk") }}</label>
+      <template #actions>
+        <button @click="onClose('exit')">{{ $t("dialogs.close.exit") }}</button>
+        <button class="primary" autofocus @click="onClose('tray')">{{ $t("dialogs.close.tray") }}</button>
+      </template>
+    </ModalDialog>
     <ModalDialog
       v-if="moving"
       :title="$t('bindings.moveTitle', { action: $t(`bindings.system.${moving.action}`), to: combo(bindKey) })"
