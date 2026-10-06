@@ -44,7 +44,7 @@ pub fn encode(events: &[Event]) -> Option<Vec<u8>> {
             // `11`..`14` carry 1..4 bytes.
             Event::Delay { ms } if ms > 0 => {
                 let b = ms.to_be_bytes();
-                let skip = b.iter().take_while(|&&x| x == 0).count();
+                let skip = (ms.leading_zeros() / 8) as usize;
                 out.push(0x10 + (4 - skip) as u8);
                 out.extend(&b[skip..]);
             }

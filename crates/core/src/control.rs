@@ -56,16 +56,10 @@ mod tests {
     }
 
     #[test]
-    fn switches_to_hardware_mode() {
+    fn switches_between_modes() {
         let kb = FakeKeyboard::new(&[31]);
         set_hardware_mode(&kb).unwrap();
         assert_eq!(kb.mode.get(), MODE_HARDWARE);
-    }
-
-    #[test]
-    fn switches_to_driver_mode() {
-        let kb = FakeKeyboard::new(&[31]);
-        set_hardware_mode(&kb).unwrap();
         set_driver_mode(&kb).unwrap();
         assert_eq!(kb.mode.get(), MODE_DRIVER);
     }

@@ -52,44 +52,10 @@ pub fn apply(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8,
     apply_with(t, profile, changes, set_mm)
 }
 
-/// Writes the profile and then the live copy, so the change takes effect without a replug.
-pub fn save(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
-    save_with(t, profile, changes, true, set_mm)
-}
-
 type Set<T, C> = fn(&T, u8, u8, &C) -> Result<Outcome, Error>;
 
 pub(crate) fn apply_with<T: Transport, C>(t: &T, profile: u8, changes: &[(u8, C)], set: Set<T, C>) -> Vec<(u8, Outcome)> {
     changes.iter().map(|(key, c)| (*key, set(t, profile, *key, c).unwrap_or_else(Outcome::Failed))).collect()
-}
-
-/// Without `live` only the profile is written and judged.
-pub(crate) fn save_with<T: Transport, C>(t: &T, profile: u8, changes: &[(u8, C)], live: bool, set: Set<T, C>) -> Vec<(u8, Outcome)> {
-    apply_with(t, profile, changes, set)
-        .into_iter()
-        .zip(changes)
-        .map(|((key, saved), (_, c))| match saved {
-            Outcome::Failed(_) => (key, saved),
-            _ if !live => (key, saved),
-            _ => match set(t, LIVE, key, c) {
-                Ok(Outcome::Ok(_)) => (key, saved),
-                Ok(live) => (key, live),
-                Err(e) => (key, Outcome::Failed(e)),
-            },
-        })
-        .collect()
-}
-
-/// Live assignments of `keys` whose press point differs from `profile`: what a replug would lose.
-pub fn unsaved(t: &impl Transport, profile: u8, keys: &[u8]) -> Result<Vec<KeyAssignment>, Error> {
-    let mut out = Vec::new();
-    for &k in keys {
-        let live = read_key(t, LIVE, k)?;
-        if live.threshold_low != read_key(t, profile, k)?.threshold_low {
-            out.push(live);
-        }
-    }
-    Ok(out)
 }
 
 /// The `thrL` of a press point picked in the window.
@@ -248,31 +214,5 @@ mod tests {
         assert!(matches!(&r[0].1, Outcome::Ok(a) if a.threshold_low == 255), "{r:?}");
         assert_eq!(kb.live_key(A).threshold_low, 255);
         assert_eq!(kb.key(A).threshold_low, 0);
-    }
-
-    #[test]
-    fn save_updates_the_profile_and_the_live_copy() {
-        let kb = FakeKeyboard::new(&[A, S]);
-        let r = save(&kb, 1, &[(A, 3.6)]);
-        assert!(matches!(&r[0].1, Outcome::Ok(a) if a.profile == 1 && a.threshold_low == 255), "{r:?}");
-        assert_eq!(kb.key(A).threshold_low, 255);
-        assert_eq!(kb.live_key(A).threshold_low, 255);
-        assert_eq!(kb.live_key(S).threshold_low, 0);
-    }
-
-    #[test]
-    fn save_fails_the_key_when_the_live_copy_is_not_updated() {
-        let mut kb = FakeKeyboard::new(&[A]);
-        kb.unplug_after = Some(3);
-        let r = save(&kb, 1, &[(A, 3.6)]);
-        assert!(matches!(r[0], (A, Outcome::Failed(Error::Io(_)))), "{r:?}");
-    }
-
-    #[test]
-    fn unsaved_lists_live_press_points_that_differ_from_the_profile() {
-        let kb = FakeKeyboard::new(&[A, S, W]);
-        apply(&kb, LIVE, &[(A, 2.0), (S, 1.5)]);
-        let u = unsaved(&kb, 1, &[A, S, W]).unwrap();
-        assert_eq!(u.iter().map(|a| (a.profile, a.key)).collect::<Vec<_>>(), [(LIVE, A)]);
     }
 }

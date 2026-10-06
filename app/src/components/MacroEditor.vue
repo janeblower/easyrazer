@@ -94,15 +94,17 @@ function move(i: number, by: number) {
 
 onUnmounted(stopRecording);
 
-async function run(command: string, args: Record<string, unknown>, done: string) {
+// `state` picks the macro list out of the reply.
+async function run<T>(command: string, args: Record<string, unknown>, done: string, state: (r: T) => MacroState) {
   busy.value = true;
   try {
-    emit("update", await invoke<MacroState>(command, args));
+    const r = await invoke<T>(command, args);
+    emit("update", state(r));
     message.value = t(done);
-    return true;
+    return r;
   } catch (error) {
     message.value = String(error);
-    return false;
+    return;
   } finally {
     busy.value = false;
   }
@@ -112,29 +114,18 @@ async function apply(): Promise<boolean> {
   const d = draft.value;
   if (!d) return false;
   stopRecording();
-  busy.value = true;
-  try {
-    const [id, state] = await invoke<[number, MacroState]>("set_macro", {
-      id: selected.value,
-      name: d.name.trim() || t("macros.untitled"),
-      events: d.events,
-    });
-    emit("update", state);
-    selected.value = id;
-    draft.value = { name: state.macros[id].name, events: state.macros[id].events.map((e) => ({ ...e })) };
-    message.value = t("macros.applied");
-    return true;
-  } catch (error) {
-    message.value = String(error);
-    return false;
-  } finally {
-    busy.value = false;
-  }
+  const args = { id: selected.value, name: d.name.trim() || t("macros.untitled"), events: d.events };
+  const r = await run<[number, MacroState]>("set_macro", args, "macros.applied", ([, s]) => s);
+  if (!r) return false;
+  const [id, state] = r;
+  selected.value = id;
+  draft.value = { name: state.macros[id].name, events: state.macros[id].events.map((e) => ({ ...e })) };
+  return true;
 }
 
 async function doWrite() {
   if ((dirty.value && !(await apply())) || selected.value == null) return;
-  await run("write_macro", { id: selected.value }, "macros.written");
+  await run<MacroState>("write_macro", { id: selected.value }, "macros.written", (s) => s);
 }
 
 const { asking, write, onConfirm } = useConfirmWrite(doWrite, (error) => (message.value = String(error)));
@@ -144,7 +135,7 @@ async function remove() {
     armed.value = true;
     return;
   }
-  if (selected.value != null && (await run("delete_macro", { id: selected.value }, "macros.deleted"))) {
+  if (selected.value != null && (await run<MacroState>("delete_macro", { id: selected.value }, "macros.deleted", (s) => s))) {
     selected.value = null;
     draft.value = null;
   }

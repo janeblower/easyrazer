@@ -3,7 +3,7 @@ import en from "./locales/en.json";
 import ru from "./locales/ru.json";
 
 export const messages = { ru, en };
-export type Language = keyof typeof messages;
+type Language = keyof typeof messages;
 
 export const i18n = createI18n({ legacy: false, locale: "en", fallbackLocale: "en", messages });
 

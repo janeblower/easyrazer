@@ -47,8 +47,6 @@ const props = withDefaults(
     rapid: () => new Set(),
     rapidEdited: () => new Set(),
     snap: () => ({}),
-    fit: false,
-    single: false,
     loaded: null,
   },
 );

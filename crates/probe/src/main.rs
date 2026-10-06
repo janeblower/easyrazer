@@ -11,7 +11,7 @@ use razer_core::control;
 use razer_core::devices;
 use razer_core::hid::{self, HidTransport, VID};
 use razer_core::keymap;
-use razer_core::packet::{self, Command};
+use razer_core::packet::Command;
 use razer_core::transport;
 
 const USAGE: &str = "\
@@ -51,20 +51,13 @@ fn run(args: &[String]) -> Result<()> {
     };
     let rest = &args[1..];
     let api = HidApi::new()?;
-    if cmd == "stream" {
-        return stream(&api, rest);
-    }
-    if cmd == "list" {
-        return list(&api);
-    }
-    if cmd == "lamps" {
-        return lamps(&api);
-    }
-    if cmd == "lampauto" {
-        return lamp_auto(&api, rest);
-    }
-    if cmd == "lampfill" {
-        return lamp_fill(&api, rest);
+    match cmd.as_str() {
+        "stream" => return stream(&api, rest),
+        "list" => return list(&api),
+        "lamps" => return lamps(&api),
+        "lampauto" => return lamp_auto(&api, rest),
+        "lampfill" => return lamp_fill(&api, rest),
+        _ => {}
     }
     warn_if_synapse_running();
     let dev = open(&api)?;
@@ -127,16 +120,9 @@ fn info(dev: &HidTransport) -> Result<String> {
         fw.args[0],
         fw.args[1],
         hex(&mode.args[..2]),
-        profiles(dev)?,
+        razer_core::profiles::list(dev)?,
         active
     ))
-}
-
-/// Profile ids stored on the device (`05:81`: count, then ids).
-fn profiles(dev: &HidTransport) -> Result<Vec<u8>> {
-    let r = transport::exchange(dev, Command::new(0x05, 0x81), 80, &[])?;
-    let n = (r.args[0] as usize).min(packet::ARGS_LEN - 1);
-    Ok(r.args[1..=n].to_vec())
 }
 
 fn parse_hex(s: &str) -> Result<u8> {
@@ -174,18 +160,11 @@ fn key_label(id: u8) -> String {
     format!("{:>3} {:<22}", id, keymap::name(id).unwrap_or("?"))
 }
 
-
 fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
     let mut out = String::new();
     for layer in [Layer::Normal, Layer::Hypershift] {
         for &key in keys {
-            let r = transport::exchange(
-                dev,
-                analog::GET_KEY_ASSIGNMENT,
-                analog::KEY_ASSIGNMENT_SIZE,
-                &[profile, key, layer as u8],
-            )?;
-            let a = analog::parse(r.data()).ok_or_else(|| format!("key {key}: short reply {}", hex(r.data())))?;
+            let a = actuation::read_layer(dev, profile, key, layer)?;
             let _ = writeln!(
                 out,
                 "{:?} {} low {:3} ({:.2} mm)  high {:3} ({:.2} mm)  fn {:02X} [{}]",
@@ -208,7 +187,7 @@ fn dump(dev: &HidTransport, a: &[String]) -> Result<()> {
     let keys = keys_arg(&[])?;
     let mut out = info(dev)?;
     let mut ids = vec![0];
-    ids.extend(profiles(dev)?);
+    ids.extend(razer_core::profiles::list(dev)?);
     for p in ids {
         let _ = writeln!(out, "\n== profile {p}");
         out += &actuation(dev, p, &keys).unwrap_or_else(|e| format!("  {e}\n"));
@@ -250,13 +229,9 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
     ))
 }
 
-/// Prints raw input reports from the vendor collections of MI_01 for a few seconds.
 fn open_lamps(api: &HidApi) -> Result<HidDevice> {
-    let info = api
-        .device_list()
-        .find(|d| d.vendor_id() == VID && d.product_id() == PID && d.usage_page() == 0x59)
-        .ok_or("LampArray collection not found")?;
-    Ok(info.open_device(api)?)
+    let spec = devices::by_pid(PID).ok_or("device description missing")?;
+    Ok(hid::open_lamp_array(api, spec)?)
 }
 
 fn lamp_bytes(a: &[String]) -> Result<Vec<u8>> {
@@ -339,6 +314,7 @@ fn lamps(api: &HidApi) -> Result<()> {
     Ok(())
 }
 
+/// Prints raw input reports from the vendor collections of MI_01 for a few seconds.
 fn stream(api: &HidApi, a: &[String]) -> Result<()> {
     let secs: u64 = a.first().map_or(Ok(10), |s| s.parse()).map_err(|_| "seconds must be a number")?;
     let devs: Vec<(String, HidDevice)> = api

@@ -7,6 +7,7 @@ import { useConfirmWrite } from "../confirmWrite";
 import { trackUnapplied } from "../unapplied";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
+import SelectionBar from "./SelectionBar.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
 import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
@@ -419,11 +420,7 @@ onMounted(load);
           <div class="field">
             <span class="field-label">{{ $t("lighting.color") }}</span>
             <ColorPicker :model-value="paintColor" :disabled="blocked || selection.size === 0" @update:model-value="paint" />
-            <span class="hint" :title="$t('common.selectHow')">{{
-              selection.size > 0 ? $t("common.selected", { n: selection.size }) : $t("common.selectHint")
-            }}</span>
-            <button @click="selectAll">{{ $t("common.selectAll") }}</button>
-            <button :disabled="selection.size === 0" @click="selection = new Set()">{{ $t("common.clearSelection") }}</button>
+            <SelectionBar :count="selection.size" @select-all="selectAll" @clear="selection = new Set()" />
           </div>
           <p class="text-warn m-0">
             {{ $t("lighting.customWarning") }}

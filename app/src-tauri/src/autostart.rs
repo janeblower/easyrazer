@@ -12,11 +12,11 @@ const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE: &str = "EasyRazer";
 pub const TRAY_ARG: &str = "--tray";
 
-fn wide(s: &str) -> Vec<u16> {
+pub(crate) fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 
-fn check(status: u32) -> Result<(), String> {
+pub(crate) fn check(status: u32) -> Result<(), String> {
     if status == ERROR_SUCCESS {
         Ok(())
     } else {

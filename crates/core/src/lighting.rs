@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::devices::{DeviceSpec, EffectTemplate};
-use crate::layout;
+use crate::layout::{self, FRAME_COLS};
 use crate::transport::{Error, Transport, exchange};
 
 pub type Rgb = [u8; 3];
@@ -13,7 +13,6 @@ pub type Rgb = [u8; 3];
 /// Per-key colors; the firmware keeps them only in the temporary store.
 pub const CUSTOM: &str = "custom";
 const FRAME_ROWS: u8 = 8;
-const FRAME_COLS: usize = 23;
 
 /// One firmware effect; which fields matter is decided by its template.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -117,26 +116,20 @@ fn decode(d: &DeviceSpec, bytes: &[u8]) -> Option<Effect> {
     d.lighting.effects.iter().find_map(|name| decode_as(p.effects.get(name)?, name, bytes))
 }
 
-fn take<'a>(rest: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
-    let (head, tail) = rest.split_at_checked(n)?;
-    *rest = tail;
-    Some(head)
-}
-
 fn decode_as(t: &EffectTemplate, name: &str, bytes: &[u8]) -> Option<Effect> {
     let mut e = Effect { name: name.into(), ..Default::default() };
     let mut rest = bytes;
     for tok in t.bytes.split_whitespace() {
         match tok {
-            "{rgb1}" => e.rgb1 = Some(take(&mut rest, 3)?.try_into().ok()?),
-            "{rgb2}" => e.rgb2 = Some(take(&mut rest, 3)?.try_into().ok()?),
+            "{rgb1}" => e.rgb1 = Some(rest.split_off(..3)?.try_into().ok()?),
+            "{rgb2}" => e.rgb2 = Some(rest.split_off(..3)?.try_into().ok()?),
             "{dir}" => {
-                let b = take(&mut rest, 1)?[0];
+                let b = *rest.split_off_first()?;
                 e.dir = Some(t.dir.iter().find(|(_, v)| **v == b)?.0.clone());
             }
-            "{speed}" => e.speed = Some(take(&mut rest, 1)?[0]),
+            "{speed}" => e.speed = Some(*rest.split_off_first()?),
             hex => {
-                if take(&mut rest, 1)?[0] != u8::from_str_radix(hex, 16).ok()? {
+                if *rest.split_off_first()? != u8::from_str_radix(hex, 16).ok()? {
                     return None;
                 }
             }
@@ -158,8 +151,8 @@ fn get_size(d: &DeviceSpec) -> u8 {
     2 + d.protocol().effects.values().map(len).max().unwrap_or(0)
 }
 
-fn frame(colors: &BTreeMap<u8, Rgb>) -> Vec<[Rgb; FRAME_COLS]> {
-    let mut rows = vec![[[0; 3]; FRAME_COLS]; FRAME_ROWS as usize];
+fn frame(colors: &BTreeMap<u8, Rgb>) -> Vec<[Rgb; FRAME_COLS as usize]> {
+    let mut rows = vec![[[0; 3]; FRAME_COLS as usize]; FRAME_ROWS as usize];
     for (&id, &rgb) in colors {
         for (r, c) in layout::cells(id) {
             rows[r as usize][c as usize] = rgb;
@@ -172,7 +165,7 @@ fn set_frame(t: &impl Transport, d: &DeviceSpec, look: &Look) -> Result<(), Erro
     let set = d.protocol().set_frame.ok_or_else(|| Error::BadArgument(format!("{}: custom layout is not supported", d.name)))?;
     let colors = look.effect.colors.as_ref().ok_or_else(|| missing(CUSTOM, "colors"))?;
     for (row, cells) in frame(colors).iter().enumerate() {
-        let args = [&[store(d, Store::Temporary), 0, row as u8, 0, FRAME_COLS as u8 - 1][..], cells.as_flattened()].concat();
+        let args = [&[store(d, Store::Temporary), 0, row as u8, 0, FRAME_COLS - 1][..], cells.as_flattened()].concat();
         exchange(t, set, args.len() as u8, &args)?;
     }
     Ok(())

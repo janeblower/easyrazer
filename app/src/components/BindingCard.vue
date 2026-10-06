@@ -2,7 +2,7 @@
 import { computed, useId } from "vue";
 import { useI18n } from "vue-i18n";
 import type { Action, KeyView, Macro, MacroMode, Media, Mouse, System } from "../types";
-import { MEDIA, MODS, MOUSE, SYSTEM, keyName } from "../bindings";
+import { MEDIA, MODS, MOUSE, SYSTEM, factory, keyName } from "../bindings";
 import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
@@ -42,34 +42,19 @@ const targetName = computed(() => targets.value.find((o) => o.key === keyAction.
 const sides = (bit: number) => (1 << bit) | (1 << (bit + 4));
 const value = (e: Event) => (e.target as HTMLSelectElement).value;
 
+const DEFAULTS: Record<Exclude<Type, "key" | "macro">, Action> = {
+  mouse: { type: "mouse", button: "left" },
+  media: { type: "media", media: "play" },
+  system: { type: "system", action: "brightness_down" },
+  disabled: { type: "disabled" },
+};
+
 function setType(ty: Type) {
   if (props.keyId == null || type.value === ty) return;
-  switch (ty) {
-    case "key": {
-      emit("set", { type: "key", key: props.keyId, mods: 0 });
-      break;
-    }
-    case "mouse": {
-      emit("set", { type: "mouse", button: "left" });
-      break;
-    }
-    case "media": {
-      emit("set", { type: "media", media: "play" });
-      break;
-    }
-    case "macro": {
-      const first = macroList.value[0];
-      if (first) emit("set", { type: "macro", id: first.id, mode: "times", count: 1 });
-      break;
-    }
-    case "system": {
-      emit("set", { type: "system", action: "brightness_down" });
-      break;
-    }
-    default: {
-      emit("set", { type: "disabled" });
-    }
-  }
+  const first = macroList.value[0];
+  if (ty === "key") emit("set", factory(props.keyId));
+  else if (ty !== "macro") emit("set", DEFAULTS[ty]);
+  else if (first) emit("set", { type: "macro", id: first.id, mode: "times", count: 1 });
 }
 
 function pickTarget(e: Event) {

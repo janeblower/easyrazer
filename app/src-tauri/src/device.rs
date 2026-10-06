@@ -1,7 +1,6 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -94,8 +93,23 @@ pub struct LightingState {
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
-/// Profiles as (id, name, slot, unsaved), the loaded id, the startup slot, whether a slot is free.
-pub type ProfileList = (Vec<(u32, String, Option<u8>, bool)>, Option<u32>, Option<u8>, bool);
+#[derive(Serialize)]
+pub struct ProfileView {
+    id: u32,
+    name: String,
+    slot: Option<u8>,
+    /// Differs from its slot.
+    unsaved: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProfilesView {
+    profiles: Vec<ProfileView>,
+    loaded: Option<u32>,
+    /// The slot the keyboard starts with without the app.
+    startup: Option<u8>,
+    free_slot: bool,
+}
 
 pub struct Device {
     api: HidApi,
@@ -209,9 +223,6 @@ impl Device {
         }
         profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
         self.settings.bind_snap_tap_once();
-        if let Some(id) = self.settings.loaded {
-            self.settings.take_legacy(id);
-        }
         self.startup = Some(startup);
         self.synced = true;
         settings::save(&self.settings)
@@ -263,16 +274,13 @@ impl Device {
         self.control.as_ref().map(|(t, d)| (t, *d))
     }
 
-    /// `fresh_synapse` is a Synapse check made just now, outside the device lock.
-    pub fn status(&mut self, fresh_synapse: Option<bool>) -> Status {
+    /// `synapse` is a check made just now, outside the device lock.
+    pub fn status(&mut self, synapse: bool) -> Status {
         let was = self.synapse;
-        if let Some(s) = fresh_synapse {
-            self.synapse = s;
-        }
-        let synapse = self.synapse;
+        self.synapse = synapse;
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
-        if was && fresh_synapse == Some(false) {
+        if was && !synapse {
             self.synced = false;
             self.reload();
         }
@@ -291,7 +299,7 @@ impl Device {
         let running = self.engine.is_some();
         let Some((t, spec)) = &self.control else { unreachable!() };
         let mode = control::mode(t).ok();
-        let released = should_release_driver_mode(fresh_synapse.is_some(), synapse, mode, running) && control::set_hardware_mode(t).is_ok();
+        let released = should_release_driver_mode(synapse, mode, running) && control::set_hardware_mode(t).is_ok();
         let model = Some(spec.name.clone());
         if released {
             self.ram = None;
@@ -375,7 +383,7 @@ impl Device {
     /// The new profile is loaded at once, so the window can rename it in place.
     pub fn create_profile(&mut self) -> Result<(), String> {
         let name = profiles::free_name(&self.settings, &self.msg("profiles.new"), profiles::numbered);
-        let id = profiles::create(&mut self.settings, name).ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let id = self.settings.loaded.and_then(|from| profiles::copy(&mut self.settings, from, name)).ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.load_profile(id)
     }
 
@@ -387,7 +395,7 @@ impl Device {
             n => i18n::tf(&lang, "profiles.copyN", &[("name", ""), ("n", &n.to_string())]),
         };
         let name = profiles::free_name(&self.settings, &base, copy);
-        profiles::duplicate(&mut self.settings, id, name);
+        profiles::copy(&mut self.settings, id, name);
         settings::save(&self.settings)
     }
 
@@ -418,7 +426,7 @@ impl Device {
     }
 
     fn write_slot_name(&mut self, id: u32, slot: u8) -> Result<(), String> {
-        if self.check_synapse(synapse_running) {
+        if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
         let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
@@ -428,7 +436,7 @@ impl Device {
 
     /// Ops that change the flash list; every one of them may reload profile 0, `reloads` says it always does.
     fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&HidTransport, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
-        if self.check_synapse(synapse_running) {
+        if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
         let startup = self.startup.ok_or_else(|| self.msg("backend.noKeyboard"))?;
@@ -471,7 +479,11 @@ impl Device {
             }
             return Ok(());
         }
-        self.slot_op(false, |t, s, startup| profiles::delete(t, s, id, startup))
+        self.slot_op(false, |t, s, startup| {
+            let after = profiles::free_slot(t, s, id, startup)?;
+            profiles::remove(s, id)?;
+            Ok(after)
+        })
     }
 
     pub fn free_slot(&mut self, id: u32) -> Result<(), String> {
@@ -501,10 +513,10 @@ impl Device {
         self.settings.profiles.iter().filter(|p| p.slot.is_some()).count()
     }
 
-    pub fn profiles_view(&self) -> ProfileList {
+    pub fn profiles_view(&self) -> ProfilesView {
         let s = &self.settings;
-        let list = s.profiles.iter().map(|p| (p.id, p.name.clone(), p.slot, profiles::is_unsaved(p, &s.slots))).collect();
-        (list, s.loaded, self.startup, self.slots_used() < slots::MAX_SLOTS as usize)
+        let profiles = s.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &s.slots) }).collect();
+        ProfilesView { profiles, loaded: s.loaded, startup: self.startup, free_slot: self.slots_used() < slots::MAX_SLOTS as usize }
     }
 
     /// Applies press points and bindings of both layers to the loaded profile and profile 0 until
@@ -517,7 +529,7 @@ impl Device {
         bindings: &[(u8, Action)],
         hs: &HypershiftEdits,
     ) -> Result<Written, String> {
-        if self.check_synapse(synapse_running) {
+        if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
         let host = self.engine.is_some();
@@ -607,7 +619,7 @@ impl Device {
 
     /// Writes the profile to its slot, a free one if it has none; backs each slot up before its first write.
     pub fn write_profile(&mut self, id: u32) -> Result<(), String> {
-        if self.check_synapse(synapse_running) {
+        if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
         if self.settings.profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
@@ -725,8 +737,8 @@ impl Device {
     }
 
     /// Fresh check before a write, honouring `watch_synapse`.
-    fn check_synapse(&mut self, running: impl FnOnce() -> bool) -> bool {
-        self.synapse = synapse_check(self.settings.watch_synapse, running);
+    fn check_synapse(&mut self) -> bool {
+        self.synapse = self.settings.watch_synapse && synapse_running();
         self.synapse
     }
 
@@ -860,7 +872,7 @@ impl Device {
 
     /// Puts the body into the keyboard's flash, replacing the one written before.
     pub fn write_macro(&mut self, id: u16) -> Result<(), String> {
-        if self.check_synapse(synapse_running) {
+        if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
         let body = self.settings.macros.get(&id).and_then(|m| macros::encode(&m.events)).ok_or_else(|| format!("no macro {id}"))?;
@@ -875,7 +887,7 @@ impl Device {
     /// Removes the macro from the library and its body from the flash.
     pub fn delete_macro(&mut self, id: u16) -> Result<(), String> {
         if self.settings.macros.get(&id).is_some_and(|m| m.written) {
-            if self.check_synapse(synapse_running) {
+            if self.check_synapse() {
                 return Err(self.msg("backend.synapseRunning"));
             }
             let (t, _) = self.keyboard()?;
@@ -975,8 +987,7 @@ fn editable_keys() -> Vec<u8> {
 }
 
 fn write_backup(text: &str) -> Result<(), String> {
-    let appdata = std::env::var("APPDATA").map_err(|e| e.to_string())?;
-    let dir = PathBuf::from(appdata).join("EasyRazer");
+    let dir = settings::dir().ok_or("APPDATA is not set")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
     std::fs::write(dir.join(format!("backup-{secs}.txt")), text).map_err(|e| e.to_string())
@@ -985,8 +996,8 @@ fn write_backup(text: &str) -> Result<(), String> {
 /// Synapse leaves the keyboard in driver mode, where it types nothing on its own.
 /// Take it back only right after confirming Synapse is gone, never on a stale answer:
 /// otherwise we would fight a Synapse that has just started. Our own engine keeps it.
-fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>, engine: bool) -> bool {
-    fresh_check && !synapse && !engine && mode == Some(control::MODE_DRIVER)
+fn should_release_driver_mode(synapse: bool, mode: Option<u8>, engine: bool) -> bool {
+    !synapse && !engine && mode == Some(control::MODE_DRIVER)
 }
 
 fn engine_config(
@@ -1026,11 +1037,6 @@ pub fn release_keyboard() {
 /// Settings from an older description may name effects that no longer exist.
 fn usable(d: &DeviceSpec, look: Option<Look>) -> Option<Look> {
     look.filter(|l| lighting::encode(d, &l.effect).is_ok())
-}
-
-/// With watching off Synapse is taken as absent, so the lighting is restored if it was blocked before.
-pub fn synapse_check(watch: bool, running: impl FnOnce() -> bool) -> bool {
-    watch && running()
 }
 
 /// A failed snapshot counts as "running": writing while Synapse is alive gets overwritten.
@@ -1106,31 +1112,19 @@ mod tests {
     }
 
     #[test]
-    fn synapse_is_not_checked_when_watching_is_off() {
-        let mut ran = false;
-        assert!(!synapse_check(false, || {
-            ran = true;
-            true
-        }));
-        assert!(!ran);
-        assert!(synapse_check(true, || true));
-    }
-
-    #[test]
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
         let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
-        assert!(!d.check_synapse(|| true));
+        assert!(!d.check_synapse());
         assert!(!d.synapse);
     }
 
     #[test]
     fn driver_mode_is_released_only_right_after_a_fresh_check() {
-        assert!(should_release_driver_mode(true, false, Some(control::MODE_DRIVER), false));
-        assert!(!should_release_driver_mode(false, false, Some(control::MODE_DRIVER), false));
-        assert!(!should_release_driver_mode(true, true, Some(control::MODE_DRIVER), false));
-        assert!(!should_release_driver_mode(true, false, Some(control::MODE_DRIVER), true));
+        assert!(should_release_driver_mode(false, Some(control::MODE_DRIVER), false));
+        assert!(!should_release_driver_mode(true, Some(control::MODE_DRIVER), false));
+        assert!(!should_release_driver_mode(false, Some(control::MODE_DRIVER), true));
     }
 
     #[test]
@@ -1207,7 +1201,7 @@ mod tests {
     fn lighting_preview_round_trip_on_hardware() {
         assert!(!synapse_running(), "close Synapse first");
         let mut dev = Device::new().unwrap();
-        dev.status(Some(false));
+        dev.status(false);
         let (original, saved_before) = {
             let (t, d) = dev.connect().expect("keyboard not connected");
             let original = lighting::get_look(t, d, Store::Temporary).unwrap().expect("known effect in the temporary store");
