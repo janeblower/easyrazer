@@ -1,4 +1,4 @@
-<img src="logo.svg" width="96" alt="">
+<p align="center"><img src="logo.svg" width="192" alt=""></p>
 
 # EasyRazer
 

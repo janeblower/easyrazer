@@ -20,7 +20,7 @@
       M222 172 L298 172 L316 190 L316 214 L298 232 L222 232 Z"/>
   </defs>
 
-  <rect width="512" height="512" fill="#000"/>
+  <!-- <rect width="512" height="512" fill="#000"/> -->
 
   <g transform="translate(-24 -8)">
     <!-- Оранжевая тень в форме буквы -->
