@@ -41,7 +41,7 @@ const LED_COLS: [&[u8]; 6] = [
     &[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 19, 20, 21],
     &[1, 2, 3, 7, 11, 12, 13, 14, 15, 16, 17, 19, 20],
 ];
-const FRAME_COLS: u8 = 23;
+pub(crate) const FRAME_COLS: u8 = 23;
 
 /// The Fn key sits where `RIGHT_GUI` is on a standard board; it switches layers and is not tuned.
 const FN_KEY: &str = "RIGHT_GUI";

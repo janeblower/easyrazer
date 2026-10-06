@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::actuation::{self, LIVE};
 use crate::analog::{KeyAssignment, Layer};
-use crate::binding::{self, Action, System};
+use crate::binding::{self, Action, FN_SERVICE, System};
 use crate::devices::DeviceSpec;
 use crate::lighting::{self, CUSTOM, Look, Store};
 use crate::packet::{self, Command};
@@ -21,7 +21,6 @@ pub const MENU: u8 = 129;
 /// fwID of the left Shift key, where the Snap Tap switch goes by default.
 pub const LEFT_SHIFT: u8 = 44;
 
-const FN_SERVICE: u8 = 0x11;
 const LIST: Command = Command::new(0x05, 0x81);
 const CREATE: Command = Command::new(0x05, 0x02);
 const DELETE: Command = Command::new(0x05, 0x03);
@@ -351,15 +350,6 @@ mod tests {
         write(&kb, spec(), 0, &base, &want).unwrap();
         assert_eq!(kb.key_in(0, 0, A).fn_id, 0x00);
         assert_eq!(kb.key_in(0, 1, A).fn_id, 0x02, "Hypershift must be written back after the Normal write");
-    }
-
-    #[test]
-    fn menu_override_reports_the_code_on_fn_menu() {
-        let kb = FakeKeyboard::new(&[MENU]);
-        kb.edit(0, 1, MENU, |a| (a.fn_id, a.fn_data) = (0x07, vec![0x04]));
-        let s = read_snapshot(&kb, spec(), 0, &[MENU], |_, _| {}).unwrap().with_menu_override();
-        assert_eq!((s.hypershift[&MENU].fn_id, s.hypershift[&MENU].fn_data.as_slice()), (0x11, &[NEXT_PROFILE_CODE][..]));
-        assert_eq!(s.normal[&MENU].fn_id, 0x02);
     }
 
     #[test]

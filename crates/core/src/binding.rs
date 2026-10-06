@@ -15,7 +15,7 @@ const FN_MACRO_TOGGLE: u8 = 0x05;
 const FN_CONSUMER: u8 = 0x0A;
 const FN_PROFILE: u8 = 0x07;
 const FN_POWER: u8 = 0x09;
-const FN_SERVICE: u8 = 0x11;
+pub(crate) const FN_SERVICE: u8 = 0x11;
 /// Service code of the app's Snap Tap switch; like `NEXT_PROFILE_CODE`, the firmware types nothing for it.
 pub const SNAP_TAP_CODE: u8 = 0x21;
 
@@ -191,24 +191,6 @@ pub fn apply(t: &impl Transport, profile: u8, changes: &[(u8, Action)]) -> Vec<(
     actuation::apply_with(t, profile, changes, set)
 }
 
-/// Writes the profile, then with `live` the live copy. In driver mode the firmware drops bindings
-/// written to the live copy, so only the profile is judged there.
-pub fn save(t: &impl Transport, profile: u8, changes: &[(u8, Action)], live: bool) -> Vec<(u8, Outcome)> {
-    actuation::save_with(t, profile, changes, live, set)
-}
-
-/// Keys of `changes` bound otherwise in `profile`: what a replug would lose.
-pub fn unsaved(t: &impl Transport, profile: u8, changes: &[(u8, Action)]) -> Result<Vec<u8>, Error> {
-    let mut out = Vec::new();
-    for &(k, a) in changes {
-        let stored = actuation::read_key(t, profile, k)?;
-        if decode(stored.fn_id, &stored.fn_data) != Some(a) {
-            out.push(k);
-        }
-    }
-    Ok(out)
-}
-
 fn set(t: &impl Transport, profile: u8, key: u8, &a: &Action) -> Result<Outcome, Error> {
     let (fn_id, fn_data) = encode(a).ok_or_else(|| Error::BadArgument(format!("cannot bind {a:?}")))?;
     actuation::update(t, profile, key, |k| {
@@ -220,12 +202,10 @@ fn set(t: &impl Transport, profile: u8, key: u8, &a: &Action) -> Result<Outcome,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actuation::LIVE;
     use crate::fake::FakeKeyboard;
     use crate::keymap;
 
     const A: u8 = 31;
-    const S: u8 = 32;
 
     #[test]
     fn every_key_has_a_usage() {
@@ -313,25 +293,5 @@ mod tests {
         let r = apply(&kb, 1, &[(A, factory(200))]);
         assert!(matches!(r[0].1, Outcome::Failed(Error::BadArgument(_))), "{r:?}");
         assert!(kb.sent.borrow().is_empty());
-    }
-
-    #[test]
-    fn save_without_live_leaves_the_live_copy() {
-        let kb = FakeKeyboard::new(&[A]);
-        let r = save(&kb, 1, &[(A, Action::Disabled)], false);
-        assert!(matches!(r[0].1, Outcome::Ok(_)), "{r:?}");
-        assert_eq!(kb.key(A).fn_id, FN_DISABLED);
-        assert_eq!(kb.live_key(A).fn_id, FN_KEY);
-        save(&kb, 1, &[(A, Action::Disabled)], true);
-        assert_eq!(kb.live_key(A).fn_id, FN_DISABLED);
-    }
-
-    #[test]
-    fn unsaved_lists_keys_bound_otherwise_in_the_profile() {
-        let kb = FakeKeyboard::new(&[A, S]);
-        apply(&kb, LIVE, &[(A, Action::Disabled)]);
-        let as_stored = decode(FN_KEY, &[0, S]).unwrap();
-        let u = unsaved(&kb, 1, &[(A, Action::Disabled), (S, as_stored)]).unwrap();
-        assert_eq!(u, [A]);
     }
 }
