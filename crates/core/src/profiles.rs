@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::actuation::{self, LIVE};
 use crate::analog::{KeyAssignment, Layer};
+use crate::binding::{self, Action, System};
 use crate::devices::DeviceSpec;
 use crate::lighting::{self, CUSTOM, Look, Store};
 use crate::packet::{self, Command};
@@ -17,6 +18,8 @@ pub const NAME_CHARS: usize = 32;
 pub const NEXT_PROFILE_CODE: u8 = 0x20;
 /// fwID of the Menu key.
 pub const MENU: u8 = 129;
+/// fwID of the left Shift key, where the Snap Tap switch goes by default.
+pub const LEFT_SHIFT: u8 = 44;
 
 const FN_SERVICE: u8 = 0x11;
 const LIST: Command = Command::new(0x05, 0x81);
@@ -133,13 +136,30 @@ impl Snapshot {
         }
     }
 
-    /// The copy profile 0 gets while the app listens for Fn+Menu.
+    /// The copy profile 0 gets while the app listens for Fn+Menu: the key bound to the next
+    /// profile reports `NEXT_PROFILE_CODE` instead of switching slots.
     pub fn with_menu_override(&self) -> Snapshot {
         let mut s = self.clone();
-        let k = s.hypershift.entry(MENU).or_insert(RawKey { thr_low: 0, thr_high: 0, fn_id: 0, fn_data: Vec::new() });
-        k.fn_id = FN_SERVICE;
-        k.fn_data = vec![NEXT_PROFILE_CODE];
+        let next = Some(Action::System { action: System::NextProfile });
+        if let Some(k) = s.hypershift.values_mut().find(|r| binding::decode(r.fn_id, &r.fn_data) == next) {
+            k.fn_id = FN_SERVICE;
+            k.fn_data = vec![NEXT_PROFILE_CODE];
+        }
         s
+    }
+
+    /// Binds the Snap Tap switch to Fn+LShift unless a key of the layer has it already.
+    pub fn bind_snap_tap(&mut self) {
+        let snap = Action::System { action: System::SnapTap };
+        if self.hypershift.values().any(|r| binding::decode(r.fn_id, &r.fn_data) == Some(snap)) {
+            return;
+        }
+        let plain = Some(binding::factory(LEFT_SHIFT));
+        if let (Some(r), Some((fn_id, fn_data))) = (self.hypershift.get_mut(&LEFT_SHIFT), binding::encode(snap))
+            && binding::decode(r.fn_id, &r.fn_data) == plain
+        {
+            (r.fn_id, r.fn_data) = (fn_id, fn_data);
+        }
     }
 
     /// The custom layout never reaches a slot, so it does not count as a difference.
@@ -220,6 +240,7 @@ pub fn write(t: &impl Transport, d: &DeviceSpec, slot: u8, base: &Snapshot, want
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binding::SNAP_TAP_CODE;
     use crate::fake::FakeKeyboard;
 
     const A: u8 = 31;
@@ -335,9 +356,46 @@ mod tests {
     #[test]
     fn menu_override_reports_the_code_on_fn_menu() {
         let kb = FakeKeyboard::new(&[MENU]);
+        kb.edit(0, 1, MENU, |a| (a.fn_id, a.fn_data) = (0x07, vec![0x04]));
         let s = read_snapshot(&kb, spec(), 0, &[MENU], |_, _| {}).unwrap().with_menu_override();
         assert_eq!((s.hypershift[&MENU].fn_id, s.hypershift[&MENU].fn_data.as_slice()), (0x11, &[NEXT_PROFILE_CODE][..]));
         assert_eq!(s.normal[&MENU].fn_id, 0x02);
+    }
+
+    #[test]
+    fn menu_override_follows_the_next_profile_key() {
+        let kb = FakeKeyboard::new(&[A, MENU]);
+        kb.edit(0, 1, A, |a| (a.fn_id, a.fn_data) = (0x07, vec![0x04]));
+        let s = read_snapshot(&kb, spec(), 0, &[A, MENU], |_, _| {}).unwrap();
+        let o = s.with_menu_override();
+        assert_eq!((o.hypershift[&A].fn_id, o.hypershift[&A].fn_data.as_slice()), (0x11, &[NEXT_PROFILE_CODE][..]));
+        assert_eq!(o.hypershift[&MENU], s.hypershift[&MENU]);
+        let mut none = s.clone();
+        none.hypershift.insert(A, s.normal[&A].clone());
+        assert_eq!(none.with_menu_override(), none, "no next-profile key, nothing to override");
+    }
+
+    #[test]
+    fn snap_tap_goes_to_left_shift_unless_bound() {
+        let kb = FakeKeyboard::new(&[A, LEFT_SHIFT]);
+        let mut s = read_snapshot(&kb, spec(), 0, &[A, LEFT_SHIFT], |_, _| {}).unwrap();
+        let (fn_id, fn_data) = binding::encode(binding::factory(LEFT_SHIFT)).unwrap();
+        let r = s.hypershift.get_mut(&LEFT_SHIFT).unwrap();
+        (r.fn_id, r.fn_data) = (fn_id, fn_data);
+        let plain = s.clone();
+        s.bind_snap_tap();
+        assert_eq!((s.hypershift[&LEFT_SHIFT].fn_id, s.hypershift[&LEFT_SHIFT].fn_data.as_slice()), (0x11, &[SNAP_TAP_CODE][..]));
+        let mut moved = s.clone();
+        moved.hypershift.insert(A, s.hypershift[&LEFT_SHIFT].clone());
+        moved.hypershift.insert(LEFT_SHIFT, s.normal[&LEFT_SHIFT].clone());
+        let before = moved.clone();
+        moved.bind_snap_tap();
+        assert_eq!(moved, before, "a moved switch stays where it is");
+        let mut custom = plain;
+        custom.hypershift.get_mut(&LEFT_SHIFT).unwrap().fn_id = 0x00;
+        let before = custom.clone();
+        custom.bind_snap_tap();
+        assert_eq!(custom, before, "a custom Fn+LShift binding stays");
     }
 
     #[test]

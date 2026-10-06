@@ -17,6 +17,9 @@ const props = withDefaults(
     layout: KeyView[];
     /** Text under the label, and the keys whose value is not applied yet. */
     values?: KeyMap<string>;
+    /** Hypershift press point, on keys where it differs from `values`; shown above it. */
+    hsValues?: KeyMap<string>;
+    hsEdited?: Set<number>;
     edited?: Set<number>;
     errors?: KeyMap<string>;
     unsaved?: Set<number>;
@@ -35,6 +38,8 @@ const props = withDefaults(
   }>(),
   {
     values: () => ({}),
+    hsValues: () => ({}),
+    hsEdited: () => new Set(),
     edited: () => new Set(),
     errors: () => ({}),
     unsaved: () => new Set(),
@@ -224,9 +229,18 @@ function up(e: PointerEvent) {
         :title="title(k.key)"
       >
         <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
-        <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-baseline">
+        <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
           <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
-          <span v-if="k.editable && values[k.key] != null" class="ml-auto truncate" :class="valueClass(k.key)">{{ values[k.key] }}</span>
+          <span
+            v-if="k.editable && values[k.key] != null"
+            class="ml-auto flex flex-col min-w-0 items-end"
+            :class="{ 'text-[9px] leading-[10px]': hsValues[k.key] != null }"
+          >
+            <span v-if="hsValues[k.key] != null" class="truncate" :class="hsEdited.has(k.key) ? 'font-semibold text-edited' : 'text-hs'">{{
+              hsValues[k.key]
+            }}</span>
+            <span class="truncate" :class="valueClass(k.key)">{{ values[k.key] }}</span>
+          </span>
         </span>
       </div>
       <div v-if="band" class="border border-accent border-dashed bg-accent/8 pointer-events-none absolute" :style="bandStyle"></div>

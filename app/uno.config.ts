@@ -11,6 +11,7 @@ const COLORS = [
   "muted",
   "ink",
   "accent",
+  "hs",
   "driver",
   "edited",
   "error",

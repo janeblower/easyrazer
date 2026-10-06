@@ -15,9 +15,9 @@ use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
 use razer_core::transport::Error;
 use razer_core::macros::{self, Event};
-use razer_core::profiles::{self as slots, Snapshot};
+use razer_core::profiles::{self as slots, RawKey, Snapshot};
 use razer_core::{control, layout};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 
@@ -58,6 +58,30 @@ pub struct Written {
     pub unsaved: Vec<u8>,
     pub bindings: Vec<(u8, Outcome)>,
     pub unsaved_bindings: Vec<u8>,
+    pub hypershift: Hypershift,
+}
+
+/// The loaded profile's Hypershift layer as the window edits it.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Hypershift {
+    pub values: BTreeMap<u8, f32>,
+    /// `None` for what the app cannot show, such as the Fn key.
+    pub bindings: BTreeMap<u8, Option<Action>>,
+    /// Keys that differ from the profile's slot.
+    pub unsaved: Vec<u8>,
+}
+
+/// Hypershift edits from the window.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct HypershiftEdits {
+    pub values: Vec<(u8, f32)>,
+    pub bindings: Vec<(u8, Action)>,
+}
+
+impl HypershiftEdits {
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty() && self.bindings.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -184,6 +208,7 @@ impl Device {
             self.settings.slots.remove(&startup);
         }
         profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
+        self.settings.bind_snap_tap_once();
         if let Some(id) = self.settings.loaded {
             self.settings.take_legacy(id);
         }
@@ -292,6 +317,16 @@ impl Device {
     pub fn bindings(&self) -> BTreeMap<u8, Option<Action>> {
         let Some(p) = self.settings.loaded_profile() else { return BTreeMap::new() };
         p.data.normal.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect()
+    }
+
+    pub fn hypershift(&self) -> Hypershift {
+        let Some(p) = self.settings.loaded_profile() else { return Hypershift::default() };
+        let layer = &p.data.hypershift;
+        Hypershift {
+            values: layer.iter().map(|(&k, r)| (k, mm(r.thr_low))).collect(),
+            bindings: layer.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect(),
+            unsaved: profiles::unsaved_hypershift(p, &self.settings.slots),
+        }
     }
 
     /// Keys whose press point and binding differ from the profile's slot.
@@ -472,9 +507,16 @@ impl Device {
         (list, s.loaded, self.startup, self.slots_used() < slots::MAX_SLOTS as usize)
     }
 
-    /// Applies press points and bindings to the loaded profile and profile 0 until the next replug,
-    /// and Rapid Trigger and Snap Tap, which live only here.
-    pub fn apply(&mut self, changes: &[(u8, f32)], rapid: &BTreeMap<u8, Rapid>, snap: Option<&SnapTap>, bindings: &[(u8, Action)]) -> Result<Written, String> {
+    /// Applies press points and bindings of both layers to the loaded profile and profile 0 until
+    /// the next replug, and Rapid Trigger and Snap Tap, which live only here.
+    pub fn apply(
+        &mut self,
+        changes: &[(u8, f32)],
+        rapid: &BTreeMap<u8, Rapid>,
+        snap: Option<&SnapTap>,
+        bindings: &[(u8, Action)],
+        hs: &HypershiftEdits,
+    ) -> Result<Written, String> {
         if self.check_synapse(synapse_running) {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -485,6 +527,12 @@ impl Device {
             return Err(missing);
         }
         let written = written_macros(&self.settings);
+        // The firmware plays only bodies in its flash.
+        if !host && hs.bindings.iter().any(|&(_, a)| matches!(a, Action::Macro { id, .. } if !written.contains(&id))) {
+            return Err(unwritten.clone());
+        }
+        let mut layer = self.settings.loaded_profile().map(|p| p.data.hypershift.clone()).unwrap_or_default();
+        edit_layer(&mut layer, hs)?;
         let (t, _) = self.keyboard()?;
         let bound: Vec<(u8, Outcome)> = if host {
             bindings.iter().map(|&(k, a)| (k, host_bound(k, a))).collect()
@@ -500,6 +548,7 @@ impl Device {
         };
         let results = actuation::apply(t, actuation::LIVE, changes);
         let Some(p) = self.settings.loaded_mut() else { return Err(missing) };
+        p.data.hypershift = layer;
         for (k, o) in &results {
             if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, p.data.normal.get_mut(k)) {
                 (r.thr_low, r.thr_high) = (a.threshold_low, a.threshold_high);
@@ -520,7 +569,7 @@ impl Device {
                     (r.thr_low, r.thr_high) = (a.threshold_low, a.threshold_high);
                 }
             }
-            // In driver mode bindings never reach profile 0: the engine plays them.
+            // In driver mode this path does not write the Normal bindings to profile 0: the engine plays them.
             if !host {
                 for (k, o) in &bound {
                     if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
@@ -536,7 +585,8 @@ impl Device {
             }
         }
         settings::save(&self.settings)?;
-        if !host && !(results.is_empty() && bound.is_empty()) {
+        // The Hypershift layer reaches profile 0 only through `restore`, its press points in driver mode too.
+        if (!host && !(results.is_empty() && bound.is_empty())) || !hs.is_empty() {
             self.restore();
         }
         self.sync_engine();
@@ -544,11 +594,11 @@ impl Device {
     }
 
     /// Applies the edits, then writes the loaded profile to its slot.
-    pub fn save(&mut self, edits: &[(u8, f32)], bind_edits: &[(u8, Action)]) -> Result<Written, String> {
-        let applied = if edits.is_empty() && bind_edits.is_empty() {
+    pub fn save(&mut self, edits: &[(u8, f32)], bind_edits: &[(u8, Action)], hs: &HypershiftEdits) -> Result<Written, String> {
+        let applied = if edits.is_empty() && bind_edits.is_empty() && hs.is_empty() {
             self.written(Vec::new(), Vec::new())
         } else {
-            self.apply(edits, &BTreeMap::new(), None, bind_edits)?
+            self.apply(edits, &BTreeMap::new(), None, bind_edits, hs)?
         };
         let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.write_profile(id)?;
@@ -567,7 +617,7 @@ impl Device {
         let bound: Vec<(u8, Action)> = self
             .settings
             .profile(id)
-            .map(|p| p.data.normal.iter().filter_map(|(&k, r)| Some((k, binding::decode(r.fn_id, &r.fn_data)?))).collect())
+            .map(|p| p.data.normal.iter().chain(&p.data.hypershift).filter_map(|(&k, r)| Some((k, binding::decode(r.fn_id, &r.fn_data)?))).collect())
             .unwrap_or_default();
         let bodies = bodies_to_write(&self.settings, &bound);
         let slot = self.settings.profile(id).and_then(|p| p.slot);
@@ -599,7 +649,7 @@ impl Device {
 
     fn written(&self, results: Vec<(u8, Outcome)>, bindings: Vec<(u8, Outcome)>) -> Written {
         let (unsaved, unsaved_bindings) = self.unsaved();
-        Written { results, unsaved, bindings, unsaved_bindings }
+        Written { results, unsaved, bindings, unsaved_bindings, hypershift: self.hypershift() }
     }
 
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
@@ -747,7 +797,7 @@ impl Device {
         }
         let Some(p) = self.settings.loaded_profile() else { return };
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
-        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.rapid, &p.snap_tap, engine::repeat_timing());
+        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
@@ -895,6 +945,31 @@ fn host_bound(key: u8, a: Action) -> Outcome {
     }
 }
 
+/// Applies `hs` to a copy of the layer; refused whole, so nothing is written on a bad request.
+fn edit_layer(layer: &mut BTreeMap<u8, RawKey>, hs: &HypershiftEdits) -> Result<(), String> {
+    let editable = editable_keys();
+    if let Some(k) = hs.values.iter().map(|v| v.0).chain(hs.bindings.iter().map(|b| b.0)).find(|k| !editable.contains(k)) {
+        return Err(format!("key {k} is not editable"));
+    }
+    for &(k, mm) in &hs.values {
+        let thr = actuation::threshold(mm).map_err(|e| e.to_string())?;
+        layer.get_mut(&k).ok_or_else(|| format!("no key {k}"))?.thr_low = thr;
+    }
+    for &(k, a) in &hs.bindings {
+        let (fn_id, fn_data) = binding::encode(a).ok_or_else(|| format!("cannot bind {a:?}"))?;
+        let r = layer.get_mut(&k).ok_or_else(|| format!("no key {k}"))?;
+        (r.fn_id, r.fn_data) = (fn_id, fn_data);
+    }
+    // A clash the profile already holds must not block edits that do not touch it.
+    for &(_, a) in &hs.bindings {
+        let same = layer.values().filter(|r| binding::decode(r.fn_id, &r.fn_data) == Some(a)).count();
+        if let (Action::System { action }, true) = (a, same > 1 && binding::clash([a, a]).is_some()) {
+            return Err(format!("{action:?} is bound to more than one key"));
+        }
+    }
+    Ok(())
+}
+
 fn editable_keys() -> Vec<u8> {
     layout::keys().into_iter().filter(|k| k.editable).map(|k| k.key).collect()
 }
@@ -917,16 +992,21 @@ fn should_release_driver_mode(fresh_check: bool, synapse: bool, mode: Option<u8>
 fn engine_config(
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
+    fn_layer: &BTreeMap<u8, RawKey>,
     rapid: &BTreeMap<u8, Rapid>,
     snap: &SnapTap,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], rapid: [None; 256], bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
+    let mut c = Config { act: [0; 256], fn_act: [0; 256], rapid: [None; 256], bind: [None; 256], fn_bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
     for (&k, &a) in bindings {
         c.bind[k as usize] = a;
+    }
+    for (&k, r) in fn_layer {
+        c.fn_act[k as usize] = r.thr_low;
+        c.fn_bind[k as usize] = binding::decode(r.fn_id, &r.fn_data);
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
         c.rapid[k as usize] = Some(Trigger { press: rapid::mm_to_depth(r.press), release: rapid::mm_to_depth(r.release) });
@@ -976,9 +1056,54 @@ pub fn synapse_running() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use razer_core::binding::System;
     use razer_core::lighting::Effect;
     use razer_core::rapid::{SnapGroup, SnapRule};
     use super::*;
+
+    fn plain(k: u8) -> RawKey {
+        RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
+    }
+
+    #[test]
+    fn hypershift_edits_change_the_layer() {
+        let mut layer = BTreeMap::from([(31, plain(0x04)), (44, plain(0xE1))]);
+        let hs = HypershiftEdits { values: vec![(31, 2.0)], bindings: vec![(44, Action::System { action: System::SnapTap })] };
+        edit_layer(&mut layer, &hs).unwrap();
+        assert_eq!(layer[&31].thr_low, analog::mm_to_threshold(2.0));
+        assert_eq!((layer[&44].fn_id, layer[&44].fn_data.as_slice()), (0x11, &[0x21][..]));
+    }
+
+    #[test]
+    fn hypershift_edits_refuse_a_second_switch_and_a_bad_point() {
+        let layer = BTreeMap::from([(31, plain(0x04)), (44, plain(0xE1))]);
+        let snap = Action::System { action: System::SnapTap };
+        let twice = HypershiftEdits { values: Vec::new(), bindings: vec![(31, snap), (44, snap)] };
+        assert!(edit_layer(&mut layer.clone(), &twice).is_err());
+        let deep = HypershiftEdits { values: vec![(31, 9.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &deep).is_err());
+        let missing = HypershiftEdits { values: vec![(200, 2.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &missing).is_err());
+    }
+
+    #[test]
+    fn hypershift_edits_ignore_a_clash_already_in_the_layer() {
+        let snap = RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] };
+        let layer = BTreeMap::from([(31, snap.clone()), (44, snap), (30, plain(0x05))]);
+        let thr = HypershiftEdits { values: vec![(30, 2.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &thr).is_ok());
+        let again = HypershiftEdits { values: Vec::new(), bindings: vec![(30, Action::System { action: System::SnapTap })] };
+        assert!(edit_layer(&mut layer.clone(), &again).is_err());
+    }
+
+    #[test]
+    fn hypershift_edits_refuse_the_fn_key() {
+        let layer = BTreeMap::from([(59, plain(0x04))]);
+        let thr = HypershiftEdits { values: vec![(59, 2.0)], bindings: Vec::new() };
+        assert!(edit_layer(&mut layer.clone(), &thr).is_err());
+        let bind = HypershiftEdits { values: Vec::new(), bindings: vec![(59, Action::System { action: System::GameMode })] };
+        assert!(edit_layer(&mut layer.clone(), &bind).is_err());
+    }
 
     #[test]
     fn synapse_is_not_checked_when_watching_is_off() {
@@ -1011,9 +1136,21 @@ mod tests {
     #[test]
     fn engine_config_keeps_snap_groups_while_off() {
         let snap = SnapTap { enabled: false, groups: vec![SnapGroup { keys: vec![31, 33], rule: SnapRule::Last }] };
-        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
+        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
         assert_eq!(c.snap, snap.groups);
         assert!(!c.snap_on);
+    }
+
+    #[test]
+    fn engine_config_takes_the_hypershift_layer() {
+        let fn_layer = BTreeMap::from([
+            (31, RawKey { thr_low: 200, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] }),
+            (32, RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x01] }),
+        ]);
+        let t = (Duration::from_millis(500), Duration::from_millis(33));
+        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &fn_layer, &BTreeMap::new(), &SnapTap::default(), t);
+        assert_eq!((c.fn_act[31], c.fn_act[32]), (200, 0));
+        assert_eq!((c.fn_bind[31], c.fn_bind[32]), (Some(Action::System { action: System::SnapTap }), None));
     }
 
     #[test]
@@ -1025,7 +1162,7 @@ mod tests {
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
-        let c = engine_config(&thresholds, &bindings, &rapid, &SnapTap::default(), t);
+        let c = engine_config(&thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
@@ -1056,10 +1193,10 @@ mod tests {
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
         dev.read_all(|_, _, _| {}).unwrap();
-        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, &[]).unwrap();
+        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
         let (t, _) = dev.connect().unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
-        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), None, &[]).unwrap();
+        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
         assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)), "{:?}", w.results);
         assert_eq!(w.unsaved, [a]);
         assert_eq!(profile_after, saved);

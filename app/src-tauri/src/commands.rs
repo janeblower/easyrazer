@@ -12,7 +12,7 @@ use razer_core::layout as kb_layout;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
-use crate::device::{self, Device, LightingState, MacroState, Status, Written, mm};
+use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
 use crate::settings::{CloseAction, Rapid, SnapTap};
@@ -68,9 +68,10 @@ pub struct Actuation {
     rapid: BTreeMap<u8, Rapid>,
     /// Snap Tap of the loaded profile.
     snap: SnapTap,
-    /// `null` for a binding the app cannot show, such as Hypershift.
+    /// `null` for a binding the app cannot show, such as the Fn key.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
+    hypershift: Hypershift,
     /// Id of the loaded profile the table belongs to.
     profile: Option<u32>,
 }
@@ -81,6 +82,7 @@ pub struct WriteResult {
     unsaved: Vec<u8>,
     bindings: Vec<BindResult>,
     unsaved_bindings: Vec<u8>,
+    hypershift: Hypershift,
 }
 
 impl From<Written> for WriteResult {
@@ -104,7 +106,7 @@ impl From<Written> for WriteResult {
                 Outcome::Failed(e) => BindResult::Error { key, message: e.to_string() },
             })
             .collect();
-        Self { results, unsaved: w.unsaved, bindings, unsaved_bindings: w.unsaved_bindings }
+        Self { results, unsaved: w.unsaved, bindings, unsaved_bindings: w.unsaved_bindings, hypershift: w.hypershift }
     }
 }
 
@@ -154,6 +156,7 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actu
         snap: device.snap_tap(),
         unsaved_bindings,
         bindings: device.bindings(),
+        hypershift: device.hypershift(),
         profile: device.loaded(),
     })
 }
@@ -165,13 +168,19 @@ pub async fn apply(
     rapid: BTreeMap<u8, Rapid>,
     snap: Option<SnapTap>,
     bindings: Vec<(u8, Action)>,
+    hypershift: HypershiftEdits,
 ) -> Result<WriteResult, String> {
-    state.device().apply(&changes, &rapid, snap.as_ref(), &bindings).map(Into::into)
+    state.device().apply(&changes, &rapid, snap.as_ref(), &bindings, &hypershift).map(Into::into)
 }
 
 #[tauri::command]
-pub async fn save(state: State<'_, AppState>, changes: Vec<(u8, f32)>, bindings: Vec<(u8, Action)>) -> Result<WriteResult, String> {
-    state.device().save(&changes, &bindings).map(Into::into)
+pub async fn save(
+    state: State<'_, AppState>,
+    changes: Vec<(u8, f32)>,
+    bindings: Vec<(u8, Action)>,
+    hypershift: HypershiftEdits,
+) -> Result<WriteResult, String> {
+    state.device().save(&changes, &bindings, &hypershift).map(Into::into)
 }
 
 #[tauri::command]

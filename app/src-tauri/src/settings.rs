@@ -91,6 +91,8 @@ pub struct Settings {
     pub autostart_offered: bool,
     /// Interface language; `None` until the window picks one from the system.
     pub language: Option<String>,
+    /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
+    pub snap_tap_bound: bool,
     /// Before profiles: applied but unsaved settings, moved into the loaded profile once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied: Option<Look>,
@@ -106,11 +108,22 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, applied: None, actuation: BTreeMap::new(), bindings: BTreeMap::new(), rapid: BTreeMap::new(), custom: None }
+        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, applied: None, actuation: BTreeMap::new(), bindings: BTreeMap::new(), rapid: BTreeMap::new(), custom: None }
     }
 }
 
 impl Settings {
+    /// Binds the Snap Tap switch to Fn+LShift in every profile, once: one removed later stays removed.
+    pub fn bind_snap_tap_once(&mut self) {
+        if self.snap_tap_bound {
+            return;
+        }
+        for p in &mut self.profiles {
+            p.data.bind_snap_tap();
+        }
+        self.snap_tap_bound = true;
+    }
+
     pub fn profile(&self, id: u32) -> Option<&Profile> {
         self.profiles.iter().find(|p| p.id == id)
     }
@@ -210,6 +223,22 @@ mod tests {
     }
 
     #[test]
+    fn snap_tap_switch_is_bound_once() {
+        let mut p = profile(1, None);
+        p.data = snap(&[31, 44]);
+        let (fn_id, fn_data) = binding::encode(binding::factory(44)).unwrap();
+        p.data.hypershift.insert(44, RawKey { thr_low: 0, thr_high: 0, fn_id, fn_data });
+        let mut s = Settings { profiles: vec![p], ..Default::default() };
+        s.bind_snap_tap_once();
+        assert_eq!(s.profiles[0].data.hypershift[&44].fn_data, [binding::SNAP_TAP_CODE]);
+        let plain = s.profiles[0].data.normal[&44].clone();
+        s.profiles[0].data.hypershift.insert(44, plain);
+        s.bind_snap_tap_once();
+        assert_eq!(s.profiles[0].data.hypershift[&44].fn_id, 2, "removed later, it stays removed");
+        assert!(parse(&serde_json::to_string(&s).unwrap()).snap_tap_bound);
+    }
+
+    #[test]
     fn profiles_round_trip() {
         let s = Settings { profiles: vec![profile(1, Some(1)), profile(2, None)], loaded: Some(2), slots: [(1, snap(&[31]))].into(), next_profile_id: 2, ..Default::default() };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
@@ -286,6 +315,7 @@ mod tests {
             watch_synapse: false,
             autostart_offered: true,
             language: Some("ru".into()),
+            snap_tap_bound: true,
             applied: None,
             actuation: BTreeMap::new(),
             bindings: BTreeMap::new(),

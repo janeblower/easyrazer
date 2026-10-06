@@ -8,6 +8,8 @@ const props = defineProps<{
   selection: Set<number>;
   layout: KeyView[];
   driver: boolean;
+  /** Fn combination of the switch; null when none has it. */
+  combo: string | null;
 }>();
 const emit = defineEmits<{ update: [snap: SnapTap] }>();
 
@@ -33,7 +35,7 @@ function add() {
         @change="emit('update', { ...snap, enabled: ($event.target as HTMLInputElement).checked })"
       />
       {{ $t("snap.title") }}
-      <span class="text-xs text-muted ml-auto">Fn+LShift</span>
+      <span class="text-xs text-muted ml-auto">{{ combo ?? $t("snap.noCombo") }}</span>
     </label>
     <ul class="m-0 p-0 list-none flex flex-col gap-2">
       <li v-for="(g, i) in snap.groups" :key="g.keys.join()" class="flex gap-1 items-center">

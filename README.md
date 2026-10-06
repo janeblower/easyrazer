@@ -23,6 +23,7 @@ memory, after which it works with no software running at all.
   (computed by the app while it runs);
 - Snap Tap: key groups of any size, a rule per group, Fn+LShift toggle (driver mode);
 - macros: keys, mouse, delays, recording;
+- Hypershift layer: an action and a press point per Fn combination;
 - built-in lighting effects with live preview and a custom per-key and per-zone colour layout;
 - Windows Dynamic Lighting toggle;
 - lives in the tray: starts with Windows, restores settings after reconnect, sleep
@@ -79,7 +80,7 @@ Firmware analysis: [firmware.md](docs/firmware.md) (in Russian).
 
 ### What Synapse still has
 
-The Hypershift layer, game mode and gamepad emulation — see the roadmap.
+Game mode and gamepad emulation — see the roadmap.
 
 ## Synapse
 
@@ -124,7 +125,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 - [x] Profiles: in the app and in keyboard memory
 - [ ] Host-driven lighting animations
 - [x] Key remapping
-- [ ] Hypershift layer
+- [x] Hypershift layer
 - [x] Macros: keys, mouse, delays, recording
 - [ ] Game mode, gamepad
 - [ ] Other keyboard models

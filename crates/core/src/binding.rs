@@ -1,4 +1,4 @@
-//! What a key does in the normal layer: the `fnId` and data of its assignment.
+//! What a key does in a layer: the `fnId` and data of its assignment.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,11 @@ const FN_MACRO_TIMES: u8 = 0x03;
 const FN_MACRO_HOLD: u8 = 0x04;
 const FN_MACRO_TOGGLE: u8 = 0x05;
 const FN_CONSUMER: u8 = 0x0A;
+const FN_PROFILE: u8 = 0x07;
+const FN_POWER: u8 = 0x09;
+const FN_SERVICE: u8 = 0x11;
+/// Service code of the app's Snap Tap switch; like `NEXT_PROFILE_CODE`, the firmware types nothing for it.
+pub const SNAP_TAP_CODE: u8 = 0x21;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -24,6 +29,8 @@ pub enum Action {
     Media { media: Media },
     /// Plays the body stored under `id`; `count` passes for `Times`.
     Macro { id: u16, mode: MacroMode, count: u8 },
+    /// A Hypershift-layer function of the firmware or the app.
+    System { action: System },
 }
 
 /// A press during `Times` is ignored; `Hold` and `Toggle` finish the pass they stop in.
@@ -45,6 +52,39 @@ pub enum Mouse {
     Forward,
     WheelUp,
     WheelDown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum System {
+    BrightnessDown,
+    BrightnessUp,
+    Sleep,
+    GameMode,
+    /// Fn+F9: the firmware only blinks the M indicator.
+    MacroLed,
+    NextProfile,
+    SnapTap,
+}
+
+/// Synapse's factory Hypershift codes on V2, plus the app's Snap Tap switch.
+const SYSTEM: [(System, u8, u8); 7] = [
+    (System::BrightnessDown, FN_SERVICE, 0x09),
+    (System::BrightnessUp, FN_SERVICE, 0x08),
+    (System::Sleep, FN_POWER, 0x82),
+    (System::GameMode, FN_SERVICE, 0x03),
+    (System::MacroLed, FN_SERVICE, 0x04),
+    (System::NextProfile, FN_PROFILE, 0x04),
+    (System::SnapTap, FN_SERVICE, SNAP_TAP_CODE),
+];
+
+/// The app reacts to these itself, so at most one key of the layer carries each.
+pub const UNIQUE: [System; 2] = [System::NextProfile, System::SnapTap];
+
+/// The first of `UNIQUE` that more than one of `actions` holds.
+pub fn clash(actions: impl IntoIterator<Item = Action>) -> Option<System> {
+    let held: Vec<System> = actions.into_iter().filter_map(|a| if let Action::System { action } = a { Some(action) } else { None }).collect();
+    UNIQUE.into_iter().find(|u| held.iter().filter(|&s| s == u).count() > 1)
 }
 
 /// fwIDs of the modifier keys by bit of the HID modifier byte.
@@ -117,10 +157,14 @@ pub fn encode(a: Action) -> Option<(u8, Vec<u8>)> {
                 MacroMode::Toggle => (FN_MACRO_TOGGLE, vec![hi, lo]),
             }
         }
+        Action::System { action } => {
+            let &(_, id, code) = SYSTEM.iter().find(|&&(s, ..)| s == action)?;
+            (id, vec![code])
+        }
     })
 }
 
-/// `None` for what the app does not edit: Hypershift, profiles, service keys.
+/// `None` for what the app does not edit: the Fn key, other profile and service codes.
 pub fn decode(fn_id: u8, data: &[u8]) -> Option<Action> {
     match (fn_id, data) {
         (FN_DISABLED, _) => Some(Action::Disabled),
@@ -135,6 +179,9 @@ pub fn decode(fn_id: u8, data: &[u8]) -> Option<Action> {
         (FN_MACRO_TIMES, &[hi, lo, count]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Times, count }),
         (FN_MACRO_HOLD, &[hi, lo]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Hold, count: 1 }),
         (FN_MACRO_TOGGLE, &[hi, lo]) => Some(Action::Macro { id: u16::from_be_bytes([hi, lo]), mode: MacroMode::Toggle, count: 1 }),
+        (FN_PROFILE | FN_POWER | FN_SERVICE, &[code]) => {
+            SYSTEM.iter().find(|&&(_, id, c)| id == fn_id && c == code).map(|&(action, ..)| Action::System { action })
+        }
         _ => None,
     }
 }
@@ -214,6 +261,34 @@ mod tests {
         assert_eq!(encode(Action::Media { media: Media::Play }), Some((FN_CONSUMER, vec![0x00, 0xCD])));
         let m = Action::Macro { id: 0x0102, mode: MacroMode::Times, count: 1 };
         assert_eq!(encode(m), Some((FN_MACRO_TIMES, vec![0x01, 0x02, 0x01])));
+    }
+
+    #[test]
+    fn system_actions_use_the_factory_codes() {
+        assert_eq!(decode(0x11, &[0x09]), Some(Action::System { action: System::BrightnessDown }));
+        assert_eq!(decode(0x09, &[0x82]), Some(Action::System { action: System::Sleep }));
+        assert_eq!(decode(0x07, &[0x04]), Some(Action::System { action: System::NextProfile }));
+        assert_eq!(encode(Action::System { action: System::SnapTap }), Some((0x11, vec![SNAP_TAP_CODE])));
+        for (action, ..) in SYSTEM {
+            let a = Action::System { action };
+            let (id, data) = encode(a).unwrap();
+            assert_eq!(decode(id, &data), Some(a));
+        }
+        assert_eq!(decode(0x07, &[0x01]), None, "only the next profile round the list is offered");
+    }
+
+    #[test]
+    fn clash_finds_a_unique_action_on_two_keys() {
+        let next = Action::System { action: System::NextProfile };
+        let led = Action::System { action: System::MacroLed };
+        assert_eq!(clash([next, led, led]), None);
+        assert_eq!(clash([next, Action::Disabled, next]), Some(System::NextProfile));
+    }
+
+    #[test]
+    fn system_action_in_json() {
+        let a: Action = serde_json::from_str(r#"{"type":"system","action":"snap_tap"}"#).unwrap();
+        assert_eq!(a, Action::System { action: System::SnapTap });
     }
 
     #[test]

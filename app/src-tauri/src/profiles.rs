@@ -45,7 +45,9 @@ pub fn sync_slots(
             let name = slots::read_name(t, k).ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| fallback_name(k));
             let name = free_name(s, &name, numbered);
             let id = s.new_profile_id();
-            s.profiles.push(Profile { id, name, slot: Some(k), data: s.slots[&k].clone(), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None });
+            let mut data = s.slots[&k].clone();
+            data.bind_snap_tap();
+            s.profiles.push(Profile { id, name, slot: Some(k), data, rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None });
         }
     }
     if s.loaded_profile().is_none() {
@@ -75,6 +77,12 @@ pub fn unsaved(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> (Vec<u8>, Vec<u8>
         }
     }
     (thr, bind)
+}
+
+/// Hypershift keys that differ from the profile's slot; none without a slot.
+pub fn unsaved_hypershift(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> Vec<u8> {
+    let Some(slot) = p.slot.and_then(|k| slots.get(&k)) else { return Vec::new() };
+    p.data.hypershift.iter().filter(|&(k, r)| slot.hypershift.get(k) != Some(r)).map(|(&k, _)| k).collect()
 }
 
 /// Whether the profile differs from its slot in anything the slot holds.
@@ -279,6 +287,19 @@ mod tests {
     }
 
     #[test]
+    fn an_imported_profile_gets_the_snap_tap_switch() {
+        let keys = &[A, slots::LEFT_SHIFT];
+        let kb = FakeKeyboard::new(keys);
+        let (fn_id, fn_data) = razer_core::binding::encode(razer_core::binding::factory(slots::LEFT_SHIFT)).unwrap();
+        kb.edit(1, 1, slots::LEFT_SHIFT, |a| (a.fn_id, a.fn_data) = (fn_id, fn_data.clone()));
+        let mut s = Settings::default();
+        sync_slots(&kb, spec(), &mut s, keys, 1, &name, |_, _, _| {}).unwrap();
+        let p = s.loaded_profile().unwrap();
+        assert_eq!(p.data.hypershift[&slots::LEFT_SHIFT].fn_data, [razer_core::binding::SNAP_TAP_CODE]);
+        assert_eq!(s.slots[&1].hypershift[&slots::LEFT_SHIFT].fn_id, 0x02, "the cache keeps what the flash holds");
+    }
+
+    #[test]
     fn a_slot_deleted_elsewhere_unbinds_its_profile() {
         let kb = FakeKeyboard::new(KEYS);
         slots::create(&kb, 2).unwrap();
@@ -304,6 +325,8 @@ mod tests {
         let kb = FakeKeyboard::new(KEYS);
         let mut s = synced(&kb);
         let id = s.loaded.unwrap();
+        let menu = s.profile_mut(id).unwrap().data.hypershift.get_mut(&slots::MENU).unwrap();
+        (menu.fn_id, menu.fn_data) = (0x07, vec![0x04]);
         s.profile_mut(id).unwrap().data.normal.get_mut(&S).unwrap().thr_low = 99;
         let base = s.slots[&1].clone();
         let after = load(&kb, spec(), &s, id, &base, true).unwrap();
@@ -343,6 +366,15 @@ mod tests {
         let free = Profile { slot: None, ..p.clone() };
         assert_eq!(unsaved(&free, &s.slots), (vec![], vec![]));
         assert!(!is_unsaved(&free, &s.slots));
+    }
+
+    #[test]
+    fn unsaved_hypershift_lists_changed_keys() {
+        let kb = FakeKeyboard::new(KEYS);
+        let mut s = synced(&kb);
+        let id = s.loaded.unwrap();
+        s.profile_mut(id).unwrap().data.hypershift.get_mut(&S).unwrap().thr_low = 99;
+        assert_eq!(unsaved_hypershift(s.profile(id).unwrap(), &s.slots), [S]);
     }
 
     #[test]

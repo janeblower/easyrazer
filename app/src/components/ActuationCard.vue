@@ -14,6 +14,9 @@ const props = defineProps<{
   value: number | null;
   rapid: RapidView;
   split: boolean;
+  /** Hypershift press point of the selection; with `hsSplit` off it follows `value`. */
+  hs: number | null;
+  hsSplit: boolean;
   driver: boolean;
 }>();
 const emit = defineEmits<{
@@ -22,6 +25,8 @@ const emit = defineEmits<{
   press: [mm: number];
   release: [mm: number];
   split: [on: boolean];
+  hs: [mm: number];
+  hsSplit: [on: boolean];
 }>();
 const { t } = useI18n();
 
@@ -74,6 +79,7 @@ function rtFill(v: number, down: boolean) {
 }
 
 const shown = computed(() => mid(MIN, MAX, props.value, MIN));
+const hsShown = computed(() => mid(MIN, MAX, props.hs, MIN));
 const rtShown = computed(() => [mid(RT_MIN, RT_MAX, props.rapid.press, 0.4), mid(RT_MIN, RT_MAX, props.rapid.release, 0.4)]);
 const rtSliders = computed(
   () =>
@@ -107,44 +113,73 @@ const rtSliders = computed(
   <div class="flex gap-8 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
       <span class="text-sm h-5">{{ $t("actuation.title") }}</span>
-      <span class="text-xs text-muted">1.5</span>
-      <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
-      <div class="mx-10 relative">
-        <input
-          class="depth h-[200px] block [writing-mode:vertical-lr]"
-          type="range"
-          :min="MIN"
-          :max="MAX"
-          :step="step"
-          :value="shown"
-          :disabled="!count"
-          :style="fill"
-          @input="emit('set', mm($event))"
-        />
-        <svg
-          v-if="arrow"
-          class="text-accent pointer-events-none right-[calc(100%+4px)] absolute -translate-y-1/2"
-          :style="{ top: fill['--to'] }"
-          viewBox="0 0 10 10"
-          width="10"
-          height="10"
-        >
-          <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
-        </svg>
-        <template v-if="!driver">
-          <div
-            v-for="m in [HW_MIN, HW_MAX]"
-            :key="m"
-            class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
-            :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
-            :style="{ top: markTop(m) }"
-          >
-            <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
+      <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
+      <div class="flex w-[192px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
+        <div class="flex flex-col gap-1 items-center">
+          <span class="text-xs text-muted">1.5</span>
+          <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
+          <div class="mx-10 relative">
+            <input
+              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              type="range"
+              :min="MIN"
+              :max="MAX"
+              :step="step"
+              :value="shown"
+              :disabled="!count"
+              :style="fill"
+              @input="emit('set', mm($event))"
+            />
+            <svg
+              v-if="arrow"
+              class="text-accent pointer-events-none right-[calc(100%+4px)] absolute -translate-y-1/2"
+              :style="{ top: fill['--to'] }"
+              viewBox="0 0 10 10"
+              width="10"
+              height="10"
+            >
+              <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
+            </svg>
+            <template v-if="!driver">
+              <div
+                v-for="m in [HW_MIN, HW_MAX]"
+                :key="m"
+                class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
+                :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
+                :style="{ top: markTop(m) }"
+              >
+                <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
+              </div>
+            </template>
+            <span class="thumb-value" :style="{ top: at((shown - MIN) / (MAX - MIN)) }">{{ label(value) }}</span>
           </div>
-        </template>
-        <span class="thumb-value" :style="{ top: at((shown - MIN) / (MAX - MIN)) }">{{ label(value) }}</span>
+          <span class="text-xs text-muted">3.6</span>
+          <span class="text-xs text-muted" :class="{ invisible: !hsSplit }">{{ $t("actuation.normal") }}</span>
+        </div>
+        <div v-if="hsSplit" class="flex flex-col gap-1 items-center">
+          <span class="text-xs text-muted">1.5</span>
+          <div class="mx-10 relative">
+            <input
+              class="depth depth-hs h-[200px] block [writing-mode:vertical-lr]"
+              type="range"
+              :min="MIN"
+              :max="MAX"
+              :step="step"
+              :value="hsShown"
+              :disabled="!count"
+              :style="fill"
+              @input="emit('hs', mm($event))"
+            />
+            <span class="thumb-value" :style="{ top: at((hsShown - MIN) / (MAX - MIN)) }">{{ label(hs) }}</span>
+          </div>
+          <span class="text-xs text-muted">3.6</span>
+          <span class="text-xs text-hs">Hypershift</span>
+        </div>
       </div>
-      <span class="text-xs text-muted">3.6</span>
+      <label class="switch text-xs">
+        <input type="checkbox" role="switch" :checked="hsSplit" :disabled="!count" @change="emit('hsSplit', checked($event))" />
+        {{ $t("actuation.hsSplit") }}
+      </label>
     </div>
     <img src="/switch.webp" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
     <div class="flex flex-col gap-1 items-center">
@@ -159,9 +194,8 @@ const rtSliders = computed(
         />
         {{ $t("rapid.title") }}
       </label>
-      <div class="flex">
-        <!-- The release slider keeps its place while hidden, so splitting moves nothing. -->
-        <div v-for="s in rtSliders" :key="s.kind" class="flex flex-col gap-1 items-center" :class="{ invisible: s.hidden }">
+      <div class="flex w-[192px]" :class="split ? 'justify-between' : 'justify-center'">
+        <div v-for="s in rtSliders.filter((s) => !s.hidden)" :key="s.kind" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">0.1</span>
           <div class="mx-10 relative">
             <input
@@ -204,12 +238,15 @@ const rtSliders = computed(
     transparent 8px,
     var(--key) 8px,
     var(--key) var(--from),
-    var(--accent) var(--from),
-    var(--accent) var(--to),
+    var(--fill, var(--accent)) var(--from),
+    var(--fill, var(--accent)) var(--to),
     var(--key) var(--to),
     var(--key) calc(100% - 8px),
     transparent calc(100% - 8px)
   );
+}
+.depth-hs {
+  --fill: var(--hs);
 }
 .depth::-webkit-slider-thumb {
   appearance: none;

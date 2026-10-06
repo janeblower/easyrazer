@@ -1,5 +1,8 @@
 <script setup lang="ts">
-const props = defineProps<{ name: "revert" | "write" | "random" | "up" | "down" | "remove" | "chip" | "rust" }>();
+const props = defineProps<{
+  name:
+    "revert" | "write" | "random" | "up" | "down" | "remove" | "chip" | "rust" | "keyboard" | "mouse" | "music" | "macro" | "cog" | "ban";
+}>();
 
 const ICONS = import.meta.glob<string>("../assets/icons/*.svg", { query: "?raw", import: "default", eager: true });
 </script>
