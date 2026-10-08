@@ -21,7 +21,8 @@
     "notAppliedN": "● не применено: {n}"
   },
   "actuation": {
-    "mm": "{v} мм",
+    "unit": "мм",
+    "shared": "Общий",
     "title": "Срабатывание",
     "hsSplit": "Раздельно для Hypershift",
     "normal": "обычное",
@@ -36,6 +37,8 @@
     "title": "Rapid Trigger",
     "press": "Нажатие",
     "release": "Отпускание",
+    "together": "Вместе",
+    "separate": "Раздельно",
     "split": "Раздельно для нажатия и отпускания",
     "hwOnly": "(недоступно в HW режиме)"
   },

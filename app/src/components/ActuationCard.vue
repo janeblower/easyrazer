@@ -33,7 +33,7 @@ const { t } = useI18n();
 const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10;
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
 const rtOn = computed(() => props.driver && props.rapid.enabled === true);
-const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : t("actuation.mm", { v: v.toFixed(1) }));
+const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
 
 const MIN = 1.5;
 const MAX = 3.6;
@@ -97,15 +97,28 @@ const rtSliders = computed(() => {
 </script>
 
 <template>
-  <div class="flex gap-8 items-start justify-center">
+  <div class="flex gap-6 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
-      <span class="text-sm h-5">{{ $t("actuation.title") }}</span>
+      <span class="text-sm h-5">{{ $t("actuation.title") }}, {{ $t("actuation.unit") }}</span>
+      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="hsSplit === on && (on ? 'border-hs bg-hs text-ink' : 'seg-on')"
+          :aria-pressed="hsSplit === on"
+          :disabled="!count"
+          @click="emit('hsSplit', on)"
+        >
+          {{ on ? "Hypershift" : $t("actuation.shared") }}
+        </button>
+      </span>
       <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
-      <div class="flex w-[192px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
+      <div class="flex w-[144px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
         <div class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">1.5</span>
           <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
-          <div class="mx-10 relative">
+          <div class="mx-7 relative">
             <input
               class="depth h-[200px] block [writing-mode:vertical-lr]"
               type="range"
@@ -145,7 +158,7 @@ const rtSliders = computed(() => {
         </div>
         <div v-if="hsSplit" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">1.5</span>
-          <div class="mx-10 relative">
+          <div class="mx-7 relative">
             <input
               class="depth depth-hs h-[200px] block [writing-mode:vertical-lr]"
               type="range"
@@ -163,10 +176,6 @@ const rtSliders = computed(() => {
           <span class="text-xs text-hs">Hypershift</span>
         </div>
       </div>
-      <label class="switch text-xs">
-        <input type="checkbox" role="switch" :checked="hsSplit" :disabled="!count" @change="emit('hsSplit', checked($event))" />
-        {{ $t("actuation.hsSplit") }}
-      </label>
     </div>
     <img src="/switch.webp" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
     <div class="flex flex-col gap-1 items-center">
@@ -179,12 +188,26 @@ const rtSliders = computed(() => {
           :disabled="!count || !driver"
           @change="emit('rapid', checked($event))"
         />
-        {{ $t("rapid.title") }}
+        {{ $t("rapid.title") }}, {{ $t("actuation.unit") }}
       </label>
-      <div class="flex w-[192px]" :class="split ? 'justify-between' : 'justify-center'">
+      <span v-if="!driver" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
+      <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="{ 'seg-on': split === on }"
+          :aria-pressed="split === on"
+          :disabled="!rtOn"
+          @click="emit('split', on)"
+        >
+          {{ $t(on ? "rapid.separate" : "rapid.together") }}
+        </button>
+      </span>
+      <div class="flex w-[144px]" :class="split ? 'justify-between' : 'justify-center'">
         <div v-for="s in rtSliders" :key="s.kind" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">0.1</span>
-          <div class="mx-10 relative">
+          <div class="mx-7 relative">
             <input
               class="depth h-[200px] block [writing-mode:vertical-lr]"
               type="range"
@@ -202,11 +225,6 @@ const rtSliders = computed(() => {
           <span class="text-xs text-muted" :class="{ invisible: !split }">{{ $t(`rapid.${s.kind}`) }}</span>
         </div>
       </div>
-      <label class="switch text-xs">
-        <input type="checkbox" role="switch" :checked="split" :disabled="!rtOn" @change="emit('split', checked($event))" />
-        {{ $t("rapid.split") }}
-      </label>
-      <span class="text-xs text-muted" :class="{ invisible: driver }">{{ $t("rapid.hwOnly") }}</span>
     </div>
   </div>
 </template>

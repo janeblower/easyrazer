@@ -21,7 +21,8 @@
     "notAppliedN": "● not applied: {n}"
   },
   "actuation": {
-    "mm": "{v} mm",
+    "unit": "mm",
+    "shared": "Shared",
     "title": "Actuation",
     "hsSplit": "Separate for Hypershift",
     "normal": "normal",
@@ -36,6 +37,8 @@
     "title": "Rapid Trigger",
     "press": "Press",
     "release": "Release",
+    "together": "Together",
+    "separate": "Separate",
     "split": "Separate press and release",
     "hwOnly": "(not available in HW mode)"
   },
