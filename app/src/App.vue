@@ -148,7 +148,7 @@ const mapHs = computed(() => {
   }
   return out;
 });
-const hsEdited = computed(() => new Set(Object.keys(hsEdits.value).map(Number)));
+const hsEdited = computed(() => new Set(Object.keys(section.value === "actuation" ? hsEdits.value : hsBindEdits.value).map(Number)));
 
 function takeHypershift(h: Hypershift) {
   hsBase.value = h.values;
@@ -266,6 +266,16 @@ const mapValues = computed(() => {
       const a = bindingOf(k);
       if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t, macroState.value?.macros);
     }
+  }
+  return out;
+});
+const mapHsBinds = computed(() => {
+  const out: KeyMap<{ text: string; icon?: System }> = {};
+  if (section.value !== "bindings") return out;
+  for (const { key: k } of layout.value) {
+    const a = hsBindingOf(k);
+    if (!a || sameAction(a, bindingOf(k) ?? factory(k))) continue;
+    out[k] = { text: shortLabel(a, byKey.value, t, macroState.value?.macros), icon: a.type === "system" ? a.action : undefined };
   }
   return out;
 });
@@ -735,6 +745,7 @@ onUnmounted(() => {
           :rapid-edited="rapidEdited"
           :hs-values="mapHs"
           :hs-edited="hsEdited"
+          :hs-binds="mapHsBinds"
           :single="section === 'bindings'"
           :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
         />
