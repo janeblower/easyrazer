@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import { hsFactory } from "./bindings";
 import { i18n } from "./i18n";
 import "virtual:uno.css";
 import "./style.css";
@@ -33,7 +34,7 @@ async function mockBackend() {
       snap: { enabled: false, groups: [] },
       bindings: {},
       unsaved_bindings: [],
-      hypershift: { values: all((_, i) => (i % 2 ? 3 : 2)), bindings: {}, unsaved: [] },
+      hypershift: { values: all((_, i) => (i % 2 ? 3 : 2)), bindings: all(hsFactory), unsaved: [] },
       profile: 1,
     },
   };
