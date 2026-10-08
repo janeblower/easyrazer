@@ -177,7 +177,25 @@ const rtSliders = computed(() => {
         </div>
       </div>
     </div>
-    <img src="/switch.webp" alt="" class="h-[200px] self-center" @error="($event.target as HTMLImageElement).style.visibility = 'hidden'" />
+    <svg class="h-[200px] self-center" viewBox="0 0 120 200" aria-hidden="true">
+      <g class="press chev">
+        <path d="M46 40 60 52 74 40M46 58 60 70 74 58" />
+      </g>
+      <g class="release chev" style="stroke: var(--text)">
+        <path d="M46 52 60 40 74 52M46 70 60 58 74 70" />
+      </g>
+      <path d="M34 120H86L92 160H28Z" style="fill: var(--key)" />
+      <path
+        d="M10 168 20 112Q22 100 34 100H86Q98 100 100 112L110 168"
+        style="fill: none; stroke: var(--muted)"
+        stroke-width="6"
+        stroke-linejoin="round"
+      />
+      <rect x="16" y="160" width="88" height="7" style="fill: var(--line)" />
+      <path d="M28 167H92V178H84V194H36V178H28Z" style="fill: var(--key)" />
+      <path d="M54 180V194M60 180V194M66 180V194" style="stroke: var(--panel)" stroke-width="2" />
+      <path d="M34 172H86" style="stroke: var(--error)" stroke-width="3" stroke-linecap="round" />
+    </svg>
     <div class="flex flex-col gap-1 items-center">
       <label class="switch text-sm h-5 whitespace-nowrap">
         <input
@@ -271,5 +289,61 @@ const rtSliders = computed(() => {
 }
 .depth:disabled::-webkit-slider-thumb {
   background: var(--muted);
+}
+.chev {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: 2s ease-in-out infinite;
+}
+.press {
+  animation-name: press;
+}
+.release {
+  animation-name: release;
+}
+@keyframes press {
+  0% {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  45% {
+    transform: translateY(10px);
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes release {
+  0%,
+  50% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  65% {
+    opacity: 1;
+  }
+  95% {
+    transform: translateY(-14px);
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chev {
+    animation: none;
+  }
+  .release {
+    opacity: 0;
+  }
 }
 </style>
