@@ -20,9 +20,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      # The switch animation is not in the repo; the card hides the image when it fails to load.
-      - run: mkdir -p app/public && touch app/public/switch.webp
-        shell: bash
       - run: bun install --frozen-lockfile
         working-directory: app
       # Windows file version must be numeric, so nightlies keep the Cargo.toml placeholder.
