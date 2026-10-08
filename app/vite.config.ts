@@ -18,7 +18,7 @@ function version() {
 }
 
 export default defineConfig({
-  plugins: [vue(), unocss()],
+  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "selectedcontent" } } }), unocss()],
   clearScreen: false,
   server: { port: 5173, strictPort: true },
   define: { __APP_VERSION__: JSON.stringify(version()) },

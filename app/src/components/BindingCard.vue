@@ -181,9 +181,64 @@ function setMod(bit: number, on: boolean) {
     </div>
     <div v-else-if="action?.type === 'system'" class="field">
       <span class="field-label">{{ $t("bindings.function") }}</span>
-      <select :value="action.action" @change="pickSystem">
-        <option v-for="s in SYSTEM" :key="s" :value="s">{{ $t(`bindings.system.${s}`) }}{{ taken?.[s] ? ` — ${taken[s]}` : "" }}</option>
+      <select class="sys" :value="action.action" @change="pickSystem">
+        <button><selectedcontent /></button>
+        <option v-for="s in SYSTEM" :key="s" :value="s">
+          <AppIcon class="text-text h-4 w-4" :name="s" />{{ $t(`bindings.system.${s}`)
+          }}<span v-if="taken?.[s]" class="taken">— {{ taken[s] }}</span>
+        </option>
       </select>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* WebView2 renders rich options only in a customizable select. */
+.sys,
+.sys::picker(select) {
+  appearance: base-select;
+}
+.sys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sys::picker(select) {
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--key);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.sys option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.sys option:hover {
+  background: var(--line);
+}
+.sys option:checked {
+  color: var(--text);
+}
+.sys option::checkmark {
+  order: 1;
+  margin-left: auto;
+  color: var(--accent);
+}
+.sys selectedcontent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.taken {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.sys selectedcontent .taken {
+  display: none;
+}
+</style>
