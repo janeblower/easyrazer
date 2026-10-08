@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
-import type { KeyMap, KeyView, Rgb } from "../types";
+import type { KeyMap, KeyView, Rgb, System } from "../types";
+import AppIcon from "./AppIcon.vue";
 
 interface Band {
   x0: number;
@@ -20,6 +21,8 @@ const props = withDefaults(
     /** Hypershift press point, on keys where it differs from `values`; shown above it. */
     hsValues?: KeyMap<string>;
     hsEdited?: Set<number>;
+    /** Hypershift binding, on keys where it differs from the normal one; system actions show as icons. */
+    hsBinds?: KeyMap<{ text: string; icon?: System }>;
     edited?: Set<number>;
     errors?: KeyMap<string>;
     unsaved?: Set<number>;
@@ -40,6 +43,7 @@ const props = withDefaults(
     values: () => ({}),
     hsValues: () => ({}),
     hsEdited: () => new Set(),
+    hsBinds: () => ({}),
     edited: () => new Set(),
     errors: () => ({}),
     unsaved: () => new Set(),
@@ -229,6 +233,15 @@ function up(e: PointerEvent) {
         <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
           <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
+          <span
+            v-if="hsBinds[k.key]"
+            class="flex min-w-0"
+            :class="hsEdited.has(k.key) ? 'font-semibold text-edited' : 'text-hs'"
+            :title="hsBinds[k.key].text"
+          >
+            <AppIcon v-if="hsBinds[k.key].icon" class="h-[13px] w-[13px]" :name="hsBinds[k.key].icon!" />
+            <span v-else class="truncate">{{ hsBinds[k.key].text }}</span>
+          </span>
           <span
             v-if="k.editable && values[k.key] != null"
             class="ml-auto flex flex-col min-w-0 items-end"

@@ -1,7 +1,23 @@
 <script setup lang="ts">
+import type { System } from "../types";
+
 const props = defineProps<{
   name:
-    "revert" | "write" | "random" | "up" | "down" | "remove" | "chip" | "rust" | "keyboard" | "mouse" | "music" | "macro" | "cog" | "ban";
+    | "revert"
+    | "write"
+    | "random"
+    | "up"
+    | "down"
+    | "remove"
+    | "chip"
+    | "rust"
+    | "keyboard"
+    | "mouse"
+    | "music"
+    | "macro"
+    | "cog"
+    | "ban"
+    | System;
 }>();
 
 const ICONS = import.meta.glob<string>("../assets/icons/*.svg", { query: "?raw", import: "default", eager: true });
