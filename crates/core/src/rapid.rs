@@ -501,6 +501,11 @@ impl Engine {
             o.clear();
         }
         self.repeat = None;
+        // The next engine starts with nothing shown, so the UI must hear the release from this one.
+        if self.shown != (0, false) {
+            self.shown = (0, false);
+            out.push(Output::Depth { depth: 0, travel: 0, down: false });
+        }
         out
     }
 }
@@ -700,6 +705,16 @@ mod tests {
         assert_eq!(feed(&[(A, 200)]), Some((200, 0, true)));
         assert_eq!(feed(&[]), Some((0, 0, false)));
         assert_eq!(feed(&[]), None);
+    }
+
+    #[test]
+    fn release_all_clears_the_shown_depth() {
+        let (mut e, t) = (engine(), Instant::now());
+        let d = depth(&[(A, 150)]);
+        e.feed_depth(&d, t);
+        e.lead(&d);
+        assert_eq!(e.release_all(), [key(A, false), Output::Depth { depth: 0, travel: 0, down: false }]);
+        assert_eq!(e.release_all(), []);
     }
 
     #[test]
