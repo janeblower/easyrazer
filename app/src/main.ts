@@ -14,7 +14,43 @@ async function mockBackend() {
   const replies: Record<string, unknown> = {
     layout,
     app_settings: { autostart_offered: true, language: null },
-    macros: { macros: {}, free: null },
+    macros: {
+      macros: {
+        1: {
+          name: "Ctrl+C, Ctrl+V",
+          events: [
+            { type: "key", key: 58, down: true },
+            { type: "key", key: 48, down: true },
+            { type: "key", key: 48, down: false },
+            { type: "delay", ms: 50 },
+            { type: "key", key: 49, down: true },
+            { type: "key", key: 49, down: false },
+            { type: "key", key: 58, down: false },
+          ],
+          written: true,
+        },
+        2: {
+          name: "Double click",
+          events: [
+            { type: "mouse", button: "left", down: true },
+            { type: "mouse", button: "left", down: false },
+            { type: "delay", ms: 30 },
+            { type: "mouse", button: "left", down: true },
+            { type: "mouse", button: "left", down: false },
+          ],
+          written: true,
+        },
+        3: {
+          name: "Draft",
+          events: [
+            { type: "key", key: 36, down: true },
+            { type: "key", key: 36, down: false },
+          ],
+          written: false,
+        },
+      },
+      free: 1536,
+    },
     profiles: null,
     status: {
       device: true,
@@ -31,8 +67,18 @@ async function mockBackend() {
       values: all(() => 2),
       unsaved: [],
       rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4 })),
-      snap: { enabled: false, groups: [] },
-      bindings: {},
+      snap: {
+        enabled: true,
+        groups: [
+          { keys: [31, 33], rule: "last" },
+          { keys: [18, 32], rule: "neutral" },
+          { keys: [79, 89], rule: "deeper" },
+        ],
+      },
+      bindings: {
+        112: { type: "macro", id: 1, mode: "times", count: 1 },
+        113: { type: "macro", id: 2, mode: "toggle", count: 1 },
+      },
       unsaved_bindings: [],
       hypershift: { values: all((_, i) => (i % 2 ? 3 : 2)), bindings: all(hsFactory), unsaved: [] },
       profile: 1,
