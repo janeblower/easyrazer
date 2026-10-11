@@ -34,7 +34,7 @@ function onScroll() {
 }
 
 watch(
-  () => rows.value.length,
+  () => rows.value.at(-1)?.seq,
   async () => {
     await nextTick();
     if (stick && box.value) box.value.scrollTop = box.value.scrollHeight;
