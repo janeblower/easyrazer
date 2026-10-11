@@ -776,11 +776,17 @@ impl Device {
         };
         // A refused or timed-out write may still have landed, so the cache is dropped either way.
         if cmd.id & 0x80 == 0 {
-            if forget(&cmd.to_string(), args, &mut self.ram, &mut self.settings) {
+            let f = forget(&cmd.to_string(), args, self.startup, &mut self.ram, &mut self.settings);
+            if f.resync {
                 self.synced = false;
-                self.reload();
+                if !self.synapse {
+                    self.reload();
+                }
             }
-            settings::save(&self.settings)?;
+            if f.saved {
+                // The write already happened; a failed save must not replace its answer.
+                let _ = settings::save(&self.settings);
+            }
         }
         answer
     }
@@ -1102,17 +1108,29 @@ pub fn synapse_running() -> bool {
     }
 }
 
-/// Drops what a console write made stale, so the next load or save writes it again; true when
-/// the slots must be read again.
-fn forget(cmd: &str, args: &[u8], ram: &mut Option<Snapshot>, s: &mut Settings) -> bool {
+/// What `forget` found stale: `saved` when the settings changed, `resync` when the slots must be read again.
+#[derive(Default)]
+struct Forgot {
+    saved: bool,
+    resync: bool,
+}
+
+/// Drops what a console write made stale, so the next load or save writes it again.
+fn forget(cmd: &str, args: &[u8], startup: Option<u8>, ram: &mut Option<Snapshot>, s: &mut Settings) -> Forgot {
     let arg = |i| args.get(i).copied().unwrap_or(0);
     fn snap<'a>(ram: &'a mut Option<Snapshot>, s: &'a mut Settings, k: u8) -> Option<&'a mut Snapshot> {
         if k == actuation::LIVE { ram.as_mut() } else { s.slots.get_mut(&k) }
     }
+    let mut f = Forgot::default();
+    // The firmware copies a write to the startup slot into profile 0.
+    if matches!(cmd, "02:12" | "0F:02" | "0F:03" | "0F:04") && Some(arg(0)) == startup {
+        *ram = None;
+    }
     match cmd {
         "02:12" => {
             let (slot, key, layer) = (arg(0), arg(1), arg(2));
-            let Some(snap) = snap(ram, s, slot) else { return false };
+            f.saved = slot != actuation::LIVE;
+            let Some(snap) = snap(ram, s, slot) else { return f };
             // A Normal write to profile 0 overwrites the key's Hypershift too.
             let hypershift = layer == analog::Layer::Hypershift as u8 || slot == actuation::LIVE;
             let normal = (layer == analog::Layer::Normal as u8).then_some(&mut snap.normal);
@@ -1123,6 +1141,7 @@ fn forget(cmd: &str, args: &[u8], ram: &mut Option<Snapshot>, s: &mut Settings) 
             }
         }
         "0F:02" | "0F:03" | "0F:04" => {
+            f.saved = arg(0) != actuation::LIVE;
             if let Some(snap) = snap(ram, s, arg(0)) {
                 snap.look = None;
             }
@@ -1130,17 +1149,18 @@ fn forget(cmd: &str, args: &[u8], ram: &mut Option<Snapshot>, s: &mut Settings) 
         "06:08" | "06:09" | "06:03" => {
             if let Some(m) = s.macros.get_mut(&u16::from_be_bytes([arg(0), arg(1)])) {
                 m.written = false;
+                f.saved = true;
             }
         }
         // The firmware reloads profile 0 from the startup slot.
         "00:04" => *ram = None,
         "05:02" | "05:03" | "05:04" => {
             *ram = None;
-            return true;
+            f.resync = true;
         }
         _ => {}
     }
-    false
+    f
 }
 
 #[cfg(test)]
@@ -1162,17 +1182,21 @@ mod tests {
         let mut s = Settings { slots: BTreeMap::from([(2, full.clone())]), ..Default::default() };
         s.macros.insert(0x0102, Macro { name: String::new(), events: Vec::new(), written: true });
 
-        assert!(!forget("02:12", &[0, 31, 0], &mut ram, &mut s));
+        assert!(!forget("02:12", &[0, 31, 0], Some(2), &mut ram, &mut s).resync);
         let r = ram.as_ref().unwrap();
         assert_eq!((r.normal[&31].fn_id, r.hypershift[&31].fn_id, r.normal[&32].fn_id), (UNKNOWN_FN, UNKNOWN_FN, 0x02));
-        forget("02:12", &[2, 31, 1], &mut ram, &mut s);
+        forget("02:12", &[3, 31, 1], Some(2), &mut ram, &mut s);
+        assert!(ram.is_some());
+        forget("02:12", &[2, 31, 1], Some(2), &mut ram, &mut s);
+        assert!(ram.is_none());
         assert_eq!((s.slots[&2].normal[&31].fn_id, s.slots[&2].hypershift[&31].fn_id), (0x02, UNKNOWN_FN));
+        ram = Some(full.clone());
 
-        forget("0F:04", &[2, 5, 0x80], &mut ram, &mut s);
+        forget("0F:04", &[2, 5, 0x80], None, &mut ram, &mut s);
         assert!(s.slots[&2].look.is_none() && ram.as_ref().unwrap().look.is_some());
-        forget("06:09", &[1, 2, 0, 0, 0, 0, 1, 0], &mut ram, &mut s);
+        forget("06:09", &[1, 2, 0, 0, 0, 0, 1, 0], None, &mut ram, &mut s);
         assert!(!s.macros[&0x0102].written);
-        assert!(forget("05:04", &[2], &mut ram, &mut s) && ram.is_none());
+        assert!(forget("05:04", &[2], None, &mut ram, &mut s).resync && ram.is_none());
     }
 
     #[test]
