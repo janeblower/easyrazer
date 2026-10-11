@@ -5,6 +5,7 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { log } from "../dev";
 import { hex, isWrite } from "../devConsole";
 import type { DevKey, RawKey } from "../types";
+import { DEV_BLOCK_H } from "../devWindow";
 import DevBlock from "./DevBlock.vue";
 
 const props = defineProps<{ keys: number[]; depth: boolean; driver: boolean }>();
@@ -33,7 +34,7 @@ onUnmounted(() => unlisten?.());
 </script>
 
 <template>
-  <DevBlock v-if="keys.length > 0 || depth">
+  <DevBlock class="shrink-0 box-border overflow-auto" :style="{ height: `${DEV_BLOCK_H}px` }">
     <div v-for="l in lines" :key="l">{{ l }}</div>
     <div v-if="keys.length > MAX">{{ $t("dev.more", { n: keys.length - MAX }) }}</div>
     <div v-if="depth">{{ driver ? `depth ${lead[0]} travel ${lead[1]} ${lead[2] ? "down" : "up"}` : $t("dev.needDriver") }}</div>

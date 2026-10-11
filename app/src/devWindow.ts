@@ -8,6 +8,9 @@ import type { DevWindow, Dock } from "./types";
 const MIN_W = 1153;
 const MIN_H = 923;
 const LABEL = "devtools";
+/** The raw-data block on the keys tab and the gap above it (`DevKeys.vue`, `gap-4`). */
+export const DEV_BLOCK_H = 100;
+const DEV_EXTRA_H = DEV_BLOCK_H + 16;
 
 // What the panel added to the main window, and how far a left dock moved it.
 const grown = { w: 0, h: 0, left: 0 };
@@ -17,11 +20,11 @@ async function logical<T>(physical: Promise<{ toLogical: (scale: number) => T }>
   return value.toLogical(scale);
 }
 
-async function grow(dock: Dock | null, size: number) {
+async function grow(dock: Dock | null, size: number, extra: number) {
   const win = getCurrentWindow();
   // A maximized window keeps its size; the panel takes room from the content.
   if (await win.isMaximized()) {
-    if (dock === null) {
+    if (dock === null && extra === 0) {
       await win.setMinSize(new LogicalSize(MIN_W, MIN_H));
       Object.assign(grown, { w: 0, h: 0, left: 0 });
     }
@@ -41,7 +44,7 @@ async function grow(dock: Dock | null, size: number) {
   const frame = { w: outer.width - inner.width, h: outer.height - inner.height };
   const base = { w: inner.width - grown.w, h: inner.height - grown.h, x: pos.x + grown.left };
   let addW = dock === "left" || dock === "right" ? size : 0;
-  let addH = dock === "bottom" ? size : 0;
+  let addH = (dock === "bottom" ? size : 0) + extra;
   let x = base.x - (dock === "left" ? addW : 0);
   let y = pos.y;
   if (area) {
@@ -81,10 +84,11 @@ let running: Promise<void> | null = null;
 let latest: (() => Promise<void>) | null = null;
 
 /** Fits the main window and the separate one to the panel; one at a time, and only the newest waiting call runs. */
-export async function applyLayout(on: boolean, dock: Dock, size: number, geom: DevWindow | null, title: string) {
+export async function applyLayout(mode: boolean, on: boolean, dock: Dock, size: number, geom: DevWindow | null, title: string) {
   latest = async () => {
     try {
-      await grow(on && dock !== "window" ? dock : null, size);
+      // The dev blocks on the tabs need room too, or the content scrolls.
+      await grow(on && dock !== "window" ? dock : null, size, mode ? DEV_EXTRA_H : 0);
       await (on && dock === "window" ? openDetached(geom, title) : closeDetached());
     } catch (error) {
       // The Vite dev server has no windows to resize.

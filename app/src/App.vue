@@ -194,9 +194,9 @@ const bindKey = computed(() => (selection.value.size === 1 ? [...selection.value
 const byKey = computed(() => new Map(layout.value.map((k) => [k.key, k])));
 
 watch(
-  () => [dev.mode && !!dev.panel?.open, dev.panel?.dock, dev.panel?.size] as const,
-  ([on, dock, size]) => {
-    if (dock && size) void applyLayout(on, dock, size, dev.window, t("dev.title"));
+  () => [dev.mode, dev.mode && !!dev.panel?.open, dev.panel?.dock, dev.panel?.size] as const,
+  ([mode, on, dock, size]) => {
+    if (dock && size) void applyLayout(mode, on, dock, size, dev.window, t("dev.title"));
   },
 );
 
