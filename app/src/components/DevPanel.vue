@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import type { Dock } from "../types";
+import { computed, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "vue-i18n";
+import type { DeviceInfo, Dock } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
 import { dev, setPanel, startDev } from "../dev";
 import { trackDetached } from "../devWindow";
+import DevConsole from "./DevConsole.vue";
 import DevLog from "./DevLog.vue";
 
 const props = defineProps<{ dock?: Dock; detached?: boolean }>();
@@ -14,6 +17,52 @@ const DOCKS: Dock[] = ["left", "bottom", "right", "window"];
 const DEFAULT_SIZE: Record<Dock, number> = { left: 420, right: 420, bottom: 260, window: 420 };
 const MIN_SIZE = 200;
 const tab = ref<(typeof TABS)[number]>("log");
+
+const { t: translate } = useI18n();
+const info = ref<DeviceInfo | null>(null);
+const uncensored = ref(false);
+const note = ref("");
+const h = (n: number | null | undefined, width = 2) => (n == null ? "—" : n.toString(16).toUpperCase().padStart(width, "0"));
+
+async function loadInfo() {
+  note.value = "";
+  try {
+    info.value = await invoke<DeviceInfo | null>("dev_device");
+  } catch (error) {
+    note.value = String(error);
+  }
+}
+
+const rows = computed(() => {
+  const i = info.value;
+  if (!i) return [];
+  return [
+    ["model", i.model],
+    ["ids", `${h(i.vid, 4)}:${h(i.pid, 4)}`],
+    ["interface", String(i.interface)],
+    ["tid", h(i.tid)],
+    ["lighting", `${i.lighting_protocol}, LED ${h(i.led)}`],
+    ["lampArray", String(i.lamp_array)],
+    ["mode", h(i.mode)],
+    ["startup", String(i.startup_slot ?? "—")],
+    ["loaded", String(i.loaded_profile ?? "—")],
+    ["firmware", i.firmware ?? "—"],
+    ["serial", i.serial ?? "—"],
+  ] as const;
+});
+
+watch(tab, (v) => {
+  if (v === "device") void loadInfo();
+});
+
+async function copyDiagnostics() {
+  try {
+    await navigator.clipboard.writeText(await invoke<string>("dev_diagnostics", { uncensored: uncensored.value }));
+    note.value = translate("dev.copied");
+  } catch (error) {
+    note.value = String(error);
+  }
+}
 
 onMounted(async () => {
   if (!props.detached) return;
@@ -73,6 +122,11 @@ function drag(down: PointerEvent) {
       <button v-for="t in TABS" :key="t" class="seg-btn" :class="{ 'seg-on': tab === t }" @click="tab = t">
         {{ $t(`dev.tabs.${t}`) }}
       </button>
+      <button class="ml-2" @click="copyDiagnostics">{{ $t("dev.copyDiagnostics") }}</button>
+      <label class="text-xs text-muted" :title="$t('dev.uncensoredHint')"
+        ><input v-model="uncensored" type="checkbox" /> {{ $t("dev.uncensored") }}</label
+      >
+      <span class="text-xs text-muted">{{ note }}</span>
       <span class="ml-auto inline-flex">
         <button
           v-for="d in DOCKS"
@@ -89,5 +143,16 @@ function drag(down: PointerEvent) {
       <button class="text-muted" :title="$t('dev.close')" @click="setPanel({ open: false })">✕</button>
     </header>
     <DevLog v-if="tab === 'log'" />
+    <DevConsole v-else-if="tab === 'console'" />
+    <div v-else class="text-xs p-2 overflow-auto">
+      <p v-if="!info" class="msg">{{ $t("dev.noDevice") }}</p>
+      <table v-else class="font-mono">
+        <tr v-for="[k, v] in rows" :key="k">
+          <td class="text-muted pr-4">{{ $t(`dev.info.${k}`) }}</td>
+          <td>{{ v }}</td>
+        </tr>
+      </table>
+      <button class="mt-2" @click="loadInfo">{{ $t("dev.refresh") }}</button>
+    </div>
   </aside>
 </template>
