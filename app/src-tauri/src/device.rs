@@ -770,10 +770,19 @@ impl Device {
     pub fn dev_exchange(&mut self, cmd: Command, size: u8, args: &[u8]) -> Result<Entry, String> {
         let (t, _) = self.keyboard()?;
         let r = exchange(t, cmd, size, args);
-        match self.log.last() {
+        let answer = match self.log.last() {
             Some(e) if e.cmd == cmd.to_string() => Ok(e),
             _ => Err(r.err().map(|e| e.to_string()).unwrap_or_default()),
+        };
+        // A refused or timed-out write may still have landed, so the cache is dropped either way.
+        if cmd.id & 0x80 == 0 {
+            if forget(&cmd.to_string(), args, &mut self.ram, &mut self.settings) {
+                self.synced = false;
+                self.reload();
+            }
+            settings::save(&self.settings)?;
         }
+        answer
     }
 
     pub fn update_settings(&mut self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
@@ -1093,6 +1102,47 @@ pub fn synapse_running() -> bool {
     }
 }
 
+/// Drops what a console write made stale, so the next load or save writes it again; true when
+/// the slots must be read again.
+fn forget(cmd: &str, args: &[u8], ram: &mut Option<Snapshot>, s: &mut Settings) -> bool {
+    let arg = |i| args.get(i).copied().unwrap_or(0);
+    fn snap<'a>(ram: &'a mut Option<Snapshot>, s: &'a mut Settings, k: u8) -> Option<&'a mut Snapshot> {
+        if k == actuation::LIVE { ram.as_mut() } else { s.slots.get_mut(&k) }
+    }
+    match cmd {
+        "02:12" => {
+            let (slot, key, layer) = (arg(0), arg(1), arg(2));
+            let Some(snap) = snap(ram, s, slot) else { return false };
+            // A Normal write to profile 0 overwrites the key's Hypershift too.
+            let hypershift = layer == analog::Layer::Hypershift as u8 || slot == actuation::LIVE;
+            let normal = (layer == analog::Layer::Normal as u8).then_some(&mut snap.normal);
+            for layer in normal.into_iter().chain(hypershift.then_some(&mut snap.hypershift)) {
+                if let Some(r) = layer.get_mut(&key) {
+                    r.fn_id = UNKNOWN_FN;
+                }
+            }
+        }
+        "0F:02" | "0F:03" | "0F:04" => {
+            if let Some(snap) = snap(ram, s, arg(0)) {
+                snap.look = None;
+            }
+        }
+        "06:08" | "06:09" | "06:03" => {
+            if let Some(m) = s.macros.get_mut(&u16::from_be_bytes([arg(0), arg(1)])) {
+                m.written = false;
+            }
+        }
+        // The firmware reloads profile 0 from the startup slot.
+        "00:04" => *ram = None,
+        "05:02" | "05:03" | "05:04" => {
+            *ram = None;
+            return true;
+        }
+        _ => {}
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use razer_core::binding::System;
@@ -1102,6 +1152,27 @@ mod tests {
 
     fn plain(k: u8) -> RawKey {
         RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
+    }
+
+    #[test]
+    fn console_writes_drop_what_they_touched() {
+        let look = Look { effect: Effect { name: "static".into(), ..Default::default() }, brightness: 9 };
+        let full = Snapshot { normal: BTreeMap::from([(31, plain(4)), (32, plain(5))]), hypershift: BTreeMap::from([(31, plain(4))]), look: Some(look) };
+        let mut ram = Some(full.clone());
+        let mut s = Settings { slots: BTreeMap::from([(2, full.clone())]), ..Default::default() };
+        s.macros.insert(0x0102, Macro { name: String::new(), events: Vec::new(), written: true });
+
+        assert!(!forget("02:12", &[0, 31, 0], &mut ram, &mut s));
+        let r = ram.as_ref().unwrap();
+        assert_eq!((r.normal[&31].fn_id, r.hypershift[&31].fn_id, r.normal[&32].fn_id), (UNKNOWN_FN, UNKNOWN_FN, 0x02));
+        forget("02:12", &[2, 31, 1], &mut ram, &mut s);
+        assert_eq!((s.slots[&2].normal[&31].fn_id, s.slots[&2].hypershift[&31].fn_id), (0x02, UNKNOWN_FN));
+
+        forget("0F:04", &[2, 5, 0x80], &mut ram, &mut s);
+        assert!(s.slots[&2].look.is_none() && ram.as_ref().unwrap().look.is_some());
+        forget("06:09", &[1, 2, 0, 0, 0, 0, 1, 0], &mut ram, &mut s);
+        assert!(!s.macros[&0x0102].written);
+        assert!(forget("05:04", &[2], &mut ram, &mut s) && ram.is_none());
     }
 
     #[test]
