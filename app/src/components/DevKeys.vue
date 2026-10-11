@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { log } from "../dev";
-import { hex } from "../devConsole";
+import { hex, isWrite } from "../devConsole";
 import type { DevKey, RawKey } from "../types";
 import DevBlock from "./DevBlock.vue";
 
@@ -16,9 +16,12 @@ let unlisten: UnlistenFn | undefined;
 async function load() {
   raw.value = props.keys.length > 0 ? await invoke<Record<number, DevKey>>("dev_keys", { keys: props.keys.slice(0, MAX) }) : {};
 }
-// A write shows up in the log; the profile it changed is read again.
+const lastWrite = () => {
+  for (let i = log.value.length - 1; i >= 0; i--) if (isWrite(log.value[i].cmd)) return log.value[i].seq;
+};
+// A write shows up in the log; the profile it changed is read again, polls and reads change nothing.
 // The parent passes a fresh array each render: watch its contents, not the array.
-watch([() => props.keys.join(","), () => log.value.at(-1)?.seq], load, { immediate: true });
+watch([() => props.keys.join(","), lastWrite], load, { immediate: true });
 
 const fmt = (r: RawKey | null) => (r ? `lo ${hex([r.thr_low])} hi ${hex([r.thr_high])} fn ${hex([r.fn_id])} [${hex(r.fn_data)}]` : "—");
 const lines = computed(() =>
