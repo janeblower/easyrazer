@@ -15,6 +15,13 @@ export const dev = reactive({
 export const log = shallowRef<LogEntry[]>([]);
 export const registry = ref<Record<string, CommandInfo>>({});
 
+/** The exchange whose details are open, by `seq`; the console opens it too. */
+export const selected = ref<number | null>(null);
+/** Exchanges this window's console sent. */
+export const fromConsole = reactive(new Set<number>());
+
+export const infoOf = (cmd: string) => Object.values(registry.value).find((c) => c.cmd === cmd);
+
 export const nameOf = (cmd: string) => Object.entries(registry.value).find(([, c]) => c.cmd === cmd)?.[0];
 
 async function loadSettings() {

@@ -6,6 +6,8 @@ import { type Parsed, hex, isWrite, parse, suggest } from "../devConsole";
 import type { LogEntry } from "../types";
 import ModalDialog from "./ModalDialog.vue";
 
+defineEmits<{ open: [seq: number]; close: [] }>();
+
 const RECENT_KEY = "dev.recent";
 const RECENT_MAX = 20;
 
@@ -83,7 +85,7 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="text-xs font-mono p-2 flex flex-col gap-2 min-h-0 overflow-auto">
+  <div class="text-xs font-mono p-2 flex flex-1 flex-col gap-2 min-h-0 overflow-auto">
     <div class="relative">
       <input
         v-model="line"

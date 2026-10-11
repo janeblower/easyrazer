@@ -41,5 +41,9 @@ export default defineConfig({
     "seg-on": "border-accent bg-accent text-ink",
     "icon-btn": "inline-flex h-8 w-[34px] items-center justify-center p-0",
     "write-btn": "icon-btn text-write border-write-line bg-transparent",
+    "dev-btn": "bg-transparent border-0 rounded px-1.5 py-0.5 text-muted hover:bg-key hover:text-text",
+    "dev-tab": "bg-transparent border-0 border-b-2 border-solid border-transparent rounded-none h-full px-2.5 text-muted",
+    "dev-tab-on": "text-text border-dev",
+    "dev-pop": "absolute z-30 bg-key border border-solid border-line rounded-md py-1.5 shadow-lg text-xs",
   },
 });
