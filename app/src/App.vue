@@ -40,6 +40,7 @@ import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
 import DevPanel from "./components/DevPanel.vue";
 import { dev, setPanel, startDev } from "./dev";
+import DevKeys from "./components/DevKeys.vue";
 import { applyLayout } from "./devWindow";
 
 const { t } = useI18n();
@@ -830,6 +831,7 @@ onUnmounted(() => {
                 />
               </div>
             </div>
+            <DevKeys v-if="dev.mode" :keys="[...selection]" :depth="section === 'actuation'" :driver="driver" />
             <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
