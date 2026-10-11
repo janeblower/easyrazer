@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, State, WebviewWindow};
 use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
-use crate::settings::{CloseAction, Rapid, SnapTap};
+use crate::settings::{CloseAction, DevPanel, DevWindow, Rapid, SnapTap};
 use crate::{autostart, i18n, tray};
 
 pub struct AppState {
@@ -253,6 +253,9 @@ pub struct AppSettings {
     confirm_write: bool,
     autostart_offered: bool,
     language: Option<String>,
+    dev_mode: bool,
+    dev_panel: Option<DevPanel>,
+    dev_window: Option<DevWindow>,
 }
 
 #[tauri::command]
@@ -265,6 +268,9 @@ pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
         confirm_write: s.confirm_write,
         autostart_offered: s.autostart_offered,
         language: s.language,
+        dev_mode: s.dev_mode,
+        dev_panel: s.dev_panel,
+        dev_window: s.dev_window,
     })
 }
 
