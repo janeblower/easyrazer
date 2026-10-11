@@ -155,7 +155,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         :title="m.written ? '' : $t('macros.notWritten')"
         @click="open(m.id)"
       >
-        {{ m.name }}<span v-if="!m.written" class="text-edited"> ●</span>
+        {{ m.id }}. {{ m.name }}<span v-if="!m.written" class="text-edited"> ●</span>
       </button>
       <button @click="open(null)">{{ $t("macros.new") }}</button>
     </div>

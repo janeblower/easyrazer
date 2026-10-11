@@ -264,7 +264,7 @@ const mapValues = computed(() => {
       if (mm != null) out[k] = mm.toFixed(1);
     } else if (k in bindBase.value || k in bindEdits.value) {
       const a = bindingOf(k);
-      if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t, macroState.value?.macros);
+      if (!sameAction(a, factory(k))) out[k] = shortLabel(a, byKey.value, t);
     }
   }
   return out;
@@ -275,7 +275,7 @@ const mapHsBinds = computed(() => {
   for (const { key: k } of layout.value) {
     const a = hsBindingOf(k);
     if (!a || sameAction(a, bindingOf(k) ?? factory(k))) continue;
-    out[k] = { text: shortLabel(a, byKey.value, t, macroState.value?.macros), icon: a.type === "system" ? a.action : undefined };
+    out[k] = { text: shortLabel(a, byKey.value, t), icon: a.type === "system" ? a.action : undefined };
   }
   return out;
 });
@@ -737,6 +737,7 @@ onUnmounted(() => {
           v-model:selection="selection"
           :layout="layout"
           :values="mapValues"
+          :inline="section === 'bindings'"
           :edited="mapEdited"
           :errors="section === 'actuation' ? errors : bindErrors"
           :unsaved="section === 'actuation' ? unsaved : bindUnsaved"

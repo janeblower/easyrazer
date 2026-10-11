@@ -18,6 +18,8 @@ const props = withDefaults(
     layout: KeyView[];
     /** Text under the label, and the keys whose value is not applied yet. */
     values?: KeyMap<string>;
+    /** Show `values` in place of the label. */
+    inline?: boolean;
     /** Hypershift press point, on keys where it differs from `values`; shown above it. */
     hsValues?: KeyMap<string>;
     hsEdited?: Set<number>;
@@ -158,6 +160,9 @@ function valueClass(key: number) {
   return props.unsaved.has(key) ? "text-accent" : "text-muted";
 }
 
+// A value in place of the label stays as bright as the label.
+const labelClass = (key: number) => valueClass(key).replace("text-muted", "");
+
 function title(key: number) {
   if (key in ZONES) return t(ZONES[key]);
   return props.errors[key] ?? (props.unsaved.has(key) ? t("actuation.unsavedKey") : undefined);
@@ -230,7 +235,8 @@ function up(e: PointerEvent) {
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
-        <span class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span v-if="inline && values[k.key] != null" class="text-xs truncate" :class="labelClass(k.key)">{{ values[k.key] }}</span>
+        <span v-else class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
           <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">RT</span>
           <span
@@ -243,7 +249,7 @@ function up(e: PointerEvent) {
             <span v-else class="truncate">{{ hsBinds[k.key].text }}</span>
           </span>
           <span
-            v-if="k.editable && values[k.key] != null"
+            v-if="k.editable && !inline && values[k.key] != null"
             class="ml-auto flex flex-col min-w-0 items-end"
             :class="{ 'text-[9px] leading-[10px]': hsValues[k.key] != null }"
           >

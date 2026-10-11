@@ -154,7 +154,7 @@ function setMod(bit: number, on: boolean) {
         <span class="field-label">{{ $t("bindings.macro") }}</span>
         <select :value="macroAction.id" @change="setMacro({ id: Number(value($event)) })">
           <option v-if="!(macroAction.id in macros)" :value="macroAction.id">#{{ macroAction.id }}</option>
-          <option v-for="m in macroList" :key="m.id" :value="m.id">{{ m.name }}</option>
+          <option v-for="m in macroList" :key="m.id" :value="m.id">{{ m.id }}. {{ m.name }}</option>
         </select>
       </div>
       <div class="field">

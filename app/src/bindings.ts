@@ -1,4 +1,4 @@
-import type { Action, KeyView, Macro, MacroEvent, Media, Mouse, System } from "./types";
+import type { Action, KeyView, MacroEvent, Media, Mouse, System } from "./types";
 
 type T = (key: string, args?: Record<string, unknown>) => string;
 
@@ -38,7 +38,7 @@ export function sameAction(a: Action | null | undefined, b: Action | null | unde
 }
 
 /** Text on the key cap; `null` is a binding the app does not edit. */
-export function shortLabel(a: Action | null, keys: Map<number, KeyView>, t: T, macros: Record<number, Macro> = {}): string {
+export function shortLabel(a: Action | null, keys: Map<number, KeyView>, t: T): string {
   if (!a) return "…";
   switch (a.type) {
     case "disabled": {
@@ -55,7 +55,7 @@ export function shortLabel(a: Action | null, keys: Map<number, KeyView>, t: T, m
       return t(`bindings.mediaShort.${a.media}`);
     }
     case "macro": {
-      return `▶${macros[a.id]?.name ?? a.id}`;
+      return `M${a.id}`;
     }
     case "system": {
       return t(`bindings.system.${a.action}`);
