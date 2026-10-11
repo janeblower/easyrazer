@@ -22,7 +22,7 @@ const listOpen = ref(false);
 const active = ref(0);
 const recent = ref(loadRecent());
 const result = ref<LogEntry | string | null>(null);
-const confirming = ref<Parsed | null>(null);
+const confirming = ref<{ p: Parsed; text: string } | null>(null);
 const list = computed(() => suggest(line.value, registry.value, recent.value));
 const shown = computed(() => list.value[active.value]);
 watch(list, () => (active.value = 0));
@@ -34,9 +34,8 @@ function complete() {
   line.value = s.recent ? s.text : `${[s.text, ...rest].join(" ")}${rest.length > 0 ? "" : " "}`;
 }
 
-async function send(p: Parsed) {
+async function send(p: Parsed, text: string) {
   confirming.value = null;
-  const text = line.value.trim();
   recent.value = [text, ...recent.value.filter((r) => r !== text)].slice(0, RECENT_MAX);
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value));
@@ -59,8 +58,8 @@ async function submit() {
   listOpen.value = false;
   const p = parse(line.value, registry.value);
   if (typeof p === "string") result.value = p;
-  else if (isWrite(p.cmd)) confirming.value = p;
-  else await send(p);
+  else if (isWrite(p.cmd)) confirming.value = { p, text: line.value.trim() };
+  else await send(p, line.value.trim());
 }
 
 function onKey(e: KeyboardEvent) {
@@ -129,10 +128,10 @@ function onKey(e: KeyboardEvent) {
       <template v-else>← {{ result.error ?? result.status }} · {{ result.ms }} ms · {{ hex(result.reply) }}</template>
     </div>
     <ModalDialog v-if="confirming" :title="$t('dev.confirmTitle')" @cancel="confirming = null">
-      <p>{{ $t("dev.confirmText", { cmd: `${confirming.cmd} ${hex(confirming.args)}` }) }}</p>
+      <p>{{ $t("dev.confirmText", { cmd: `${confirming.p.cmd} ${hex(confirming.p.args)}` }) }}</p>
       <template #actions>
         <button autofocus @click="confirming = null">{{ $t("profiles.cancel") }}</button>
-        <button class="primary" @click="send(confirming)">{{ $t("dev.send") }}</button>
+        <button class="primary" @click="send(confirming.p, confirming.text)">{{ $t("dev.send") }}</button>
       </template>
     </ModalDialog>
   </div>
