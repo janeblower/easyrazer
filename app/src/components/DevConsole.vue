@@ -20,7 +20,8 @@ interface Line {
 
 function loadRecent(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[];
+    const x: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
   } catch {
     return [];
   }
@@ -105,7 +106,9 @@ function cancel() {
 
 function onKey(e: KeyboardEvent) {
   if (pending.value) {
-    if (e.key === "Enter") {
+    if (e.repeat) {
+      e.preventDefault();
+    } else if (e.key === "Enter") {
       e.preventDefault();
       const { p, text } = pending.value;
       pending.value = null;
