@@ -109,7 +109,7 @@ async function mockBackend() {
       driver_mode: true,
       profile: 1,
       profile_name: "Dev",
-      model: "Huntsman V2 Analog",
+      model: "Phantom Analog 104",
       unsupported: null,
       error: null,
     },
