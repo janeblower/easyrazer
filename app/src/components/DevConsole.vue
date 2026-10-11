@@ -35,9 +35,18 @@ const recent = ref(loadRecent());
 const out = ref<Line[]>([]);
 const pending = ref<{ p: Parsed; text: string } | null>(null);
 const box = ref<HTMLElement | null>(null);
+const listBox = ref<HTMLElement | null>(null);
+const navigated = ref(false); // an item was picked with the arrows
 const list = computed(() => suggest(line.value, registry.value, recent.value));
 const shown = computed(() => list.value[active.value]);
-watch(list, () => (active.value = 0));
+watch(list, () => {
+  active.value = 0;
+  navigated.value = false;
+});
+watch(active, async (i) => {
+  await nextTick();
+  listBox.value?.children[i]?.scrollIntoView({ block: "nearest" });
+});
 
 function print(...lines: Line[]) {
   out.value.push(...lines);
@@ -46,11 +55,25 @@ function print(...lines: Line[]) {
   });
 }
 
-function complete() {
+function completion() {
   const s = shown.value;
-  if (!s) return;
+  if (!s) return null;
   const rest = line.value.trim().split(/\s+/).slice(1);
-  line.value = s.recent ? s.text : `${[s.text, ...rest].join(" ")}${rest.length > 0 ? "" : " "}`;
+  return s.recent ? s.text : `${[s.text, ...rest].join(" ")}${rest.length > 0 ? "" : " "}`;
+}
+
+function complete() {
+  line.value = completion() ?? line.value;
+}
+
+/** Enter takes the picked item, unless the line already names a command and the arrows were not used. */
+function accepts() {
+  if (!listOpen.value) return false;
+  const next = completion();
+  if (next === null || next === line.value) return false;
+  const head = line.value.trim().split(/\s+/)[0] ?? "";
+  const known = Object.hasOwn(registry.value, head.toLowerCase()) || /^[0-9a-f]{2}:[0-9a-f]{2}$/i.test(head);
+  return navigated.value || !known;
 }
 
 async function send(p: Parsed, text: string) {
@@ -120,11 +143,22 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   const keys: Record<string, () => void> = {
-    ArrowDown: () => (active.value = Math.min(active.value + 1, list.value.length - 1)),
-    ArrowUp: () => (active.value = Math.max(active.value - 1, 0)),
+    ArrowDown: () => {
+      listOpen.value = true;
+      navigated.value = true;
+      active.value = Math.min(active.value + 1, list.value.length - 1);
+    },
+    ArrowUp: () => {
+      listOpen.value = true;
+      navigated.value = true;
+      active.value = Math.max(active.value - 1, 0);
+    },
     Tab: complete,
     Enter: () => {
-      void submit();
+      if (accepts()) {
+        complete();
+        listOpen.value = false;
+      } else void submit();
     },
   };
   if (e.key === "Escape") {
@@ -182,6 +216,7 @@ const tone: Record<Line["kind"], string> = {
     <div class="px-2 py-1 border-t border-0 border-line border-solid flex shrink-0 gap-1.5 items-center relative">
       <div
         v-if="listOpen && !pending && list.length > 0"
+        ref="listBox"
         class="border border-line rounded-t-md border-solid bg-key max-h-[160px] bottom-full left-5 right-1 absolute z-10 overflow-auto"
       >
         <div
