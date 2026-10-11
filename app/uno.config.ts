@@ -19,6 +19,7 @@ const COLORS = [
   "warn-bg",
   "write",
   "write-line",
+  "dev",
 ];
 
 export default defineConfig({

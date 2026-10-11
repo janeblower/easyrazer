@@ -150,6 +150,9 @@ export interface AppSettings {
   confirm_write: boolean;
   autostart_offered: boolean;
   language: string | null;
+  dev_mode: boolean;
+  dev_panel: DevPanel | null;
+  dev_window: DevWindow | null;
 }
 
 // fwID -> value
@@ -169,4 +172,73 @@ export interface ProfilesView {
   // Slot the keyboard starts with without the app.
   startup: number | null;
   free_slot: boolean;
+}
+
+export type Dock = "left" | "right" | "bottom" | "window";
+
+export interface DevPanel {
+  open: boolean;
+  dock: Dock;
+  size: number; // logical px across the dock
+}
+
+export interface DevWindow {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// One exchange with the keyboard (razer_core::logged::Entry).
+export interface LogEntry {
+  seq: number;
+  time: number; // unix ms
+  cmd: string; // "CC:II" or a label
+  size: number;
+  args: number[];
+  status: string | null;
+  reply: number[];
+  polls: number;
+  ms: number;
+  error: string | null;
+  background: boolean;
+  tx: number[];
+  rx: number[];
+}
+
+export interface CommandInfo {
+  cmd: string;
+  size: number | null; // null: as many as the args
+  help: string;
+  args: [string, string][];
+  example: string;
+}
+
+export interface RawKey {
+  thr_low: number;
+  thr_high: number;
+  fn_id: number;
+  fn_data: number[];
+}
+
+export interface DevKey {
+  name: string;
+  normal: RawKey | null;
+  hypershift: RawKey | null;
+}
+
+export interface DeviceInfo {
+  model: string;
+  vid: number;
+  pid: number;
+  interface: number;
+  tid: number;
+  lighting_protocol: string;
+  led: number;
+  lamp_array: boolean;
+  mode: number | null;
+  startup_slot: number | null;
+  loaded_profile: number | null;
+  firmware: string | null;
+  serial: string | null;
 }

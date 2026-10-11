@@ -62,6 +62,87 @@ async function mockBackend() {
     rapid?: Record<number, unknown>;
     snap?: unknown;
   }
+  const { emit } = await import("@tauri-apps/api/event");
+  const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
+  const devSettings = { dev_mode: false, dev_panel: null as unknown, dev_window: null as unknown };
+  let seq = 0;
+  const devLog: unknown[] = [];
+  const entry = (cmd: string, args: number[], reply: number[] = []) => {
+    const e = {
+      seq: seq++,
+      time: Date.now(),
+      cmd,
+      size: args.length,
+      args,
+      status: "Ok",
+      reply,
+      polls: 0,
+      ms: 3,
+      error: null,
+      background: false,
+      tx: args,
+      rx: reply,
+    };
+    devLog.push(e);
+    void emit("hid-log", e);
+    return e;
+  };
+  entry("00:84", [], [3, 0]);
+  entry("05:84", [], [1]);
+  entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4]);
+  const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
+  const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
+    set_dev_mode: ({ on }) => {
+      devSettings.dev_mode = on as boolean;
+      devSettings.dev_panel ??= { open: true, dock: "right", size: 420 };
+      void emit("settings-changed");
+    },
+    set_dev_panel: ({ panel }) => {
+      devSettings.dev_panel = panel;
+      void emit("settings-changed");
+    },
+    set_dev_window: ({ geom }) => {
+      devSettings.dev_window = geom;
+    },
+    dev_log: () => devLog,
+    dev_commands: () => ({
+      get_mode: info("00:84", "Device mode in the first reply byte: 00 hardware, 03 driver.", 2),
+      set_mode: info("00:04", "Switches the device mode.", 2, [
+        ["mode", "00 hardware, 03 driver"],
+        ["reserved", "00"],
+      ]),
+      get_key_assignment: info("02:92", "Reads one key's press and release points and its function on a layer.", 80, [
+        ["profile", ""],
+        ["key", "fwID"],
+        ["layer", ""],
+      ]),
+    }),
+    dev_device: () => ({
+      model: "Phantom Analog 104",
+      vid: 0x15_32,
+      pid: 0x02_66,
+      interface: 3,
+      tid: 0x1f,
+      lighting_protocol: "extended",
+      led: 5,
+      lamp_array: true,
+      mode: 3,
+      startup_slot: 1,
+      loaded_profile: 1,
+      firmware: "1.02",
+      serial: "PM0000000000000",
+    }),
+    dev_exchange: ({ class: c, id, args }) => entry(`${hex2(c as number)}:${hex2(id as number)}`, args as number[], [0]),
+    dev_keys: ({ keys }) =>
+      Object.fromEntries(
+        (keys as number[]).map((k) => [
+          k,
+          { name: "KEY", normal: { thr_low: 128, thr_high: 112, fn_id: 2, fn_data: [2, 0, 4] }, hypershift: null },
+        ]),
+      ),
+    dev_macro: () => [1, 4, 0, 2, 1, 4],
+    dev_diagnostics: ({ uncensored }) => `EasyRazer dev\nuncensored: ${String(uncensored)}`,
+  };
   // Applied edits stay unsaved until a save; a save writes everything.
   const write = (cmd: string, w: Write) => {
     const keep = (into: Record<number, unknown>, pairs: Pairs, unsaved: number[]) => {
@@ -74,6 +155,7 @@ async function mockBackend() {
     hs.unsaved = keep(hs.bindings, w.hypershift.bindings, keep(hs.values, w.hypershift.values, hs.unsaved));
     if (w.rapid) Object.assign(state.rapid, w.rapid);
     if (w.snap) state.snap = w.snap;
+    for (const [k] of w.changes) entry("02:12", [0, k, 0]);
     return {
       results: w.changes.map(([key, mm]) => ({ status: "ok", key, mm })),
       unsaved: state.unsaved,
@@ -167,9 +249,14 @@ async function mockBackend() {
     },
     read_all: state,
   };
-  mockIPC((cmd, args) => (cmd === "apply" || cmd === "save" ? write(cmd, args as unknown as Write) : replies[cmd]), {
-    shouldMockEvents: true,
-  });
+  mockIPC(
+    (cmd, args) => {
+      if (cmd === "apply" || cmd === "save") return write(cmd, args as unknown as Write);
+      if (cmd === "app_settings") return { ...(replies.app_settings as object), ...devSettings };
+      return cmd in devReplies ? devReplies[cmd](args as Record<string, unknown>) : replies[cmd];
+    },
+    { shouldMockEvents: true },
+  );
 }
 
 void mockBackend().then(() => createApp(App).use(i18n).mount("#app"));
