@@ -12,6 +12,7 @@ pub mod hid;
 pub mod keymap;
 pub mod layout;
 pub mod lighting;
+pub mod logged;
 pub mod macros;
 pub mod packet;
 pub mod profiles;

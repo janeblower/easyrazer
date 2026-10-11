@@ -12,7 +12,7 @@ pub type Report = [u8; packet::LEN + 1];
 pub const TID: u8 = 0x1F;
 
 const POLL_DELAY: Duration = Duration::from_millis(15);
-const MAX_POLLS: usize = 10;
+pub(crate) const MAX_POLLS: usize = 10;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
