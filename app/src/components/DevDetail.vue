@@ -34,10 +34,12 @@ const copy = async () => {
         </div>
         <h4 class="text-[11px] text-muted font-sans mb-0.5 mt-2 uppercase">{{ $t("dev.detail.args") }}</h4>
         <table v-if="args.length > 0">
-          <tr v-for="([name, byte], i) in args" :key="i">
-            <td class="text-muted pr-3">{{ name }}</td>
-            <td>{{ byte }}</td>
-          </tr>
+          <tbody>
+            <tr v-for="([name, byte], i) in args" :key="i">
+              <td class="text-muted pr-3">{{ name }}</td>
+              <td>{{ byte }}</td>
+            </tr>
+          </tbody>
         </table>
         <div v-else>—</div>
         <h4 class="text-[11px] text-muted font-sans mb-0.5 mt-2 uppercase">{{ $t("dev.detail.bytes") }}</h4>
@@ -64,22 +66,24 @@ const copy = async () => {
         </div>
       </template>
       <table v-else>
-        <tr>
-          <td class="text-muted pr-3">{{ $t("dev.detail.sent") }}</td>
-          <td>{{ clock(entry.time) }}</td>
-        </tr>
-        <tr>
-          <td class="text-muted pr-3">{{ $t("dev.detail.duration") }}</td>
-          <td>{{ entry.ms }}</td>
-        </tr>
-        <tr>
-          <td class="text-muted pr-3">{{ $t("dev.detail.polls") }}</td>
-          <td>{{ entry.polls }}</td>
-        </tr>
-        <tr>
-          <td class="text-muted pr-3">{{ $t("dev.detail.background") }}</td>
-          <td>{{ entry.background ? $t("dev.detail.yes") : $t("dev.detail.no") }}</td>
-        </tr>
+        <tbody>
+          <tr>
+            <td class="text-muted pr-3">{{ $t("dev.detail.sent") }}</td>
+            <td>{{ clock(entry.time) }}</td>
+          </tr>
+          <tr>
+            <td class="text-muted pr-3">{{ $t("dev.detail.duration") }}</td>
+            <td>{{ entry.ms }}</td>
+          </tr>
+          <tr>
+            <td class="text-muted pr-3">{{ $t("dev.detail.polls") }}</td>
+            <td>{{ entry.polls }}</td>
+          </tr>
+          <tr>
+            <td class="text-muted pr-3">{{ $t("dev.detail.background") }}</td>
+            <td>{{ entry.background ? $t("dev.detail.yes") : $t("dev.detail.no") }}</td>
+          </tr>
+        </tbody>
       </table>
     </div>
   </div>
