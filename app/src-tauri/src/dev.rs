@@ -247,13 +247,14 @@ mod tests {
             entry(0, "06:09", vec![0, 1, 0, 0, 0, 0, 3, 0xAA, 0xBB, 0xCC], vec![]),
             entry(1, "05:08", vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42], vec![]),
             entry(2, "05:88", vec![1, 0, 0, 0, 0x40], vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42]),
+            entry(3, "00:82", vec![], b"PM2149H00012345".to_vec()),
         ];
         let s = Settings::default();
         let censored = report(Some(&info()), &s, &entries, false);
-        assert!(!censored.contains("AA BB CC") && !censored.contains("00 41 00 42") && !censored.contains("PM2149"));
+        assert!(!censored.contains("AA BB CC") && !censored.contains("00 41 00 42") && !censored.contains("PM2149") && !censored.contains("50 4D 32 31"));
         assert!(censored.contains("<3 bytes hidden>") && censored.contains("<4 bytes hidden>"));
         let raw = report(Some(&info()), &s, &entries, true);
-        assert!(raw.contains("AA BB CC") && raw.contains("00 41 00 42") && raw.contains("PM2149"));
+        assert!(raw.contains("AA BB CC") && raw.contains("00 41 00 42") && raw.contains("PM2149") && raw.contains("50 4D 32 31"));
     }
 
     #[test]
