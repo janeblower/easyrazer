@@ -30,6 +30,58 @@ async function mockBackend() {
     speed,
     fast_low: speed !== null,
   });
+  const state = {
+    values: all(() => 2) as Record<number, unknown>,
+    unsaved: [] as number[],
+    rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4 })) as Record<number, unknown>,
+    snap: {
+      enabled: true,
+      groups: [
+        { keys: [31, 33], rule: "last" },
+        { keys: [18, 32], rule: "neutral" },
+        { keys: [79, 89], rule: "deeper" },
+      ],
+    } as unknown,
+    bindings: {
+      112: { type: "macro", id: 1, mode: "times", count: 1 },
+      113: { type: "macro", id: 2, mode: "toggle", count: 1 },
+    } as Record<number, unknown>,
+    unsaved_bindings: [] as number[],
+    hypershift: {
+      values: all((_, i) => (i % 2 ? 3 : 2)) as Record<number, unknown>,
+      bindings: all(hsFactory) as Record<number, unknown>,
+      unsaved: [] as number[],
+    },
+    profile: 1,
+  };
+  type Pairs = [number, unknown][];
+  interface Write {
+    changes: Pairs;
+    bindings: Pairs;
+    hypershift: { values: Pairs; bindings: Pairs };
+    rapid?: Record<number, unknown>;
+    snap?: unknown;
+  }
+  // Applied edits stay unsaved until a save; a save writes everything.
+  const write = (cmd: string, w: Write) => {
+    const keep = (into: Record<number, unknown>, pairs: Pairs, unsaved: number[]) => {
+      for (const [k, v] of pairs) into[k] = v;
+      return cmd === "save" ? [] : [...new Set([...unsaved, ...pairs.map(([k]) => k)])];
+    };
+    state.unsaved = keep(state.values, w.changes, state.unsaved);
+    state.unsaved_bindings = keep(state.bindings, w.bindings, state.unsaved_bindings);
+    const hs = state.hypershift;
+    hs.unsaved = keep(hs.bindings, w.hypershift.bindings, keep(hs.values, w.hypershift.values, hs.unsaved));
+    if (w.rapid) Object.assign(state.rapid, w.rapid);
+    if (w.snap) state.snap = w.snap;
+    return {
+      results: w.changes.map(([key, mm]) => ({ status: "ok", key, mm })),
+      unsaved: state.unsaved,
+      bindings: w.bindings.map(([key, action]) => ({ status: "ok", key, action })),
+      unsaved_bindings: state.unsaved_bindings,
+      hypershift: hs,
+    };
+  };
   const replies: Record<string, unknown> = {
     layout,
     lighting_layout: [
@@ -113,28 +165,11 @@ async function mockBackend() {
       unsupported: null,
       error: null,
     },
-    read_all: {
-      values: all(() => 2),
-      unsaved: [],
-      rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4 })),
-      snap: {
-        enabled: true,
-        groups: [
-          { keys: [31, 33], rule: "last" },
-          { keys: [18, 32], rule: "neutral" },
-          { keys: [79, 89], rule: "deeper" },
-        ],
-      },
-      bindings: {
-        112: { type: "macro", id: 1, mode: "times", count: 1 },
-        113: { type: "macro", id: 2, mode: "toggle", count: 1 },
-      },
-      unsaved_bindings: [],
-      hypershift: { values: all((_, i) => (i % 2 ? 3 : 2)), bindings: all(hsFactory), unsaved: [] },
-      profile: 1,
-    },
+    read_all: state,
   };
-  mockIPC((cmd) => replies[cmd], { shouldMockEvents: true });
+  mockIPC((cmd, args) => (cmd === "apply" || cmd === "save" ? write(cmd, args as unknown as Write) : replies[cmd]), {
+    shouldMockEvents: true,
+  });
 }
 
 void mockBackend().then(() => createApp(App).use(i18n).mount("#app"));
