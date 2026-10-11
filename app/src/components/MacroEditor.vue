@@ -4,8 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
+import { dev } from "../dev";
+import { hex } from "../devConsole";
 import { useConfirmWrite } from "../confirmWrite";
 import { trackUnapplied } from "../unapplied";
+import DevBlock from "./DevBlock.vue";
 import ConfirmWrite from "./ConfirmWrite.vue";
 import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
@@ -27,6 +30,14 @@ interface Draft {
 
 // null while a new macro is not applied yet.
 const selected = ref<number | null>(null);
+const bytes = ref<number[] | null>(null);
+watch(
+  () => [dev.mode, selected.value, props.state] as const,
+  async ([on, id]) => {
+    bytes.value = on && id != null ? await invoke<number[] | null>("dev_macro", { id }) : null;
+  },
+  { immediate: true },
+);
 const draft = ref<Draft | null>(null);
 const busy = ref(false);
 const message = ref("");
@@ -238,6 +249,10 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         @apply="apply"
         @write="write"
       />
+      <DevBlock v-if="dev.mode && selected != null">
+        <div>id {{ selected }} · {{ bytes?.length ?? 0 }} B · free {{ state?.free ?? "—" }}</div>
+        <div>{{ hex(bytes ?? []) }}</div>
+      </DevBlock>
     </div>
     <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />

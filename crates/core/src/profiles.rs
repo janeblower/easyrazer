@@ -21,12 +21,12 @@ pub const MENU: u8 = 129;
 /// fwID of the left Shift key, where the Snap Tap switch goes by default.
 pub const LEFT_SHIFT: u8 = 44;
 
-const LIST: Command = Command::new(0x05, 0x81);
-const CREATE: Command = Command::new(0x05, 0x02);
-const DELETE: Command = Command::new(0x05, 0x03);
-const ACTIVATE: Command = Command::new(0x05, 0x04);
-const SET_NAME: Command = Command::new(0x05, 0x08);
-const GET_NAME: Command = Command::new(0x05, 0x88);
+pub(crate) const LIST: Command = Command::new(0x05, 0x81);
+pub(crate) const CREATE: Command = Command::new(0x05, 0x02);
+pub(crate) const DELETE: Command = Command::new(0x05, 0x03);
+pub(crate) const ACTIVATE: Command = Command::new(0x05, 0x04);
+pub(crate) const SET_NAME: Command = Command::new(0x05, 0x08);
+pub(crate) const GET_NAME: Command = Command::new(0x05, 0x88);
 /// `id off16 len16` before the name bytes.
 const NAME_HEADER: usize = 5;
 

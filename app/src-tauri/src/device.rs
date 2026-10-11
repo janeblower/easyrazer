@@ -12,7 +12,9 @@ use razer_core::devices::DeviceSpec;
 use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{self, Config, Trigger};
-use razer_core::transport::Error;
+use razer_core::logged::{Entry, Log, Logged};
+use razer_core::packet::Command;
+use razer_core::transport::{Error, exchange};
 use razer_core::macros::{self, Event};
 use razer_core::profiles::{self as slots, RawKey, Snapshot};
 use razer_core::{control, layout};
@@ -25,6 +27,8 @@ use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
 use crate::settings::{self, Macro, Rapid, Settings, SnapTap};
+
+pub type Control = Logged<HidTransport>;
 
 /// Marks a key of `ram` as unknown so the next load writes it; the firmware takes no `fnId` 0xFF.
 const UNKNOWN_FN: u8 = 0xFF;
@@ -113,7 +117,9 @@ pub struct ProfilesView {
 
 pub struct Device {
     api: HidApi,
-    control: Option<(HidTransport, &'static DeviceSpec)>,
+    control: Option<(Control, &'static DeviceSpec)>,
+    /// Outlives reconnects, so the developer log keeps what led up to one.
+    log: Arc<Log>,
     /// Last known Synapse state; assumed running until checked.
     synapse: bool,
     /// Slots backed up this session.
@@ -149,6 +155,7 @@ impl Device {
         Ok(Self {
             api,
             control: None,
+            log: Arc::new(Log::default()),
             synapse: true,
             backed_up: BTreeSet::new(),
             settings: settings::load(),
@@ -168,7 +175,7 @@ impl Device {
 
     /// Reopens the control interface if the keyboard was replugged; `true` when connected.
     pub fn ensure_connected(&mut self) -> bool {
-        let alive = self.control.as_ref().is_some_and(|(t, _)| control::mode(t).is_ok());
+        let alive = self.poll_mode().is_some();
         if !alive {
             self.engine = None;
             self.menu = None;
@@ -177,7 +184,7 @@ impl Device {
             self.startup = None;
             self.control = None;
             let _ = self.api.refresh_devices();
-            self.control = hid::open_control(&self.api).ok().flatten();
+            self.control = hid::open_control(&self.api).ok().flatten().map(|(t, d)| (Logged::new(t, self.log.clone()), d));
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
                 if let Some(sink) = &self.sink {
@@ -190,6 +197,15 @@ impl Device {
             }
         }
         self.control.is_some()
+    }
+
+    /// The watcher's liveness check; the log hides it by default.
+    fn poll_mode(&self) -> Option<u8> {
+        let (t, _) = self.control.as_ref()?;
+        self.log.set_background(true);
+        let mode = control::mode(t).ok();
+        self.log.set_background(false);
+        mode
     }
 
     /// Syncs the slots if this connect has not yet, then loads the profile into profile 0.
@@ -264,12 +280,12 @@ impl Device {
         i18n::t(self.lang(), key)
     }
 
-    fn keyboard(&mut self) -> Result<(&HidTransport, &'static DeviceSpec), String> {
+    fn keyboard(&mut self) -> Result<(&Control, &'static DeviceSpec), String> {
         let missing = self.msg("backend.noKeyboard");
         self.connect().ok_or(missing)
     }
 
-    pub fn connect(&mut self) -> Option<(&HidTransport, &'static DeviceSpec)> {
+    pub fn connect(&mut self) -> Option<(&Control, &'static DeviceSpec)> {
         self.ensure_connected();
         self.control.as_ref().map(|(t, d)| (t, *d))
     }
@@ -297,8 +313,8 @@ impl Device {
         self.sync_engine();
         let error = self.restore_error.take();
         let running = self.engine.is_some();
+        let mode = self.poll_mode();
         let Some((t, spec)) = &self.control else { unreachable!() };
-        let mode = control::mode(t).ok();
         let released = should_release_driver_mode(synapse, mode, running) && control::set_hardware_mode(t).is_ok();
         let model = Some(spec.name.clone());
         if released {
@@ -435,7 +451,7 @@ impl Device {
     }
 
     /// Ops that change the flash list; every one of them may reload profile 0, `reloads` says it always does.
-    fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&HidTransport, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
+    fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&Control, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -746,6 +762,35 @@ impl Device {
         &self.settings
     }
 
+    pub fn log(&self) -> &Arc<Log> {
+        &self.log
+    }
+
+    /// Sends a console command as typed; the answer is its log entry, refused or not.
+    pub fn dev_exchange(&mut self, cmd: Command, size: u8, args: &[u8]) -> Result<Entry, String> {
+        let (t, _) = self.keyboard()?;
+        let r = exchange(t, cmd, size, args);
+        let answer = match self.log.last() {
+            Some(e) if e.cmd == cmd.to_string() => Ok(e),
+            _ => Err(r.err().map(|e| e.to_string()).unwrap_or_default()),
+        };
+        // A refused or timed-out write may still have landed, so the cache is dropped either way.
+        if cmd.id & 0x80 == 0 {
+            let f = forget(&cmd.to_string(), args, self.startup, &mut self.ram, &mut self.settings);
+            if f.resync {
+                self.synced = false;
+                if !self.synapse {
+                    self.reload();
+                }
+            }
+            if f.saved {
+                // The write already happened; a failed save must not replace its answer.
+                let _ = settings::save(&self.settings);
+            }
+        }
+        answer
+    }
+
     pub fn update_settings(&mut self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
         f(&mut self.settings);
         settings::save(&self.settings)
@@ -760,7 +805,9 @@ impl Device {
             return Ok(());
         }
         let d = self.keyboard()?.1;
-        hid::set_autonomous(&self.api, d, true).map_err(|e| e.to_string())?;
+        let r = hid::set_autonomous(&self.api, d, true);
+        self.log.note("LampArray autonomous", &[1], r.as_ref().err().map(ToString::to_string));
+        r.map_err(|e| e.to_string())?;
         if let (Some((t, _)), Some(look)) = (&self.control, self.settings.loaded_profile().and_then(|p| p.data.look.as_ref())) {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
         }
@@ -1061,6 +1108,61 @@ pub fn synapse_running() -> bool {
     }
 }
 
+/// What `forget` found stale: `saved` when the settings changed, `resync` when the slots must be read again.
+#[derive(Default)]
+struct Forgot {
+    saved: bool,
+    resync: bool,
+}
+
+/// Drops what a console write made stale, so the next load or save writes it again.
+fn forget(cmd: &str, args: &[u8], startup: Option<u8>, ram: &mut Option<Snapshot>, s: &mut Settings) -> Forgot {
+    let arg = |i| args.get(i).copied().unwrap_or(0);
+    fn snap<'a>(ram: &'a mut Option<Snapshot>, s: &'a mut Settings, k: u8) -> Option<&'a mut Snapshot> {
+        if k == actuation::LIVE { ram.as_mut() } else { s.slots.get_mut(&k) }
+    }
+    let mut f = Forgot::default();
+    // The firmware copies a write to the startup slot into profile 0.
+    if matches!(cmd, "02:12" | "0F:02" | "0F:03" | "0F:04") && Some(arg(0)) == startup {
+        *ram = None;
+    }
+    match cmd {
+        "02:12" => {
+            let (slot, key, layer) = (arg(0), arg(1), arg(2));
+            f.saved = slot != actuation::LIVE;
+            let Some(snap) = snap(ram, s, slot) else { return f };
+            // A Normal write to profile 0 overwrites the key's Hypershift too.
+            let hypershift = layer == analog::Layer::Hypershift as u8 || slot == actuation::LIVE;
+            let normal = (layer == analog::Layer::Normal as u8).then_some(&mut snap.normal);
+            for layer in normal.into_iter().chain(hypershift.then_some(&mut snap.hypershift)) {
+                if let Some(r) = layer.get_mut(&key) {
+                    r.fn_id = UNKNOWN_FN;
+                }
+            }
+        }
+        "0F:02" | "0F:03" | "0F:04" => {
+            f.saved = arg(0) != actuation::LIVE;
+            if let Some(snap) = snap(ram, s, arg(0)) {
+                snap.look = None;
+            }
+        }
+        "06:08" | "06:09" | "06:03" => {
+            if let Some(m) = s.macros.get_mut(&u16::from_be_bytes([arg(0), arg(1)])) {
+                m.written = false;
+                f.saved = true;
+            }
+        }
+        // The firmware reloads profile 0 from the startup slot.
+        "00:04" => *ram = None,
+        "05:02" | "05:03" | "05:04" => {
+            *ram = None;
+            f.resync = true;
+        }
+        _ => {}
+    }
+    f
+}
+
 #[cfg(test)]
 mod tests {
     use razer_core::binding::System;
@@ -1070,6 +1172,31 @@ mod tests {
 
     fn plain(k: u8) -> RawKey {
         RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
+    }
+
+    #[test]
+    fn console_writes_drop_what_they_touched() {
+        let look = Look { effect: Effect { name: "static".into(), ..Default::default() }, brightness: 9 };
+        let full = Snapshot { normal: BTreeMap::from([(31, plain(4)), (32, plain(5))]), hypershift: BTreeMap::from([(31, plain(4))]), look: Some(look) };
+        let mut ram = Some(full.clone());
+        let mut s = Settings { slots: BTreeMap::from([(2, full.clone())]), ..Default::default() };
+        s.macros.insert(0x0102, Macro { name: String::new(), events: Vec::new(), written: true });
+
+        assert!(!forget("02:12", &[0, 31, 0], Some(2), &mut ram, &mut s).resync);
+        let r = ram.as_ref().unwrap();
+        assert_eq!((r.normal[&31].fn_id, r.hypershift[&31].fn_id, r.normal[&32].fn_id), (UNKNOWN_FN, UNKNOWN_FN, 0x02));
+        forget("02:12", &[3, 31, 1], Some(2), &mut ram, &mut s);
+        assert!(ram.is_some());
+        forget("02:12", &[2, 31, 1], Some(2), &mut ram, &mut s);
+        assert!(ram.is_none());
+        assert_eq!((s.slots[&2].normal[&31].fn_id, s.slots[&2].hypershift[&31].fn_id), (0x02, UNKNOWN_FN));
+        ram = Some(full.clone());
+
+        forget("0F:04", &[2, 5, 0x80], None, &mut ram, &mut s);
+        assert!(s.slots[&2].look.is_none() && ram.as_ref().unwrap().look.is_some());
+        forget("06:09", &[1, 2, 0, 0, 0, 0, 1, 0], None, &mut ram, &mut s);
+        assert!(!s.macros[&0x0102].written);
+        assert!(forget("05:04", &[2], None, &mut ram, &mut s).resync && ram.is_none());
     }
 
     #[test]
@@ -1116,7 +1243,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }

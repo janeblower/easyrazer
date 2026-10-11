@@ -6,11 +6,13 @@ use crate::transport::{Error, Transport, exchange};
 const MODE_HARDWARE: u8 = 0x00;
 pub const MODE_DRIVER: u8 = 0x03;
 
-const GET_MODE: Command = Command::new(0x00, 0x84);
-const SET_MODE: Command = Command::new(0x00, 0x04);
-const GET_ACTIVE_PROFILE: Command = Command::new(0x05, 0x84);
-const SET_LED: Command = Command::new(0x03, 0x00);
-const SET_LED_BLINK: Command = Command::new(0x03, 0x02);
+pub(crate) const GET_MODE: Command = Command::new(0x00, 0x84);
+pub(crate) const SET_MODE: Command = Command::new(0x00, 0x04);
+pub(crate) const GET_ACTIVE_PROFILE: Command = Command::new(0x05, 0x84);
+pub(crate) const SET_LED: Command = Command::new(0x03, 0x00);
+pub(crate) const SET_LED_BLINK: Command = Command::new(0x03, 0x02);
+pub(crate) const GET_FIRMWARE: Command = Command::new(0x00, 0x81);
+pub(crate) const GET_SERIAL: Command = Command::new(0x00, 0x82);
 
 pub const LED_MACRO: u8 = 0x07;
 pub const LED_GAME: u8 = 0x08;
@@ -33,6 +35,17 @@ pub fn set_driver_mode(t: &impl Transport) -> Result<(), Error> {
 
 pub fn active_profile(t: &impl Transport) -> Result<u8, Error> {
     Ok(exchange(t, GET_ACTIVE_PROFILE, 1, &[])?.args[0])
+}
+
+/// Firmware version as `(major, minor)`.
+pub fn firmware(t: &impl Transport) -> Result<(u8, u8), Error> {
+    let r = exchange(t, GET_FIRMWARE, 2, &[])?;
+    Ok((r.args[0], r.args[1]))
+}
+
+pub fn serial(t: &impl Transport) -> Result<String, Error> {
+    let r = exchange(t, GET_SERIAL, 0x16, &[])?;
+    Ok(String::from_utf8_lossy(&r.args[..0x16]).trim_end_matches('\0').trim().to_string())
 }
 
 /// The M indicator obeys this only in driver mode.

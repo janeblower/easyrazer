@@ -39,6 +39,7 @@ const TOGGLES = [
   { key: "autostart", cmd: "set_autostart", label: "settings.autostart" },
   { key: "watch_synapse", cmd: "set_watch_synapse", label: "settings.watchSynapse" },
   { key: "confirm_write", cmd: "set_confirm_write", label: "settings.confirmWrite" },
+  { key: "dev_mode", cmd: "set_dev_mode", label: "settings.devMode" },
 ] as const;
 
 onMounted(async () => {

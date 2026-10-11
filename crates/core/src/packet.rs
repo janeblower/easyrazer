@@ -31,6 +31,12 @@ impl fmt::Display for Command {
     }
 }
 
+impl serde::Serialize for Command {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     New,

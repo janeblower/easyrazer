@@ -2,6 +2,7 @@
 
 mod autostart;
 mod commands;
+mod dev;
 mod device;
 mod dynamic_lighting;
 mod engine;
@@ -83,6 +84,7 @@ fn main() {
                     _ => {}
                 });
             }));
+            dev::sync_listener(app.handle(), &app.state::<commands::AppState>().device());
             let blocked = focus::watch();
             let focus_handle = handle.clone();
             std::thread::spawn(move || {
@@ -111,6 +113,10 @@ fn main() {
             Ok(())
         })
         .on_window_event(|w, e| {
+            // The developer window closes like any other; only the main one asks or goes to the tray.
+            if w.label() != "main" {
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = e {
                 let action = w.state::<commands::AppState>().device().settings().close_action;
                 match action {
@@ -162,7 +168,17 @@ fn main() {
             commands::free_slot,
             commands::write_profile,
             commands::hide_window,
-            commands::quit
+            commands::quit,
+            dev::set_dev_mode,
+            dev::set_dev_panel,
+            dev::set_dev_window,
+            dev::dev_log,
+            dev::dev_commands,
+            dev::dev_device,
+            dev::dev_exchange,
+            dev::dev_keys,
+            dev::dev_macro,
+            dev::dev_diagnostics
         ])
         .build(tauri::generate_context!())
         .expect("tauri build")

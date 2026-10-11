@@ -106,7 +106,7 @@ fn opt_command<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Command>, D::Er
     command(d).map(Some)
 }
 
-fn command<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> {
+pub(crate) fn command<'de, D: Deserializer<'de>>(d: D) -> Result<Command, D::Error> {
     let s = String::deserialize(d)?;
     let (class, id) = s.split_once(':').ok_or_else(|| serde::de::Error::custom(format!("{s}: expected CC:II")))?;
     let byte = |h: &str| u8::from_str_radix(h, 16).map_err(serde::de::Error::custom);

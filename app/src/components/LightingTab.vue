@@ -3,8 +3,11 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
+import { dev, log, nameOf } from "../dev";
+import { hex } from "../devConsole";
 import { useConfirmWrite } from "../confirmWrite";
 import { trackUnapplied } from "../unapplied";
+import DevBlock from "./DevBlock.vue";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import SelectionBar from "./SelectionBar.vue";
@@ -326,6 +329,16 @@ watch(
   async (now, before) => now != null && now !== before && connected.value && load(),
 );
 onMounted(load);
+const LIGHTING = ["set_effect", "set_brightness", "get_effect", "get_brightness"];
+function last(name: string) {
+  for (let i = log.value.length - 1; i >= 0; i--) if (nameOf(log.value[i].cmd) === name) return log.value[i];
+}
+const lightingLog = computed(() =>
+  LIGHTING.map((name) => {
+    const e = last(name);
+    return e ? `${name} ${e.cmd} ${hex(e.args)} ← ${e.status ?? e.error ?? "—"} ${hex(e.reply)}` : `${name} —`;
+  }),
+);
 </script>
 
 <template>
@@ -450,6 +463,9 @@ onMounted(load);
       @apply="send('lighting_apply', 'lighting.applied')"
       @write="save"
     />
+    <DevBlock v-if="dev.mode"
+      ><div v-for="l in lightingLog" :key="l">{{ l }}</div></DevBlock
+    >
     <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </section>
 </template>
