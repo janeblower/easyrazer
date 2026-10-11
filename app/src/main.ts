@@ -68,7 +68,7 @@ async function mockBackend() {
   const devSettings = { dev_mode: false, dev_panel: null as unknown, dev_window: null as unknown };
   let seq = 0;
   const devLog: unknown[] = [];
-  const entry = (cmd: string, args: number[], reply: number[] = []) => {
+  const entry = (cmd: string, args: number[], reply: number[] = [], live = true) => {
     const e = {
       seq: seq++,
       time: Date.now(),
@@ -85,12 +85,12 @@ async function mockBackend() {
       rx: reply,
     };
     devLog.push(e);
-    void emit("hid-log", e);
+    if (live) void emit("hid-log", e);
     return e;
   };
-  entry("00:84", [], [3, 0]);
-  entry("05:84", [], [1]);
-  entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4]);
+  entry("00:84", [], [3, 0], false);
+  entry("05:84", [], [1], false);
+  entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4], false);
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
     set_dev_mode: ({ on }) => {
