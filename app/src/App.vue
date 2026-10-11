@@ -617,7 +617,6 @@ async function onOffer(on: boolean) {
 onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
-  await startDev();
   unlisten.push(
     await listen("close-requested", () => {
       closeRemember.value = false;
@@ -650,6 +649,7 @@ onMounted(async () => {
     }),
   );
   await invoke("window_ready");
+  await startDev();
   await loadMacros();
   unlisten.push(
     await listen<boolean>("snap-tap", (e) => {
