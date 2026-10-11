@@ -40,6 +40,7 @@ import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
 import DevPanel from "./components/DevPanel.vue";
 import { dev, setPanel, startDev } from "./dev";
+import { applyLayout } from "./devWindow";
 
 const { t } = useI18n();
 const version = __APP_VERSION__;
@@ -190,6 +191,13 @@ const bindingOf = (k: number) => bindEdits.value[k] ?? bindBase.value[k] ?? null
 // Bindings are edited one key at a time.
 const bindKey = computed(() => (selection.value.size === 1 ? [...selection.value][0] : null));
 const byKey = computed(() => new Map(layout.value.map((k) => [k.key, k])));
+
+watch(
+  () => [dev.mode && !!dev.panel?.open, dev.panel?.dock, dev.panel?.size] as const,
+  ([on, dock, size]) => {
+    if (dock && size) void applyLayout(on, dock, size, dev.window, t("dev.title"));
+  },
+);
 
 watch(section, (s) => {
   if (s === "bindings" && selection.value.size > 1) selection.value = new Set();

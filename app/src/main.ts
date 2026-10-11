@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import DevPanel from "./components/DevPanel.vue";
 import { hsFactory } from "./bindings";
 import { i18n } from "./i18n";
 import "virtual:uno.css";
@@ -259,4 +260,8 @@ async function mockBackend() {
   );
 }
 
-void mockBackend().then(() => createApp(App).use(i18n).mount("#app"));
+const detached = location.hash === "#devtools";
+void mockBackend().then(() => {
+  const app = detached ? createApp(DevPanel, { detached: true }) : createApp(App);
+  app.use(i18n).mount("#app");
+});

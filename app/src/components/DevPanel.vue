@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { Dock } from "../types";
-import { dev, setPanel } from "../dev";
+import { setLanguage, systemLanguage } from "../i18n";
+import { dev, setPanel, startDev } from "../dev";
+import { trackDetached } from "../devWindow";
 import DevLog from "./DevLog.vue";
 
 const props = defineProps<{ dock?: Dock; detached?: boolean }>();
@@ -12,6 +14,13 @@ const DOCKS: Dock[] = ["left", "bottom", "right", "window"];
 const DEFAULT_SIZE: Record<Dock, number> = { left: 420, right: 420, bottom: 260, window: 420 };
 const MIN_SIZE = 200;
 const tab = ref<(typeof TABS)[number]>("log");
+
+onMounted(async () => {
+  if (!props.detached) return;
+  await startDev();
+  setLanguage(dev.language ?? systemLanguage());
+  await trackDetached();
+});
 
 function pickDock(d: Dock) {
   const p = dev.panel;
