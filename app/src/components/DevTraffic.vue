@@ -52,7 +52,7 @@ const rows = computed(() =>
     (e) => e.seq > clearedAt.value && matches(e, prefs.show, prefs.background, filter.value, nameOf(e.cmd)),
   ),
 );
-const errors = computed(() => log.value.filter((e) => e.seq > clearedAt.value && isError(e)).length);
+const errors = computed(() => log.value.filter((e) => e.seq > clearedAt.value && (prefs.background || !e.background) && isError(e)).length);
 const entry = computed(() => selectedEntry(log.value, selected.value, clearedAt.value));
 watch(entry, (e, old) => {
   if (!e && old && selected.value === old.seq) selected.value = null;
@@ -89,7 +89,14 @@ function cell(e: LogEntry, c: Column) {
 
 function openPopup(kind: "columns" | "show", ev: MouseEvent) {
   const r = root.value?.getBoundingClientRect();
-  popup.value = { kind, x: ev.clientX - (r?.left ?? 0), y: ev.clientY - (r?.top ?? 0) };
+  const x = ev.clientX - (r?.left ?? 0);
+  popup.value = { kind, x: Math.max(0, Math.min(x, width.value - 160)), y: ev.clientY - (r?.top ?? 0) };
+  root.value?.focus();
+}
+function onKey(e: KeyboardEvent) {
+  if (e.key !== "Escape" || !popup.value) return;
+  e.preventDefault();
+  popup.value = null;
 }
 function toggleColumn(c: Column) {
   prefs.columns = prefs.columns.includes(c)
@@ -115,7 +122,7 @@ watch(
 </script>
 
 <template>
-  <div ref="root" class="flex flex-1 flex-col min-h-0 min-w-0 relative">
+  <div ref="root" tabindex="-1" class="outline-none flex flex-1 flex-col min-h-0 min-w-0 relative" @keydown="onKey">
     <div class="px-1 border-b border-0 border-line border-solid flex shrink-0 gap-1 h-7 min-w-0 whitespace-nowrap items-center">
       <button class="dev-btn" :title="$t('dev.traffic.clear')" @click="clearedAt = log.at(-1)?.seq ?? -1">⊘</button>
       <button
