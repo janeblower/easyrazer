@@ -16,4 +16,5 @@ pub mod macros;
 pub mod packet;
 pub mod profiles;
 pub mod rapid;
+pub mod registry;
 pub mod transport;

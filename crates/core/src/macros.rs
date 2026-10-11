@@ -6,10 +6,10 @@ use crate::binding::{self, Mouse};
 use crate::packet::Command;
 use crate::transport::{Error, Transport, exchange};
 
-const ALLOCATE: Command = Command::new(0x06, 0x08);
-const WRITE: Command = Command::new(0x06, 0x09);
-const DELETE: Command = Command::new(0x06, 0x03);
-const STATS: Command = Command::new(0x06, 0x86);
+pub(crate) const ALLOCATE: Command = Command::new(0x06, 0x08);
+pub(crate) const WRITE: Command = Command::new(0x06, 0x09);
+pub(crate) const DELETE: Command = Command::new(0x06, 0x03);
+pub(crate) const STATS: Command = Command::new(0x06, 0x86);
 
 /// Largest `06:09` payload.
 const CHUNK: usize = 72;
