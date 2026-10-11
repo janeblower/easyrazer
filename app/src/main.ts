@@ -108,15 +108,27 @@ async function mockBackend() {
     dev_log: () => devLog,
     dev_commands: () => ({
       get_mode: info("00:84", "Device mode in the first reply byte: 00 hardware, 03 driver.", 2),
-      set_mode: info("00:04", "Switches the device mode.", 2, [
-        ["mode", "00 hardware, 03 driver"],
-        ["reserved", "00"],
-      ]),
+      set_mode: {
+        ...info("00:04", "Switches the device mode.", 2, [
+          ["mode", "00 hardware, 03 driver"],
+          ["reserved", "00"],
+        ]),
+        safe: [0, [0, 3]],
+      },
       get_key_assignment: info("02:92", "Reads one key's press and release points and its function on a layer.", 80, [
         ["profile", ""],
         ["key", "fwID"],
         ["layer", ""],
       ]),
+      set_effect: {
+        ...info("0F:02", "Shows a lighting effect.", null, [
+          ["store", "00 temporary, 01 flash"],
+          ["led", ""],
+          ["effect", ""],
+        ]),
+        flash: 0,
+      },
+      macro_delete: { ...info("06:03", "Removes a macro body from the flash.", 2, [["id", "u16 BE"]]), flash: true },
     }),
     dev_device: () => ({
       model: "Phantom Analog 104",
