@@ -160,8 +160,7 @@ function valueClass(key: number) {
   return props.unsaved.has(key) ? "text-accent" : "text-muted";
 }
 
-// A value in place of the label stays as bright as the label.
-const labelClass = (key: number) => valueClass(key).replace("text-muted", "");
+const labelClass = (key: number) => (props.edited.has(key) ? "font-semibold text-edited" : "text-accent");
 
 function title(key: number) {
   if (key in ZONES) return t(ZONES[key]);
