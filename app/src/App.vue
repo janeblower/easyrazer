@@ -38,6 +38,8 @@ import AppIcon from "./components/AppIcon.vue";
 import { useConfirmWrite } from "./confirmWrite";
 import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
+import DevPanel from "./components/DevPanel.vue";
+import { dev, setPanel, startDev } from "./dev";
 
 const { t } = useI18n();
 const version = __APP_VERSION__;
@@ -68,6 +70,7 @@ const section = ref<"actuation" | "bindings" | "macros">("actuation");
 const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null); // reads done, reads in all
+const docked = computed(() => (dev.mode && dev.panel?.open && dev.panel.dock !== "window" ? dev.panel.dock : null));
 const editableCount = computed(() => layout.value.filter((k) => k.editable).length);
 const busy = ref(false);
 const profiles = ref<ProfilesView | null>(null);
@@ -605,6 +608,7 @@ async function onOffer(on: boolean) {
 onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
+  await startDev();
   unlisten.push(
     await listen("close-requested", () => {
       closeRemember.value = false;
@@ -657,216 +661,238 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]">
-    <nav class="flex gap-1">
-      <button
-        v-for="name in TABS"
-        :key="name"
-        class="rounded-b-none"
-        :class="
-          tab === name ? 'border-x-transparent border-t-transparent border-b-2 border-b-accent' : 'bg-panel text-muted border-transparent'
-        "
-        :aria-current="tab === name ? 'page' : undefined"
-        @click="tab = name"
-      >
-        {{ $t(`tabs.${name}`) }}
-      </button>
-      <ProfileMenu
-        class="ml-auto"
-        :view="profiles"
-        :writable="writable"
-        :next-combo="nextCombo"
-        @load="(id) => switchTo(() => profileOp('load_profile', { id }))"
-        @create="switchTo(() => profileOp('create_profile'))"
-        @duplicate="(id) => profileOp('duplicate_profile', { id })"
-        @rename="(id, name) => profileOp('rename_profile', { id, name })"
-        @remove="(id) => (removing = id)"
-        @startup="(id) => profileOp('set_startup', { id })"
-        @free="(id) => profileOp('free_slot', { id })"
-        @write="(id) => profileOp('write_profile', { id })"
-      />
-      <span class="inline-flex" :title="$t('mode.hint')">
-        <button
-          v-for="on in [false, true]"
-          :key="String(on)"
-          class="px-3 py-0 seg-btn inline-flex items-center"
-          :class="driver !== on ? 'text-muted' : on ? 'text-driver' : 'text-accent'"
-          :aria-label="$t(on ? 'mode.driver' : 'mode.hw')"
-          :aria-pressed="driver === on"
-          :disabled="!writable"
-          @click="setMode(on)"
-        >
-          <AppIcon class="h-7 w-7" :name="on ? 'rust' : 'chip'" />
-        </button>
-      </span>
-    </nav>
-    <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
-    <!-- With the map shown, the tab takes its width, not the window's. -->
-    <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'self-start': section !== 'macros' }">
-      <div class="flex gap-3 items-center">
-        <span class="inline-flex">
+  <div class="flex h-screen" :class="{ 'flex-row-reverse': docked === 'left', 'flex-col': docked === 'bottom' }">
+    <div class="flex-1 min-h-0 min-w-0 overflow-auto">
+      <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]">
+        <nav class="flex gap-1">
           <button
-            v-for="s in ['actuation', 'bindings', 'macros'] as const"
-            :key="s"
-            class="seg-btn"
-            :class="{ 'seg-on': section === s }"
-            @click="section = s"
+            v-for="name in TABS"
+            :key="name"
+            class="rounded-b-none"
+            :class="
+              tab === name
+                ? 'border-x-transparent border-t-transparent border-b-2 border-b-accent'
+                : 'bg-panel text-muted border-transparent'
+            "
+            :aria-current="tab === name ? 'page' : undefined"
+            @click="tab = name"
           >
-            {{ $t(`keys.${s}`) }}
+            {{ $t(`tabs.${name}`) }}
           </button>
-        </span>
-        <SelectionBar
-          v-if="section !== 'macros'"
-          class="ml-auto"
-          :count="selection.size"
-          :single="section === 'bindings'"
-          @select-all="selectAll"
-          @clear="selection = new Set()"
-        />
-      </div>
-      <MacroEditor
-        v-if="section === 'macros'"
-        :state="macroState"
-        :layout="layout"
-        :bound="macroKeys"
-        :writable="writable"
-        @update="(s) => (macroState = s)"
-      />
-      <template v-else>
-        <KeyboardMap
-          v-model:selection="selection"
-          :layout="layout"
-          :values="mapValues"
-          :inline="section === 'bindings'"
-          :edited="mapEdited"
-          :errors="section === 'actuation' ? errors : bindErrors"
-          :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-          :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
-          :snap="driver && section === 'actuation' ? snapColors(snap) : {}"
-          :rapid-edited="rapidEdited"
-          :hs-values="mapHs"
-          :hs-edited="hsEdited"
-          :hs-binds="mapHsBinds"
-          :single="section === 'bindings'"
-          :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
-        />
-        <div class="gap-4 grid grid-cols-2">
-          <div class="px-4 py-3 card flex flex-col gap-3">
-            <ActuationCard
-              v-if="section === 'actuation'"
+          <ProfileMenu
+            class="ml-auto"
+            :view="profiles"
+            :writable="writable"
+            :next-combo="nextCombo"
+            @load="(id) => switchTo(() => profileOp('load_profile', { id }))"
+            @create="switchTo(() => profileOp('create_profile'))"
+            @duplicate="(id) => profileOp('duplicate_profile', { id })"
+            @rename="(id, name) => profileOp('rename_profile', { id, name })"
+            @remove="(id) => (removing = id)"
+            @startup="(id) => profileOp('set_startup', { id })"
+            @free="(id) => profileOp('free_slot', { id })"
+            @write="(id) => profileOp('write_profile', { id })"
+          />
+          <span class="inline-flex" :title="$t('mode.hint')">
+            <button
+              v-for="on in [false, true]"
+              :key="String(on)"
+              class="px-3 py-0 seg-btn inline-flex items-center"
+              :class="driver !== on ? 'text-muted' : on ? 'text-driver' : 'text-accent'"
+              :aria-label="$t(on ? 'mode.driver' : 'mode.hw')"
+              :aria-pressed="driver === on"
+              :disabled="!writable"
+              @click="setMode(on)"
+            >
+              <AppIcon class="h-7 w-7" :name="on ? 'rust' : 'chip'" />
+            </button>
+            <button
+              v-if="dev.mode"
+              class="font-bold font-mono px-3 py-0"
+              :class="dev.panel?.open ? 'border-dev text-dev' : 'text-muted'"
+              :title="$t('dev.title')"
+              :aria-pressed="!!dev.panel?.open"
+              @click="setPanel({ open: !dev.panel?.open })"
+            >
+              &lt;/&gt;
+            </button>
+          </span>
+        </nav>
+        <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
+        <!-- With the map shown, the tab takes its width, not the window's. -->
+        <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'self-start': section !== 'macros' }">
+          <div class="flex gap-3 items-center">
+            <span class="inline-flex">
+              <button
+                v-for="s in ['actuation', 'bindings', 'macros'] as const"
+                :key="s"
+                class="seg-btn"
+                :class="{ 'seg-on': section === s }"
+                @click="section = s"
+              >
+                {{ $t(`keys.${s}`) }}
+              </button>
+            </span>
+            <SelectionBar
+              v-if="section !== 'macros'"
+              class="ml-auto"
               :count="selection.size"
-              :value="selectedValue"
-              :rapid="selectedRapid"
-              :split="split"
-              :hs="selectedHs"
-              :hs-split="hsSplit"
-              :driver="driver"
-              @set="setValue"
-              @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
-              @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
-              @release="(v) => setRapid((r) => ({ ...r, release: v }))"
-              @split="onSplit"
-              @hs="(v) => setHs(() => v)"
-              @hs-split="onHsSplit"
-            />
-            <BindingCard
-              v-else
-              :title="$t('bindings.main')"
-              :key-id="bindKey"
-              :action="bindKey == null ? null : bindingOf(bindKey)"
-              :factory-action="bindKey == null ? null : factory(bindKey)"
-              :layout="layout"
-              :macros="macroState?.macros ?? {}"
-              @set="setBinding"
+              :single="section === 'bindings'"
+              @select-all="selectAll"
+              @clear="selection = new Set()"
             />
           </div>
-          <div class="px-4 py-3 card flex flex-col gap-3">
-            <SnapTapCard
-              v-if="section === 'actuation'"
-              :snap="snap"
-              :selection="selection"
+          <MacroEditor
+            v-if="section === 'macros'"
+            :state="macroState"
+            :layout="layout"
+            :bound="macroKeys"
+            :writable="writable"
+            @update="(s) => (macroState = s)"
+          />
+          <template v-else>
+            <KeyboardMap
+              v-model:selection="selection"
               :layout="layout"
-              :driver="driver"
-              :combo="snapCombo"
-              @update="setSnap"
+              :values="mapValues"
+              :inline="section === 'bindings'"
+              :edited="mapEdited"
+              :errors="section === 'actuation' ? errors : bindErrors"
+              :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
+              :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
+              :snap="driver && section === 'actuation' ? snapColors(snap) : {}"
+              :rapid-edited="rapidEdited"
+              :hs-values="mapHs"
+              :hs-edited="hsEdited"
+              :hs-binds="mapHsBinds"
+              :single="section === 'bindings'"
+              :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
             />
-            <BindingCard
-              v-else
-              hypershift
-              :title="bindKey == null ? 'Hypershift' : `Hypershift · ${combo(bindKey)}`"
-              :key-id="bindKey"
-              :action="bindKey == null ? null : hsBindingOf(bindKey)"
-              :factory-action="bindKey == null ? null : hsFactory(bindKey)"
-              :taken="taken"
-              :layout="layout"
-              :macros="macroState?.macros ?? {}"
-              @set="setHsBinding"
-            />
-          </div>
+            <div class="gap-4 grid grid-cols-2">
+              <div class="px-4 py-3 card flex flex-col gap-3">
+                <ActuationCard
+                  v-if="section === 'actuation'"
+                  :count="selection.size"
+                  :value="selectedValue"
+                  :rapid="selectedRapid"
+                  :split="split"
+                  :hs="selectedHs"
+                  :hs-split="hsSplit"
+                  :driver="driver"
+                  @set="setValue"
+                  @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+                  @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
+                  @release="(v) => setRapid((r) => ({ ...r, release: v }))"
+                  @split="onSplit"
+                  @hs="(v) => setHs(() => v)"
+                  @hs-split="onHsSplit"
+                />
+                <BindingCard
+                  v-else
+                  :title="$t('bindings.main')"
+                  :key-id="bindKey"
+                  :action="bindKey == null ? null : bindingOf(bindKey)"
+                  :factory-action="bindKey == null ? null : factory(bindKey)"
+                  :layout="layout"
+                  :macros="macroState?.macros ?? {}"
+                  @set="setBinding"
+                />
+              </div>
+              <div class="px-4 py-3 card flex flex-col gap-3">
+                <SnapTapCard
+                  v-if="section === 'actuation'"
+                  :snap="snap"
+                  :selection="selection"
+                  :layout="layout"
+                  :driver="driver"
+                  :combo="snapCombo"
+                  @update="setSnap"
+                />
+                <BindingCard
+                  v-else
+                  hypershift
+                  :title="bindKey == null ? 'Hypershift' : `Hypershift · ${combo(bindKey)}`"
+                  :key-id="bindKey"
+                  :action="bindKey == null ? null : hsBindingOf(bindKey)"
+                  :factory-action="bindKey == null ? null : hsFactory(bindKey)"
+                  :taken="taken"
+                  :layout="layout"
+                  :macros="macroState?.macros ?? {}"
+                  @set="setHsBinding"
+                />
+              </div>
+            </div>
+            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+          </template>
         </div>
-        <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
-      </template>
+        <LightingTab v-else-if="tab === 'lighting'" :status="status" />
+        <SettingsTab v-else />
+        <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
+        <ConfirmWrite
+          v-if="macrosToWrite.length > 0"
+          :text="$t('bindings.writeMacros', { names: macrosToWrite.map((id) => macroState?.macros[id]?.name ?? `#${id}`).join(', ') })"
+          @yes="onWriteMacros"
+          @no="macrosToWrite = []"
+        />
+        <ModalDialog v-if="closing" :title="$t('dialogs.close.title')" @cancel="closing = false">
+          <p>{{ $t("dialogs.close.text") }}</p>
+          <p v-if="hasUnapplied()">{{ $t("dialogs.close.unapplied") }}</p>
+          <label class="dlg-check"><input v-model="closeRemember" type="checkbox" /> {{ $t("common.dontAsk") }}</label>
+          <template #actions>
+            <button @click="onClose('exit')">{{ $t("dialogs.close.exit") }}</button>
+            <button class="primary" autofocus @click="onClose('tray')">{{ $t("dialogs.close.tray") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog
+          v-if="moving"
+          :title="$t('bindings.moveTitle', { action: $t(`bindings.system.${moving.action}`), to: combo(bindKey) })"
+          @cancel="moving = null"
+        >
+          <p>{{ $t("bindings.moveText", { from: combo(moving.from) }) }}</p>
+          <template #actions>
+            <button autofocus @click="moving = null">{{ $t("profiles.cancel") }}</button>
+            <button class="primary" @click="confirmMove">{{ $t("bindings.move") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog v-if="hiding" :title="$t('dialogs.close.title')" @cancel="hiding = false">
+          <p>{{ $t("dialogs.close.unapplied") }}</p>
+          <template #actions>
+            <button autofocus @click="hiding = false">{{ $t("profiles.cancel") }}</button>
+            <button class="primary" @click="hide">{{ $t("dialogs.close.tray") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog
+          v-if="removing != null"
+          :title="$t('profiles.removeTitle', { name: profiles?.profiles.find((p) => p.id === removing)?.name ?? '' })"
+          @cancel="removing = null"
+        >
+          <p>{{ $t("profiles.removeText") }}</p>
+          <template #actions>
+            <button autofocus @click="removing = null">{{ $t("profiles.cancel") }}</button>
+            <button class="primary" @click="confirmRemove">{{ $t("profiles.remove") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog v-if="switching != null" :title="$t('profiles.dropTitle')" @cancel="switching = null">
+          <template #actions>
+            <button autofocus @click="switching = null">{{ $t("profiles.cancel") }}</button>
+            <button class="primary" @click="confirmSwitch">{{ $t("profiles.drop") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog v-if="offering && !closing" :title="$t('dialogs.autostart.title')" @cancel="offering = false">
+          <p>{{ $t("dialogs.autostart.text") }}</p>
+          <template #actions>
+            <button @click="onOffer(false)">{{ $t("dialogs.autostart.no") }}</button>
+            <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
+          </template>
+        </ModalDialog>
+        <footer class="text-xs text-muted">{{ version }} · {{ $t("footer") }}</footer>
+      </main>
     </div>
-    <LightingTab v-else-if="tab === 'lighting'" :status="status" />
-    <SettingsTab v-else />
-    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
-    <ConfirmWrite
-      v-if="macrosToWrite.length > 0"
-      :text="$t('bindings.writeMacros', { names: macrosToWrite.map((id) => macroState?.macros[id]?.name ?? `#${id}`).join(', ') })"
-      @yes="onWriteMacros"
-      @no="macrosToWrite = []"
+    <DevPanel
+      v-if="docked && dev.panel"
+      class="shrink-0"
+      :dock="docked"
+      :style="docked === 'bottom' ? { height: `${dev.panel.size}px` } : { width: `${dev.panel.size}px` }"
     />
-    <ModalDialog v-if="closing" :title="$t('dialogs.close.title')" @cancel="closing = false">
-      <p>{{ $t("dialogs.close.text") }}</p>
-      <p v-if="hasUnapplied()">{{ $t("dialogs.close.unapplied") }}</p>
-      <label class="dlg-check"><input v-model="closeRemember" type="checkbox" /> {{ $t("common.dontAsk") }}</label>
-      <template #actions>
-        <button @click="onClose('exit')">{{ $t("dialogs.close.exit") }}</button>
-        <button class="primary" autofocus @click="onClose('tray')">{{ $t("dialogs.close.tray") }}</button>
-      </template>
-    </ModalDialog>
-    <ModalDialog
-      v-if="moving"
-      :title="$t('bindings.moveTitle', { action: $t(`bindings.system.${moving.action}`), to: combo(bindKey) })"
-      @cancel="moving = null"
-    >
-      <p>{{ $t("bindings.moveText", { from: combo(moving.from) }) }}</p>
-      <template #actions>
-        <button autofocus @click="moving = null">{{ $t("profiles.cancel") }}</button>
-        <button class="primary" @click="confirmMove">{{ $t("bindings.move") }}</button>
-      </template>
-    </ModalDialog>
-    <ModalDialog v-if="hiding" :title="$t('dialogs.close.title')" @cancel="hiding = false">
-      <p>{{ $t("dialogs.close.unapplied") }}</p>
-      <template #actions>
-        <button autofocus @click="hiding = false">{{ $t("profiles.cancel") }}</button>
-        <button class="primary" @click="hide">{{ $t("dialogs.close.tray") }}</button>
-      </template>
-    </ModalDialog>
-    <ModalDialog
-      v-if="removing != null"
-      :title="$t('profiles.removeTitle', { name: profiles?.profiles.find((p) => p.id === removing)?.name ?? '' })"
-      @cancel="removing = null"
-    >
-      <p>{{ $t("profiles.removeText") }}</p>
-      <template #actions>
-        <button autofocus @click="removing = null">{{ $t("profiles.cancel") }}</button>
-        <button class="primary" @click="confirmRemove">{{ $t("profiles.remove") }}</button>
-      </template>
-    </ModalDialog>
-    <ModalDialog v-if="switching != null" :title="$t('profiles.dropTitle')" @cancel="switching = null">
-      <template #actions>
-        <button autofocus @click="switching = null">{{ $t("profiles.cancel") }}</button>
-        <button class="primary" @click="confirmSwitch">{{ $t("profiles.drop") }}</button>
-      </template>
-    </ModalDialog>
-    <ModalDialog v-if="offering && !closing" :title="$t('dialogs.autostart.title')" @cancel="offering = false">
-      <p>{{ $t("dialogs.autostart.text") }}</p>
-      <template #actions>
-        <button @click="onOffer(false)">{{ $t("dialogs.autostart.no") }}</button>
-        <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
-      </template>
-    </ModalDialog>
-    <footer class="text-xs text-muted">{{ version }} · {{ $t("footer") }}</footer>
-  </main>
+  </div>
 </template>
