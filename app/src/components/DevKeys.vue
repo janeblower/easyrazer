@@ -17,8 +17,8 @@ async function load() {
   raw.value = props.keys.length > 0 ? await invoke<Record<number, DevKey>>("dev_keys", { keys: props.keys.slice(0, MAX) }) : {};
 }
 // A write shows up in the log; the profile it changed is read again.
-// The parent passes a fresh array each render: compare the contents.
-watch(() => [props.keys.join(","), log.value.at(-1)?.seq], load, { immediate: true });
+// The parent passes a fresh array each render: watch its contents, not the array.
+watch([() => props.keys.join(","), () => log.value.at(-1)?.seq], load, { immediate: true });
 
 const fmt = (r: RawKey | null) => (r ? `lo ${hex([r.thr_low])} hi ${hex([r.thr_high])} fn ${hex([r.fn_id])} [${hex(r.fn_data)}]` : "—");
 const lines = computed(() =>
