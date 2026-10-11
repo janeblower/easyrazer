@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { type Registry, hex, isWrite, parse, suggest } from "./devConsole";
+import { type Parsed, type Registry, confirmation, hex, isWrite, parse, suggest } from "./devConsole";
 
 const reg: Registry = {
   get_mode: { cmd: "00:84", size: 2, help: "Device mode", args: [], example: "" },
@@ -49,4 +49,30 @@ test("recent lines lead only while nothing is typed", () => {
 
 test("hex pads and uppercases", () => {
   expect(hex([0, 10, 255])).toBe("00 0A FF");
+});
+
+const flashReg: Registry = {
+  ...reg,
+  set_effect: { cmd: "0F:02", size: null, help: "", args: [["store", ""]], example: "", flash: 0 },
+  macro_delete: { cmd: "06:03", size: 2, help: "", args: [["id", ""]], example: "", flash: true },
+  set_mode: { cmd: "00:04", size: 2, help: "Switches the mode", args: [["mode", ""]], example: "", safe: [0, [0, 3]] },
+};
+const ask = (line: string) => confirmation(parse(line, flashReg) as Parsed, flashReg);
+
+test("only flash writes wait for a confirmation", () => {
+  expect(ask("get_mode")).toBeNull();
+  expect(ask("set_mode 03 00")).toBeNull();
+  expect(ask("set_effect 00 05 01")).toBeNull();
+  expect(ask("set_effect 02 05 01")).toEqual({ kind: "slot", slot: 2 });
+  expect(ask("macro_delete 00 01")).toEqual({ kind: "flash" });
+});
+
+test("a value outside the everyday ones waits too", () => {
+  expect(ask("set_mode 00 00")).toBeNull();
+  expect(ask("set_mode 01 00")).toEqual({ kind: "unusual", value: 1, help: "Switches the mode" });
+});
+
+test("a write the registry does not know counts as a flash write", () => {
+  expect(ask("0a:0e 01")).toEqual({ kind: "unknown" });
+  expect(ask("0a:8e 01")).toBeNull();
 });

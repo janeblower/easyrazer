@@ -52,3 +52,22 @@ export function suggest(input: string, registry: Registry, recent: string[]): Su
     .map(([text, info]) => ({ text, info }));
   return q ? commands : [...recent.map((text) => ({ text, recent: true })), ...commands];
 }
+
+export type Confirm =
+  { kind: "slot"; slot: number } | { kind: "flash" } | { kind: "unknown" } | { kind: "unusual"; value: number; help: string };
+
+/** Why a line is confirmed before it is sent: a flash write or an unusual value; `null` sends at once. */
+export function confirmation(p: Parsed, registry: Registry): Confirm | null {
+  if (!isWrite(p.cmd)) return null;
+  const info = Object.values(registry).find((c) => c.cmd === p.cmd);
+  // What an unknown write does is anyone's guess, so it is confirmed like the worst case.
+  if (!info) return { kind: "unknown" };
+  if (info.safe) {
+    const [arg, values] = info.safe;
+    const value = p.args[arg] ?? 0;
+    if (!values.includes(value)) return { kind: "unusual", value, help: info.help };
+  }
+  if (info.flash === true) return { kind: "flash" };
+  const slot = typeof info.flash === "number" ? (p.args[info.flash] ?? 0) : 0;
+  return slot === 0 ? null : { kind: "slot", slot };
+}

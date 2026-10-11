@@ -7,6 +7,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::packet::Command;
 
+/// Whether a write lands in the flash, where every write wears it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Flash {
+    Always(bool),
+    /// The arg holding a slot; zero is the temporary store.
+    Arg(u8),
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CommandInfo {
     #[serde(deserialize_with = "crate::devices::command")]
@@ -19,6 +28,11 @@ pub struct CommandInfo {
     pub args: Vec<(String, String)>,
     #[serde(default)]
     pub example: String,
+    #[serde(default)]
+    pub flash: Option<Flash>,
+    /// An arg and its everyday values; any other value is confirmed first.
+    #[serde(default)]
+    pub safe: Option<(u8, Vec<u8>)>,
 }
 
 pub fn all() -> &'static BTreeMap<String, CommandInfo> {
@@ -74,5 +88,30 @@ mod tests {
         for c in all().values() {
             assert!(seen.insert((c.cmd.class, c.cmd.id)), "{} is described twice", c.cmd);
         }
+    }
+
+    #[test]
+    fn flash_marks_only_writes_and_points_at_an_arg() {
+        for (name, c) in all() {
+            let Some(f) = c.flash else { continue };
+            assert!(!c.cmd.is_get(), "{name} reads, yet is marked flash");
+            if let Flash::Arg(i) = f {
+                assert!((i as usize) < c.args.len(), "{name}: flash arg {i} is not an arg");
+            }
+        }
+        assert_eq!(all()["macro_write"].flash, Some(Flash::Always(true)));
+        assert_eq!(all()["set_key_assignment"].flash, Some(Flash::Arg(0)));
+        assert_eq!(all()["set_mode"].flash, None);
+    }
+
+    #[test]
+    fn safe_values_point_at_an_arg() {
+        for (name, c) in all() {
+            let Some((i, values)) = &c.safe else { continue };
+            assert!((*i as usize) < c.args.len(), "{name}: safe arg {i} is not an arg");
+            assert!(!values.is_empty(), "{name}: no safe values");
+        }
+        // Mode 01 reboots into the bootloader; the console must ask first.
+        assert_eq!(all()["set_mode"].safe, Some((0, vec![0, 3])));
     }
 }

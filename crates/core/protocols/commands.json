@@ -4,6 +4,7 @@
   "get_mode": { "cmd": "00:84", "size": 2, "help": "Device mode in the first reply byte: 00 hardware, 03 driver." },
   "set_mode": {
     "cmd": "00:04",
+    "safe": [0, [0, 3]],
     "size": 2,
     "help": "Switches the device mode and reloads profile 0 from the startup slot. Mode 01 reboots into the bootloader.",
     "args": [["mode", "00 hardware, 03 driver"], ["reserved", "00"]],
@@ -25,16 +26,18 @@
   },
   "list_profiles": { "cmd": "05:81", "size": 80, "help": "Flash slots in use: the reply holds their count, then the slot numbers." },
   "get_active_profile": { "cmd": "05:84", "size": 1, "help": "The slot the keyboard starts with." },
-  "create_profile": { "cmd": "05:02", "size": 1, "help": "Lists a slot; its page keeps what it held before.", "args": [["slot", "01..05"]] },
-  "delete_profile": { "cmd": "05:03", "size": 1, "help": "Unlists a slot. Activate another first if it is the active one.", "args": [["slot", "01..05"]] },
+  "create_profile": { "cmd": "05:02", "size": 1, "help": "Lists a slot; its page keeps what it held before.", "args": [["slot", "01..05"]], "flash": true },
+  "delete_profile": { "cmd": "05:03", "size": 1, "help": "Unlists a slot. Activate another first if it is the active one.", "args": [["slot", "01..05"]], "flash": true },
   "activate_profile": {
     "cmd": "05:04",
+    "flash": true,
     "size": 1,
     "help": "Makes the slot the startup one, reloads profile 0 from it and erases the settings page.",
     "args": [["slot", "01..05"]]
   },
   "set_profile_name": {
     "cmd": "05:08",
+    "flash": true,
     "size": 80,
     "help": "Writes a slot's name.",
     "args": [["slot", "01..05"], ["offset", "00 00"], ["length", "u16 BE, bytes of the name"], ["name", "UTF-16 BE, up to 32 units"]]
@@ -48,6 +51,7 @@
   },
   "set_key_assignment": {
     "cmd": "02:12",
+    "flash": 0,
     "size": 80,
     "help": "Writes one key's press and release points and its function on a layer. Thresholds map 00..FF onto 1.5..3.6 mm.",
     "args": [
@@ -70,18 +74,21 @@
   },
   "macro_allocate": {
     "cmd": "06:08",
+    "flash": true,
     "help": "Reserves flash for a macro body.",
     "args": [["id", "u16 BE"], ["size", "u32 BE, body bytes"]]
   },
   "macro_write": {
     "cmd": "06:09",
+    "flash": true,
     "help": "Writes a chunk of a macro body; the firmware writes the flash about 100 ms later.",
     "args": [["id", "u16 BE"], ["offset", "u32 BE"], ["length", "up to 72"], ["data", "body bytes"]]
   },
-  "macro_delete": { "cmd": "06:03", "size": 2, "help": "Removes a macro body from the flash.", "args": [["id", "u16 BE"]] },
+  "macro_delete": { "cmd": "06:03", "size": 2, "help": "Removes a macro body from the flash.", "args": [["id", "u16 BE"]], "flash": true },
   "macro_stats": { "cmd": "06:86", "size": 12, "help": "Macro store: count u16, 2 bytes, free u32, free u32." },
   "set_effect": {
     "cmd": "0F:02",
+    "flash": 0,
     "help": "Shows a lighting effect.",
     "args": [["store", "00 temporary, 01 flash"], ["led", "from devices/*.json"], ["effect", "bytes from protocols/extended.json"]]
   },
@@ -93,11 +100,13 @@
   },
   "set_frame": {
     "cmd": "0F:03",
+    "flash": 0,
     "help": "Per-key colors of one row for the custom effect.",
     "args": [["store", "00"], ["reserved", "00"], ["row", ""], ["first column", ""], ["last column", ""], ["colors", "RGB per column"]]
   },
   "set_brightness": {
     "cmd": "0F:04",
+    "flash": 0,
     "size": 3,
     "help": "Sets the lighting brightness.",
     "args": [["store", "00 temporary, 01 flash"], ["led", "from devices/*.json"], ["value", "00..FF"]]

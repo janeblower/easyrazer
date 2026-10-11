@@ -212,6 +212,8 @@ export interface CommandInfo {
   help: string;
   args: [string, string][];
   example: string;
+  flash?: boolean | number | null; // true: always; a number: the arg holding the slot
+  safe?: [number, number[]] | null; // an arg and its everyday values
 }
 
 export interface RawKey {
