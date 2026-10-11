@@ -245,7 +245,7 @@ mod tests {
     fn a_censored_report_hides_macro_bodies_names_and_the_serial() {
         let entries = [
             entry(0, "06:09", vec![0, 1, 0, 0, 0, 0, 3, 0xAA, 0xBB, 0xCC], vec![]),
-            entry(1, "05:08", vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42], vec![]),
+            entry(1, "05:08", vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42], vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42]),
             entry(2, "05:88", vec![1, 0, 0, 0, 0x40], vec![1, 0, 0, 0, 4, 0, 0x41, 0, 0x42]),
             entry(3, "00:82", vec![], b"PM2149H00012345".to_vec()),
         ];

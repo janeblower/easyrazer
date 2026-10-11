@@ -164,8 +164,8 @@ impl<T: Transport> Transport for Logged<T> {
 /// Bytes of the args and of the reply a bug report may show; the rest can hold a macro's keys, a profile name or the serial.
 pub fn public_len(e: &Entry) -> (usize, usize) {
     let (args, reply) = match e.cmd.as_str() {
-        "06:09" => (7, usize::MAX),
-        "05:08" => (5, usize::MAX),
+        "06:09" => (7, 7),
+        "05:08" => (5, 5),
         "05:88" => (usize::MAX, 5),
         "00:82" => (usize::MAX, 0),
         _ => (usize::MAX, usize::MAX),
@@ -281,11 +281,11 @@ mod tests {
         let t = logged(FakeKeyboard::new(&[31]));
         macros::write(&t, 3, &[0xAA; 10]).unwrap();
         let body = t.log.entries().into_iter().find(|e| e.cmd == "06:09").unwrap();
-        assert_eq!(public_len(&body), (7, body.reply.len()));
+        assert_eq!(public_len(&body), (7, 7));
         let name = Entry { cmd: "05:88".into(), args: vec![1, 0, 0, 0, 0x40], reply: vec![0; 20], ..Default::default() };
         assert_eq!(public_len(&name), (5, 5));
-        let set = Entry { cmd: "05:08".into(), args: vec![0; 12], ..Default::default() };
-        assert_eq!(public_len(&set), (5, 0));
+        let set = Entry { cmd: "05:08".into(), args: vec![0; 12], reply: vec![0; 12], ..Default::default() };
+        assert_eq!(public_len(&set), (5, 5));
         let serial = Entry { cmd: "00:82".into(), args: vec![1], reply: b"PM2149H00012345".to_vec(), ..Default::default() };
         assert_eq!(public_len(&serial), (1, 0));
         let other = Entry { cmd: "00:84".into(), args: vec![1], reply: vec![2, 3], ..Default::default() };
