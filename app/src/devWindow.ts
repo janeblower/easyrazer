@@ -20,7 +20,13 @@ async function logical<T>(physical: Promise<{ toLogical: (scale: number) => T }>
 async function grow(dock: Dock | null, size: number) {
   const win = getCurrentWindow();
   // A maximized window keeps its size; the panel takes room from the content.
-  if (await win.isMaximized()) return;
+  if (await win.isMaximized()) {
+    if (dock === null) {
+      await win.setMinSize(new LogicalSize(MIN_W, MIN_H));
+      Object.assign(grown, { w: 0, h: 0, left: 0 });
+    }
+    return;
+  }
   const scale = await win.scaleFactor();
   const inner = await logical(win.innerSize(), scale);
   const outer = await logical(win.outerSize(), scale);
@@ -71,11 +77,12 @@ async function closeDetached() {
   await win?.destroy();
 }
 
-let queue = Promise.resolve();
+let running: Promise<void> | null = null;
+let latest: (() => Promise<void>) | null = null;
 
-/** Fits the main window and the separate one to the panel; calls run one after another. */
+/** Fits the main window and the separate one to the panel; one at a time, and only the newest waiting call runs. */
 export async function applyLayout(on: boolean, dock: Dock, size: number, geom: DevWindow | null, title: string) {
-  queue = queue.then(async () => {
+  latest = async () => {
     try {
       await grow(on && dock !== "window" ? dock : null, size);
       await (on && dock === "window" ? openDetached(geom, title) : closeDetached());
@@ -83,8 +90,17 @@ export async function applyLayout(on: boolean, dock: Dock, size: number, geom: D
       // The Vite dev server has no windows to resize.
       console.error(error);
     }
-  });
-  await queue;
+  };
+  if (running) return running;
+  running = (async () => {
+    while (latest) {
+      const next = latest;
+      latest = null;
+      await next();
+    }
+    running = null;
+  })();
+  await running;
 }
 
 /** In the separate window: remembers where it is, and closing it closes the panel. */

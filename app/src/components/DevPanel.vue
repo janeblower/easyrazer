@@ -96,15 +96,19 @@ function drag(down: PointerEvent) {
   const start = p.size;
   const sign = props.dock === "left" ? 1 : -1;
   const move = (e: PointerEvent) => {
-    const delta = props.dock === "bottom" ? e.clientY - down.clientY : e.clientX - down.clientX;
+    // The window moves under the pointer on a left or bottom dock, so client coordinates would feed back.
+    const delta = props.dock === "bottom" ? e.screenY - down.screenY : e.screenX - down.screenX;
     if (dev.panel) dev.panel.size = Math.max(MIN_SIZE, Math.round(start + sign * delta));
   };
   const up = () => {
     el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.removeEventListener("pointercancel", up);
     void setPanel({});
   };
   el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", up, { once: true });
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
 }
 </script>
 
