@@ -54,8 +54,8 @@ const rows = computed(() =>
 );
 const errors = computed(() => log.value.filter((e) => e.seq > clearedAt.value && isError(e)).length);
 const entry = computed(() => selectedEntry(log.value, selected.value, clearedAt.value));
-watch(entry, (e) => {
-  if (!e) selected.value = null;
+watch(entry, (e, old) => {
+  if (!e && old && selected.value === old.seq) selected.value = null;
 });
 const split = computed(() => width.value >= SPLIT_MIN);
 const columns = computed<Column[]>(() => (entry.value ? ["name"] : visibleColumns(prefs.columns, width.value - 12)));
