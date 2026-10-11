@@ -19,7 +19,7 @@ pub enum CloseAction {
 }
 
 /// An unknown value must not reset the whole file.
-fn lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<CloseAction, D::Error> {
+fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
     let v = serde_json::Value::deserialize(d)?;
     Ok(serde_json::from_value(v).unwrap_or_default())
 }
@@ -125,7 +125,9 @@ pub struct Settings {
     pub snap_tap_bound: bool,
     pub dev_mode: bool,
     /// `None` until the mode is first switched on.
+    #[serde(deserialize_with = "lenient")]
     pub dev_panel: Option<DevPanel>,
+    #[serde(deserialize_with = "lenient")]
     pub dev_window: Option<DevWindow>,
 }
 
@@ -301,6 +303,12 @@ mod tests {
     fn unknown_close_action_is_ask_and_keeps_the_rest() {
         let s = parse("{\"close_action\": \"minimize\", \"confirm_write\": false, \"watch_synapse\": false}");
         assert_eq!((s.close_action, s.confirm_write, s.watch_synapse), (CloseAction::Ask, false, false));
+    }
+
+    #[test]
+    fn an_unreadable_dev_panel_is_dropped_and_keeps_the_rest() {
+        let s = parse("{\"dev_panel\": {\"open\": true, \"dock\": \"nowhere\", \"size\": 1}, \"confirm_write\": false}");
+        assert_eq!((s.dev_panel, s.confirm_write), (None, false));
     }
 
     #[test]
