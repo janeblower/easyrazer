@@ -262,7 +262,6 @@
       "close": "Скрыть (Esc)",
       "empty": "Команды и ответы. Запись во flash спросит подтверждение.",
       "placeholder": "команда или CC:II и байты",
-      "hint": "↑↓ выбор · Tab подставить · Enter отправить · Esc закрыть",
       "confirmSlot": "Запись во flash (слот {slot}). Enter — выполнить, Esc — отмена",
       "confirmFlash": "Запись во flash. Enter — выполнить, Esc — отмена",
       "confirmUnknown": "Неизвестная запись, может затронуть flash. Enter — выполнить, Esc — отмена",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { DeviceInfo, Dock } from "../types";
@@ -90,13 +90,30 @@ async function copyDiagnostics() {
 }
 
 const root = ref<HTMLElement | null>(null);
+
+// The console swallows the Esc that closes its own list or confirmation.
+function onKey(e: KeyboardEvent) {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (menu.value) menu.value = false;
+  else drawer.open = !drawer.open;
+}
+
 onMounted(async () => {
   if (!props.detached) return;
+  window.addEventListener("keydown", onKey);
   root.value?.focus();
   await startDev();
   setLanguage(dev.language ?? systemLanguage());
   await trackDetached();
 });
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKey);
+});
+
+function onAsideKey(e: KeyboardEvent) {
+  if (!props.detached) onKey(e);
+}
 
 function pickDock(d: Dock) {
   menu.value = false;
@@ -106,17 +123,9 @@ function pickDock(d: Dock) {
   void setPanel({ dock: d, size: sameAxis ? p.size : DEFAULT_SIZE[d] });
 }
 
-/** The console's answer opens its exchange. */
 function openEntry(seq: number) {
   tab.value = "traffic";
   selected.value = seq;
-}
-
-// The console swallows the Esc that closes its own list or confirmation.
-function onKey(e: KeyboardEvent) {
-  if (e.key !== "Escape" || e.defaultPrevented) return;
-  if (menu.value) menu.value = false;
-  else drawer.open = !drawer.open;
 }
 
 const edge = computed(
@@ -181,7 +190,7 @@ function dragDrawer(down: PointerEvent) {
         ? 'h-screen border-0'
         : { left: 'border-0 border-r-2', right: 'border-0 border-l-2', bottom: 'border-0 border-t-2', window: 'border-0' }[dock ?? 'window']
     "
-    @keydown="onKey"
+    @keydown="onAsideKey"
   >
     <div class="absolute z-10" :class="edge" @pointerdown="drag" />
     <header class="px-1 border-b border-0 border-line border-solid flex shrink-0 h-[30px] min-w-0 whitespace-nowrap items-center">
@@ -236,11 +245,13 @@ function dragDrawer(down: PointerEvent) {
       </table>
       <button class="mt-2" @click="loadInfo">{{ $t("dev.refresh") }}</button>
     </div>
-    <template v-if="drawer.open">
-      <div class="border-t border-0 border-line border-solid bg-bg shrink-0 h-[5px] cursor-ns-resize" @pointerdown="dragDrawer" />
-      <div class="flex shrink-0 flex-col min-h-0" :style="{ height: `${drawer.height}px` }">
-        <DevConsole @open="openEntry" @close="drawer.open = false" />
-      </div>
-    </template>
+    <div
+      v-show="drawer.open"
+      class="border-t border-0 border-line border-solid bg-bg shrink-0 h-[5px] cursor-ns-resize"
+      @pointerdown="dragDrawer"
+    />
+    <div v-show="drawer.open" class="flex shrink-0 flex-col max-h-[70%] min-h-0" :style="{ height: `${drawer.height}px` }">
+      <DevConsole @open="openEntry" @close="drawer.open = false" />
+    </div>
   </aside>
 </template>

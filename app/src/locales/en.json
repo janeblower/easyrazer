@@ -262,7 +262,6 @@
       "close": "Hide (Esc)",
       "empty": "Commands and replies. A flash write asks first.",
       "placeholder": "command or CC:II and bytes",
-      "hint": "↑↓ select · Tab complete · Enter send · Esc close",
       "confirmSlot": "Write to flash (slot {slot}). Enter to send, Esc to cancel",
       "confirmFlash": "Write to flash. Enter to send, Esc to cancel",
       "confirmUnknown": "Unknown write, may reach the flash. Enter to send, Esc to cancel",
