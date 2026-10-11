@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { reactive, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AppSettings, CommandInfo, DevPanel, DevWindow, LogEntry } from "./types";
@@ -11,7 +11,8 @@ export const dev = reactive({
   window: null as DevWindow | null,
   language: null as string | null,
 });
-export const log = ref<LogEntry[]>([]);
+// Replaced, never mutated: a full read logs hundreds of exchanges, and each change re-renders the log.
+export const log = shallowRef<LogEntry[]>([]);
 export const registry = ref<Record<string, CommandInfo>>({});
 
 export const nameOf = (cmd: string) => Object.entries(registry.value).find(([, c]) => c.cmd === cmd)?.[0];
@@ -22,6 +23,14 @@ async function loadSettings() {
 }
 
 let started: Promise<void> | undefined;
+let pending: LogEntry[] = [];
+
+// A timer, not a frame: frames stop while the window is hidden and the batch would grow unbounded.
+function flush() {
+  const last = log.value.at(-1)?.seq ?? -1;
+  log.value = [...log.value, ...pending.filter((e) => e.seq > last)].slice(-CAPACITY);
+  pending = [];
+}
 
 /** Loads the mode, the log and the registry once per window and follows their changes. */
 export async function startDev() {
@@ -30,8 +39,7 @@ export async function startDev() {
       void loadSettings();
     });
     await listen<LogEntry>("hid-log", (e) => {
-      log.value.push(e.payload);
-      if (log.value.length > CAPACITY) log.value.shift();
+      if (pending.push(e.payload) === 1) setTimeout(flush, 100);
     });
     await loadSettings();
     const [fetched, commands] = await Promise.all([invoke<LogEntry[]>("dev_log"), invoke<Record<string, CommandInfo>>("dev_commands")]);

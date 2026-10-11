@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { log, nameOf } from "../dev";
 import { hex, isWrite } from "../devConsole";
 import type { LogEntry } from "../types";
 
 const filter = ref("");
 const hideBackground = ref(true);
-const frozen = ref<LogEntry[] | null>(null); // the log as it was when paused
+const frozen = shallowRef<LogEntry[] | null>(null); // the log as it was when paused
 const clearedAt = ref(-1); // last seq hidden by Clear
 const open = ref<number | null>(null);
 const box = ref<HTMLElement | null>(null);
@@ -50,7 +50,7 @@ watch(
       <label class="text-xs text-muted whitespace-nowrap"
         ><input v-model="hideBackground" type="checkbox" /> {{ $t("dev.hideBackground") }}</label
       >
-      <button @click="frozen = frozen ? null : [...log]">{{ frozen ? $t("dev.resume") : $t("dev.pause") }}</button>
+      <button @click="frozen = frozen ? null : log">{{ frozen ? $t("dev.resume") : $t("dev.pause") }}</button>
       <button @click="clearedAt = log.at(-1)?.seq ?? -1">{{ $t("dev.clear") }}</button>
     </div>
     <div ref="box" class="text-xs font-mono p-2 flex-1 overflow-auto" @scroll="onScroll">
