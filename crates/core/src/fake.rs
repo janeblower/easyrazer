@@ -1,4 +1,5 @@
-//! In-memory Huntsman V2 Analog answering the commands `core` sends.
+//! In-memory Huntsman V2 Analog answering the commands `core` sends, plus the V3 Pro's
+//! firmware Rapid Trigger and Snap Tap.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +42,10 @@ pub struct FakeKeyboard {
     pub frame: RefCell<BTreeMap<u8, Vec<u8>>>,
     /// Macro bodies by id.
     pub macros: RefCell<BTreeMap<u16, Vec<u8>>>,
+    /// Arguments of each `02:1A`.
+    pub rapid_sent: RefCell<Vec<Vec<u8>>>,
+    /// `02:21` per profile: `on fwID fwID`.
+    pub snap: RefCell<BTreeMap<u8, [u8; 3]>>,
     reply: RefCell<Report>,
 }
 
@@ -84,6 +89,8 @@ impl FakeKeyboard {
             brightness: RefCell::new((0..=5).map(|p| (p, 0xF2)).collect()),
             frame: RefCell::new(BTreeMap::new()),
             macros: RefCell::new(BTreeMap::new()),
+            rapid_sent: RefCell::new(Vec::new()),
+            snap: RefCell::new(BTreeMap::new()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
     }
@@ -219,6 +226,14 @@ impl FakeKeyboard {
                 let free = (0x6FA78 - used as u32).to_be_bytes();
                 let count = (self.macros.borrow().len() as u16).to_be_bytes();
                 (OK, [&count[..], &[0, 0], &free, &free].concat())
+            }
+            (0x02, 0x1A) if a.len() >= 2 && (a.len() - 2).is_multiple_of(6) => {
+                self.rapid_sent.borrow_mut().push(a.to_vec());
+                (OK, a.to_vec())
+            }
+            (0x02, 0x21) => {
+                self.snap.borrow_mut().insert(a[0], [a[1], a[2], a[3]]);
+                (OK, a.to_vec())
             }
             _ => (NOT_SUPPORTED, Vec::new()),
         }

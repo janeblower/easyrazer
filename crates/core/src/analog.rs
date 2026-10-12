@@ -1,12 +1,12 @@
-//! Per-key analog key assignment (`02:12`/`02:92`) used by the Huntsman V2 Analog.
+//! Per-key analog key assignment (`02:12`/`02:92`) and each model's press-point scale.
 //!
-//! The newer multi-key actuation and rapid trigger commands (`02:19`/`02:1A`) answer
-//! "not supported" on this device; actuation lives inside the key assignment instead.
+//! On the Huntsman V2 Analog the multi-key actuation and rapid trigger commands (`02:19`/`02:1A`)
+//! answer "not supported"; actuation lives inside the key assignment instead.
 //! Layout: `[profile, key, layer, thresholdL, thresholdH, fnId, fnSize, fnData..]`.
-//! Thresholds map 0..=255 onto 1.5..=3.6 mm
-//! (`obmEngineKeyboard.convertUIThresholdToFWThreshold`); 0 is the 1.5 mm minimum.
-//! In hardware mode the firmware clamps the press point to 15..=250 (1.62..=3.56 mm) and the
-//! release point to 5..=press−10; in driver mode the host engine uses the raw values.
+//! Thresholds map 0..=255 onto the model's [`Analog`] scale: 1.5..=3.6 mm on V2
+//! (`obmEngineKeyboard.convertUIThresholdToFWThreshold`), the high byte of the u16 threshold on V3.
+
+use serde::{Deserialize, Serialize};
 
 use crate::packet::Command;
 
@@ -14,15 +14,49 @@ pub const SET_KEY_ASSIGNMENT: Command = Command::new(0x02, 0x12);
 pub const GET_KEY_ASSIGNMENT: Command = Command::new(0x02, 0x92);
 pub const KEY_ASSIGNMENT_SIZE: u8 = 80;
 
-pub const MIN_MM: f32 = 1.5;
-pub const MAX_MM: f32 = 3.6;
-
-pub fn mm_to_threshold(mm: f32) -> u8 {
-    ((mm.clamp(MIN_MM, MAX_MM) - MIN_MM) / (MAX_MM - MIN_MM) * 255.0).round() as u8
+/// How a model maps millimetres onto thresholds and depth.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Analog {
+    /// Threshold and depth 0.
+    pub zero_mm: f32,
+    /// Threshold and depth 255.
+    pub full_mm: f32,
+    /// Press points the window offers.
+    pub range: [f32; 2],
+    /// Press points the firmware keeps to in hardware mode, if narrower than `range`.
+    pub hw_range: Option<[f32; 2]>,
+    /// Rapid Trigger and Snap Tap run in the firmware in hardware mode (`02:1A`, `02:21`).
+    #[serde(default)]
+    pub firmware_rapid: bool,
+    #[serde(skip_serializing)]
+    pub depth: DepthReport,
 }
 
-pub fn threshold_to_mm(t: u8) -> f32 {
-    t as f32 / 255.0 * (MAX_MM - MIN_MM) + MIN_MM
+/// Where driver mode streams key depth: an MI_01 collection.
+#[derive(Clone, Debug, Deserialize)]
+pub struct DepthReport {
+    /// Collection in the device path, such as `col06`.
+    pub collection: String,
+    #[serde(deserialize_with = "crate::devices::hex_u8")]
+    pub id: u8,
+    /// `true` for a u16 BE depth on the u16 threshold scale, `false` for one byte.
+    #[serde(default)]
+    pub wide: bool,
+}
+
+impl Analog {
+    pub fn threshold(&self, mm: f32) -> u8 {
+        ((mm - self.zero_mm) / (self.full_mm - self.zero_mm) * 255.0).round().clamp(0.0, 255.0) as u8
+    }
+
+    pub fn mm(&self, t: u8) -> f32 {
+        t as f32 / 255.0 * (self.full_mm - self.zero_mm) + self.zero_mm
+    }
+
+    /// A travel distance in threshold units, at least one.
+    pub fn units(&self, mm: f32) -> u8 {
+        (mm / (self.full_mm - self.zero_mm) * 255.0).round().clamp(1.0, 255.0) as u8
+    }
 }
 
 /// Key layer: normal or Hypershift.
@@ -69,12 +103,30 @@ pub fn set_args(a: &KeyAssignment) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn scale(pid: u16) -> &'static Analog {
+        &crate::devices::by_pid(pid).unwrap().analog
+    }
+
     #[test]
-    fn threshold_conversion() {
-        assert_eq!(mm_to_threshold(1.5), 0);
-        assert_eq!(mm_to_threshold(3.6), 255);
-        assert_eq!(mm_to_threshold(2.4), 109);
-        assert!((threshold_to_mm(0x6F) - 2.41).abs() < 0.01);
+    fn v2_threshold_conversion() {
+        let a = scale(0x0266);
+        assert_eq!(a.threshold(1.5), 0);
+        assert_eq!(a.threshold(3.6), 255);
+        assert_eq!(a.threshold(2.4), 109);
+        assert!((a.mm(0x6F) - 2.41).abs() < 0.01);
+        assert_eq!(a.units(0.1), 12);
+    }
+
+    #[test]
+    fn v3_thresholds_are_the_high_byte_of_the_u16() {
+        let a = scale(0x02A6);
+        // Synapse's default 19656 (1.2 mm) is 76.8 in high bytes.
+        assert_eq!(a.threshold(1.2), 77);
+        assert_eq!(a.threshold(4.0), 255);
+        for tenth in 1..=40 {
+            let mm = tenth as f32 / 10.0;
+            assert_eq!((a.mm(a.threshold(mm)) * 10.0).round() / 10.0, mm, "the window's 0.1 mm steps survive");
+        }
     }
 
     #[test]

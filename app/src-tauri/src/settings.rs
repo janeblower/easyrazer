@@ -124,6 +124,8 @@ pub struct Settings {
     /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
     pub snap_tap_bound: bool,
     pub dev_mode: bool,
+    /// RAM writes to keyboard models nobody has checked on hardware yet.
+    pub unverified_writes: bool,
     /// `None` until the mode is first switched on.
     #[serde(deserialize_with = "lenient")]
     pub dev_panel: Option<DevPanel>,
@@ -133,7 +135,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, dev_panel: None, dev_window: None }
+        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, unverified_writes: false, dev_panel: None, dev_window: None }
     }
 }
 
@@ -287,6 +289,7 @@ mod tests {
             language: Some("ru".into()),
             snap_tap_bound: true,
             dev_mode: true,
+            unverified_writes: true,
             dev_panel: Some(DevPanel { open: false, dock: Dock::Bottom, size: 300 }),
             dev_window: Some(DevWindow { x: 10.0, y: 20.0, w: 800.0, h: 600.0 }),
         };

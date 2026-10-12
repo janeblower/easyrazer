@@ -157,6 +157,7 @@ fn main() {
             commands::autostart_answered,
             commands::set_close_action,
             commands::set_watch_synapse,
+            commands::set_unverified_writes,
             commands::set_language,
             commands::profiles,
             commands::load_profile,

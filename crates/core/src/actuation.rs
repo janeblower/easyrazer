@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use crate::analog::{self, KeyAssignment, MAX_MM, MIN_MM, Layer};
+use crate::analog::{self, Analog, KeyAssignment, Layer};
 use crate::keymap;
 use crate::transport::{Error, Transport, exchange};
 
@@ -48,29 +48,31 @@ pub enum Outcome {
 }
 
 /// Sets the press point of each `(key, mm)`; one failing key does not stop the rest.
-pub fn apply(t: &impl Transport, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
-    apply_with(t, profile, changes, set_mm)
+pub fn apply(t: &impl Transport, scale: &Analog, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
+    apply_with(t, profile, changes, |t, profile, key, &mm| {
+        let thr = threshold(scale, mm)?;
+        update(t, profile, key, |a| a.threshold_low = thr)
+    })
 }
 
-type Set<T, C> = fn(&T, u8, u8, &C) -> Result<Outcome, Error>;
-
-pub(crate) fn apply_with<T: Transport, C>(t: &T, profile: u8, changes: &[(u8, C)], set: Set<T, C>) -> Vec<(u8, Outcome)> {
+pub(crate) fn apply_with<T: Transport, C>(
+    t: &T,
+    profile: u8,
+    changes: &[(u8, C)],
+    set: impl Fn(&T, u8, u8, &C) -> Result<Outcome, Error>,
+) -> Vec<(u8, Outcome)> {
     changes.iter().map(|(key, c)| (*key, set(t, profile, *key, c).unwrap_or_else(Outcome::Failed))).collect()
 }
 
 /// The `thrL` of a press point picked in the window.
-pub fn threshold(mm: f32) -> Result<u8, Error> {
+pub fn threshold(scale: &Analog, mm: f32) -> Result<u8, Error> {
     // The UI works in 0.1 mm steps; rounding absorbs float drift from the slider.
     let mm = (mm * 10.0).round() / 10.0;
-    if !(MIN_MM..=MAX_MM).contains(&mm) {
-        return Err(Error::BadArgument(format!("{mm} mm is outside {MIN_MM}..={MAX_MM}")));
+    let [min, max] = scale.range;
+    if !(min..=max).contains(&mm) {
+        return Err(Error::BadArgument(format!("{mm} mm is outside {min}..={max}")));
     }
-    Ok(analog::mm_to_threshold(mm))
-}
-
-fn set_mm(t: &impl Transport, profile: u8, key: u8, &mm: &f32) -> Result<Outcome, Error> {
-    let thr = threshold(mm)?;
-    update(t, profile, key, |a| a.threshold_low = thr)
+    Ok(scale.threshold(mm))
 }
 
 /// Changes one key's assignment and reads it back to confirm.
@@ -108,6 +110,10 @@ mod tests {
     use crate::packet::Status;
 
     const A: u8 = 31;
+
+    fn apply(t: &FakeKeyboard, profile: u8, changes: &[(u8, f32)]) -> Vec<(u8, Outcome)> {
+        super::apply(t, &crate::devices::by_pid(0x0266).unwrap().analog, profile, changes)
+    }
     const S: u8 = 32;
     const W: u8 = 18;
 

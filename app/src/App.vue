@@ -103,6 +103,9 @@ const dirty = computed(
 trackUnapplied(() => dirty.value > 0);
 const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
 const driver = computed(() => !!status.value?.driver_mode);
+const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
+// Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
+const rapidHere = computed(() => driver.value || fwRapid.value);
 const canApply = computed(() => writable.value && dirty.value > 0);
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
 const canSave = computed(
@@ -768,8 +771,8 @@ onUnmounted(() => {
               :edited="mapEdited"
               :errors="section === 'actuation' ? errors : bindErrors"
               :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-              :rapid="driver && section === 'actuation' ? rapidKeys : new Set()"
-              :snap="driver && section === 'actuation' ? snapColors(snap) : {}"
+              :rapid="rapidHere && section === 'actuation' ? rapidKeys : new Set()"
+              :snap="rapidHere && section === 'actuation' ? snapColors(snap) : {}"
               :rapid-edited="rapidEdited"
               :hs-values="mapHs"
               :hs-edited="hsEdited"
@@ -788,6 +791,7 @@ onUnmounted(() => {
                   :hs="selectedHs"
                   :hs-split="hsSplit"
                   :driver="driver"
+                  :analog="status?.analog ?? null"
                   @set="setValue"
                   @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
                   @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
@@ -814,6 +818,7 @@ onUnmounted(() => {
                   :selection="selection"
                   :layout="layout"
                   :driver="driver"
+                  :firmware="fwRapid && !driver"
                   :combo="snapCombo"
                   @update="setSnap"
                 />

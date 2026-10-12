@@ -19,3 +19,4 @@ pub mod profiles;
 pub mod rapid;
 pub mod registry;
 pub mod transport;
+pub mod trigger;

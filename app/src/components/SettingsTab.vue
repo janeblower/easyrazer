@@ -40,6 +40,7 @@ const TOGGLES = [
   { key: "watch_synapse", cmd: "set_watch_synapse", label: "settings.watchSynapse" },
   { key: "confirm_write", cmd: "set_confirm_write", label: "settings.confirmWrite" },
   { key: "dev_mode", cmd: "set_dev_mode", label: "settings.devMode" },
+  { key: "unverified_writes", cmd: "set_unverified_writes", label: "settings.unverifiedWrites" },
 ] as const;
 
 onMounted(async () => {

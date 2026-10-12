@@ -5,9 +5,10 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Deserializer};
 
+use crate::analog::Analog;
 use crate::packet::Command;
 
-const DEVICES: &[&str] = &[include_str!("../devices/1532-0266.json")];
+const DEVICES: &[&str] = &[include_str!("../devices/1532-0266.json"), include_str!("../devices/1532-02A6.json")];
 const PROTOCOLS: &[(&str, &str)] = &[("extended", include_str!("../protocols/extended.json"))];
 
 #[derive(Debug, Deserialize)]
@@ -20,6 +21,10 @@ pub struct DeviceSpec {
     pub control_interface: i32,
     #[serde(deserialize_with = "hex_u8")]
     pub tid: u8,
+    /// Checked on hardware; the app writes to an unverified model only when asked to, and never its flash.
+    #[serde(default)]
+    pub verified: bool,
+    pub analog: Analog,
     pub lighting: Lighting,
     pub lamp_array: Option<LampArray>,
 }
@@ -94,7 +99,7 @@ impl DeviceSpec {
     }
 }
 
-fn hex_u8<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
+pub(crate) fn hex_u8<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
     u8::from_str_radix(&String::deserialize(d)?, 16).map_err(serde::de::Error::custom)
 }
 

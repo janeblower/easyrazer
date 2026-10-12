@@ -49,6 +49,7 @@
     "empty": "Select two or more keys on the map, such as A and D, and group them.",
     "rule": "Rule",
     "remove": "Remove group",
+    "firmwarePair": "In HW mode the keyboard runs one pair: the first two keys of the first group, rule Last",
     "rules": { "last": "Last", "neutral": "Neutral", "deeper": "Deeper" },
     "hints": {
       "last": "While several are held, the newest press types. Release it and the previous one types again.",
@@ -214,7 +215,8 @@
     "exit": "Quit",
     "watchSynapse": "Watch for Synapse",
     "confirmWrite": "Ask before saving to keyboard memory",
-    "devMode": "Developer mode"
+    "devMode": "Developer mode",
+    "unverifiedWrites": "Write to keyboards not yet checked on hardware (RAM only)"
   },
   "dev": {
     "title": "Developer tools",
@@ -293,7 +295,8 @@
     "unsupported": "This Razer keyboard model is not supported (PID {pid}).",
     "notFound": "No supported Razer keyboard found.",
     "reading": "Reading the keyboard: {percent}%",
-    "connected": "Connected: {model}, profile “{profile}”"
+    "connected": "Connected: {model}, profile “{profile}”",
+    "unverified": "Connected: {model}, profile “{profile}”. This model has not been checked on hardware: the app only reads it unless allowed in Settings, and never writes its memory"
   },
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
@@ -308,7 +311,9 @@
     "lastSlot": "The last slot cannot be freed",
     "onlyProfile": "The only profile cannot be deleted",
     "emptyName": "A profile name cannot be empty",
-    "nameTaken": "A profile with this name already exists"
+    "nameTaken": "A profile with this name already exists",
+    "unverified": "{model} has not been checked on hardware: turn on writes to such keyboards in Settings",
+    "unverifiedFlash": "{model} has not been checked on hardware: its memory is not written yet"
   },
   "profiles": {
     "new": "New profile",

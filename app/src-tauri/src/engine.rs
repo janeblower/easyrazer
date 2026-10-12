@@ -10,6 +10,8 @@ use hidapi::{HidApi, HidDevice};
 use razer_core::hid::VID;
 use razer_core::binding::Mouse;
 use razer_core::profiles;
+use razer_core::analog::DepthReport;
+use razer_core::devices::DeviceSpec;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
 use windows_sys::Win32::System::Power::SetSuspendState;
 use windows_sys::Win32::System::Shutdown::LockWorkStation;
@@ -33,7 +35,7 @@ const POLL: Duration = Duration::from_millis(100);
 const PAUSE: u8 = 126;
 const L: u8 = 39;
 
-type Feed = fn(&mut Engine, &[u8], Instant) -> Vec<Output>;
+type Feed = Box<dyn Fn(&mut Engine, &[u8], Instant) -> Vec<Output> + Send>;
 
 pub struct EngineHandle {
     engine: Arc<Mutex<Engine>>,
@@ -104,9 +106,10 @@ impl Drop for MenuListener {
 
 impl EngineHandle {
     /// Opens the report collections and starts reading; the keyboard only reports once in driver mode.
-    pub fn start(api: &HidApi, pid: u16, cfg: Config, sink: Sink) -> Result<Self, String> {
-        let depth = open(api, pid, "col06")?;
-        let razer = open(api, pid, "col04")?;
+    pub fn start(api: &HidApi, d: &DeviceSpec, cfg: Config, sink: Sink) -> Result<Self, String> {
+        let report = &d.analog.depth;
+        let depth = open(api, d.pid, &report.collection)?;
+        let razer = open(api, d.pid, "col04")?;
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
@@ -118,8 +121,8 @@ impl EngineHandle {
                 emit(&out, &sink);
             })
         };
-        let threads = vec![spawn(depth, feed_depth), spawn(razer, feed_razer)];
-        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(pid) })
+        let threads = vec![spawn(depth, Box::new(feed_depth(report.clone()))), spawn(razer, Box::new(feed_razer))];
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(d.pid) })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
@@ -151,11 +154,13 @@ impl Drop for EngineHandle {
     }
 }
 
-fn feed_depth(e: &mut Engine, report: &[u8], now: Instant) -> Vec<Output> {
-    let Some(d) = rapid::parse_depth(report) else { return Vec::new() };
-    let mut out = e.feed_depth(&d, now);
-    out.extend(e.lead(&d));
-    out
+fn feed_depth(r: DepthReport) -> impl Fn(&mut Engine, &[u8], Instant) -> Vec<Output> {
+    move |e, report, now| {
+        let Some(d) = rapid::parse_depth(report, &r) else { return Vec::new() };
+        let mut out = e.feed_depth(&d, now);
+        out.extend(e.lead(&d));
+        out
+    }
 }
 
 fn feed_razer(e: &mut Engine, report: &[u8], _: Instant) -> Vec<Output> {
