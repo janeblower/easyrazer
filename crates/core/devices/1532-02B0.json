@@ -1,0 +1,27 @@
+{
+  "name": "Razer Huntsman V3 Pro Mini",
+  "vid": "1532",
+  "pid": "02B0",
+  "control_interface": 3,
+  "tid": "1F",
+  "layout": "mini",
+  "analog": {
+    "zero_mm": 0,
+    "full_mm": 3.98535,
+    "range": [0.1, 4.0],
+    "firmware_rapid": true,
+    "depth": { "collection": "col07", "id": "0B", "wide": true }
+  },
+  "lighting": {
+    "protocol": "extended",
+    "led": "05",
+    "effects": [
+      "off", "static", "breathing_one", "breathing_two", "breathing_random", "spectrum",
+      "wave",
+      "reactive_key_one", "reactive_key_random", "reactive_ripple_one", "reactive_ripple_random",
+      "starlight_random", "starlight_one", "starlight_two",
+      "fire"
+    ]
+  },
+  "lamp_array": { "control_report": "06" }
+}

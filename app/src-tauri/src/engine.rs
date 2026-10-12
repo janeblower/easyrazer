@@ -348,11 +348,14 @@ fn scancode(id: u8) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use razer_core::layout::Board;
 
     #[test]
     fn every_editable_key_has_an_output() {
-        for k in razer_core::layout::keys().into_iter().filter(|k| k.editable) {
-            assert!(scancode(k.key).is_some() || k.key == PAUSE, "fwID {} {}", k.key, k.label);
+        for board in [Board::Full, Board::Mini] {
+            for k in razer_core::layout::keys(board).into_iter().filter(|k| k.editable) {
+                assert!(scancode(k.key).is_some() || k.key == PAUSE, "fwID {} {}", k.key, k.label);
+            }
         }
     }
 

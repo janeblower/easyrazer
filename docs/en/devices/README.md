@@ -7,12 +7,14 @@ differ.
 |---|---|---|---|---|
 | Huntsman V2 Analog | `1532:0266` | STM32L4+ | supported | [protocol](huntsman-v2-analog/protocol.md), [firmware](huntsman-v2-analog/firmware.md) |
 | Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, probably LPC55S6x | in development, RAM writes only, not tested on hardware | [protocol](huntsman-v3-pro/protocol.md), [firmware](huntsman-v3-pro/firmware.md) |
+| Huntsman V3 Pro Mini | `1532:02B0` | as V3 Pro | in development, RAM writes only, not tested on hardware | [protocol](huntsman-v3-pro-mini/protocol.md), [firmware](huntsman-v3-pro-mini/firmware.md) |
 
 The V3 Pro has not been verified on hardware: everything about it comes from the
 Synapse 4 module and firmware 1.03.00. The Synapse modules for the V2 Analog,
 Huntsman Mini Analog (`0282`), V3 Pro, V3 Pro TKL (`02A7`) and V3 Pro Mini
 (`02B0`) are built from one branch, and the V2 and V3 Pro share one command
-table; the TKL and Mini probably differ from the V3 Pro only in layout.
+table; the TKL probably differs from the V3 Pro only in layout. The Mini firmware
+2.01.00 confirms that for the Mini.
 
 ## Control packet
 

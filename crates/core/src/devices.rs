@@ -6,9 +6,14 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Deserializer};
 
 use crate::analog::Analog;
+use crate::layout::Board;
 use crate::packet::Command;
 
-const DEVICES: &[&str] = &[include_str!("../devices/1532-0266.json"), include_str!("../devices/1532-02A6.json")];
+const DEVICES: &[&str] = &[
+    include_str!("../devices/1532-0266.json"),
+    include_str!("../devices/1532-02A6.json"),
+    include_str!("../devices/1532-02B0.json"),
+];
 const PROTOCOLS: &[(&str, &str)] = &[("extended", include_str!("../protocols/extended.json"))];
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +29,8 @@ pub struct DeviceSpec {
     /// Checked on hardware; the app writes to an unverified model only when asked to, and never its flash.
     #[serde(default)]
     pub verified: bool,
+    #[serde(default)]
+    pub layout: Board,
     pub analog: Analog,
     pub lighting: Lighting,
     pub lamp_array: Option<LampArray>,

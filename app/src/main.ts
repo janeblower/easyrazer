@@ -6,10 +6,31 @@ import { i18n } from "./i18n";
 import "virtual:uno.css";
 import "./style.css";
 
+// Reloads the mock with another model, to see its key map.
+function showModelPicker(models: Record<string, string>, current: string) {
+  const select = document.createElement("select");
+  select.style.cssText = "position:fixed;right:8px;bottom:8px;z-index:9999;font-size:12px";
+  for (const [id, name] of Object.entries(models)) select.add(new Option(name, id, false, id === current));
+  select.addEventListener("change", () => {
+    const url = new URL(location.href);
+    url.searchParams.set("model", select.value);
+    location.href = url.href;
+  });
+  document.body.append(select);
+}
+
 // A plain browser on the Vite dev server has no backend: fake a keyboard with every key indicator on.
 async function mockBackend() {
   if (!import.meta.env.DEV || "__TAURI_INTERNALS__" in window) return;
-  const [{ mockIPC }, { default: layout }] = await Promise.all([import("@tauri-apps/api/mocks"), import("./dev-layout.json")]);
+  const [{ mockIPC }, { default: layout }, { default: miniLayout }] = await Promise.all([
+    import("@tauri-apps/api/mocks"),
+    import("./dev-layout.json"),
+    import("./dev-layout-mini.json"),
+  ]);
+  const MODELS: Record<string, string> = { v2: "Huntsman V2 Analog", mini: "Razer Huntsman V3 Pro Mini" };
+  const pick = new URLSearchParams(location.search).get("model");
+  const model = pick && pick in MODELS ? pick : "v2";
+  if (location.hash !== "#devtools") showModelPicker(MODELS, model);
   const keys = layout.filter((k) => k.editable).map((k) => k.key);
   const all = <T>(v: (k: number, i: number) => T) => Object.fromEntries(keys.map((k, i) => [k, v(k, i)]));
   // Mirrors kb_layout::lighting_keys and lighting::effect_infos for the Huntsman V2 Analog.
@@ -189,7 +210,7 @@ async function mockBackend() {
     lighting_state: {
       effects: [
         effect("off"),
-        effect("custom"),
+        ...(model === "mini" ? [] : [effect("custom")]),
         effect("static", 1),
         effect("breathing_one", 1),
         effect("breathing_two", 2),
@@ -261,7 +282,7 @@ async function mockBackend() {
       driver_mode: true,
       profile: 1,
       profile_name: "Dev",
-      model: "Huntsman V2 Analog",
+      model: MODELS[model],
       verified: true,
       unsupported: null,
       error: null,
@@ -271,6 +292,7 @@ async function mockBackend() {
   mockIPC(
     (cmd, args) => {
       if (cmd === "apply" || cmd === "save") return write(cmd, args as unknown as Write);
+      if (cmd === "layout") return (args as { model?: string }).model === MODELS.mini ? miniLayout : layout;
       if (cmd === "app_settings") return { ...(replies.app_settings as object), ...devSettings };
       return cmd in devReplies ? devReplies[cmd](args as Record<string, unknown>) : replies[cmd];
     },
