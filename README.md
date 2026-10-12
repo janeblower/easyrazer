@@ -2,7 +2,7 @@
 
 # EasyRazer
 
-[Русская версия](docs/README.ru.md)
+[Русская версия](docs/ru/README.md)
 
 A lightweight Razer Synapse replacement for the Razer Huntsman V2 Analog (`1532:0266`)
 on Windows. The actuation point of every key (1.5–3.6 mm) is written to the keyboard's
@@ -30,7 +30,7 @@ memory, after which it works with no software running at all.
   and Synapse exit;
 - English and Russian UI.
 
-Details and caveats: [user guide](docs/usage.md) (in Russian).
+Details and caveats: [user guide](docs/en/usage.md).
 
 ## Supported keyboards
 
@@ -39,7 +39,7 @@ Details and caveats: [user guide](docs/usage.md) (in Russian).
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Supported, tested on hardware | Rapid Trigger and Snap Tap are computed by the app (driver mode); some macro modes are untested |
 | Huntsman V3 Pro (`1532:02A6`) | — | — | — | — | — | — | — | Not supported: protocol studied without hardware | Rapid Trigger and Snap Tap (one key pair) are built into the firmware; a tester with the keyboard is needed |
 
-Protocol and firmware notes for each model: [docs/devices](docs/devices/README.md) (in Russian).
+Protocol and firmware notes for each model: [docs/en/devices](docs/en/devices/README.md).
 
 ## Compared to Synapse
 
@@ -85,7 +85,7 @@ erases a whole page. So EasyRazer:
   already stored;
 - keeps Rapid Trigger and the custom colour layout in the app, never in flash.
 
-Firmware analysis: [firmware.md](docs/devices/huntsman-v2-analog/firmware.md) (in Russian).
+Firmware analysis: [firmware.md](docs/en/devices/huntsman-v2-analog/firmware.md).
 
 ### What Synapse still has
 
@@ -113,11 +113,11 @@ The resulting `easyrazer.exe` is a single file with no installer; copy it anywhe
 Tests (from the repository root): `cargo test`; frontend: `bun run lint` (in `app`).
 Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`.
 
-## Documentation (in Russian)
+## Documentation
 
-- [User guide](docs/usage.md) — features, controls, limitations.
-- [Development](docs/development.md) — layout, rules, adding a keyboard model.
-- [Keyboard models](docs/devices/README.md) — protocol and firmware of each supported or studied model.
+- [User guide](docs/en/usage.md) — features, controls, limitations.
+- [Development](docs/en/development.md) — layout, rules, adding a keyboard model.
+- [Keyboard models](docs/en/devices/README.md) — protocol and firmware of each supported or studied model.
 
 ## Roadmap
 

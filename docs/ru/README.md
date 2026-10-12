@@ -1,6 +1,8 @@
-<img src="../logo.svg" width="96" alt="">
+<img src="../../logo.svg" width="96" alt="">
 
 # EasyRazer
+
+[English version](../../README.md)
 
 Лёгкая замена Razer Synapse для Razer Huntsman V2 Analog (`1532:0266`) на Windows.
 Точка нажатия каждой клавиши (1.5–3.6 мм) записывается в память клавиатуры,
@@ -8,7 +10,7 @@
 
 **Неофициальный проект, не связан с Razer Inc.**
 
-![Вкладка «Клавиши»: точки нажатия и Rapid Trigger](screenshots/actuation.png)
+![Вкладка «Клавиши»: точки нажатия и Rapid Trigger](../screenshots/actuation.png)
 
 ## Что умеет
 
