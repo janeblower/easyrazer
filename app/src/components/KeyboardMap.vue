@@ -217,7 +217,7 @@ function up(e: PointerEvent) {
 
 <template>
   <div ref="box">
-    <div ref="root" class="relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
+    <div ref="root" class="mx-auto relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
       <div
         v-for="k in rings"
         :key="`ring-${k.key}`"
