@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::packet::{self, Response, Status};
 use crate::transport::{Error, MAX_POLLS, Report, Transport};
 
+/// Entries kept unless [`Log::set_capacity`] says otherwise.
 pub const CAPACITY: usize = 1000;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -38,15 +39,30 @@ pub struct Entry {
 
 pub type Listener = Box<dyn Fn(&Entry) + Send + Sync>;
 
-#[derive(Default)]
 pub struct Log {
     entries: Mutex<VecDeque<Entry>>,
+    capacity: AtomicUsize,
     seq: AtomicU64,
     background: AtomicBool,
     listener: Mutex<Option<Listener>>,
 }
 
+impl Default for Log {
+    fn default() -> Self {
+        Self { entries: Mutex::default(), capacity: AtomicUsize::new(CAPACITY), seq: AtomicU64::default(), background: AtomicBool::default(), listener: Mutex::default() }
+    }
+}
+
 impl Log {
+    /// Drops the oldest entries beyond `n`, at least one entry is kept.
+    pub fn set_capacity(&self, n: usize) {
+        let n = n.max(1);
+        self.capacity.store(n, Ordering::Relaxed);
+        let mut q = lock(&self.entries);
+        let excess = q.len().saturating_sub(n);
+        q.drain(..excess);
+    }
+
     pub fn entries(&self) -> Vec<Entry> {
         lock(&self.entries).iter().cloned().collect()
     }
@@ -77,7 +93,7 @@ impl Log {
             l(&e);
         }
         let mut q = lock(&self.entries);
-        if q.len() == CAPACITY {
+        if q.len() >= self.capacity.load(Ordering::Relaxed) {
             q.pop_front();
         }
         q.push_back(e);
@@ -260,6 +276,19 @@ mod tests {
         }
         let e = t.log.entries();
         assert_eq!((e.len(), e[0].seq), (CAPACITY, 5));
+    }
+
+    #[test]
+    fn capacity_can_grow_and_shrink() {
+        let t = logged(FakeKeyboard::new(&[31]));
+        t.log.set_capacity(CAPACITY + 10);
+        for _ in 0..CAPACITY + 5 {
+            control::mode(&t).unwrap();
+        }
+        assert_eq!(t.log.entries().len(), CAPACITY + 5);
+        t.log.set_capacity(3);
+        let e = t.log.entries();
+        assert_eq!((e.len(), e[0].seq), (3, CAPACITY as u64 + 2), "the newest stay");
     }
 
     #[test]

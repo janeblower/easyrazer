@@ -215,6 +215,7 @@
     "exit": "Quit",
     "watchSynapse": "Watch for Synapse",
     "confirmWrite": "Ask before saving to keyboard memory",
+    "devLogSize": "Developer log size, commands",
     "devMode": "Developer mode",
     "unverifiedWrites": "Write to keyboards not yet checked on hardware (RAM only)"
   },

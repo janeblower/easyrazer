@@ -163,6 +163,7 @@ export interface AppSettings {
   autostart_offered: boolean;
   language: string | null;
   dev_mode: boolean;
+  dev_log_size: number;
   unverified_writes: boolean;
   dev_panel: DevPanel | null;
   dev_window: DevWindow | null;
