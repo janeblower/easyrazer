@@ -23,7 +23,9 @@ Per the firmware descriptors.
   OpenRazer).
 - Mode `00:04` / `00:84`: `00` hardware, `03` driver, `01` is a flag, probably
   bootloader entry, as on V2. On switching to driver mode the firmware makes
-  profile 1 active. Snap Tap (`02:21`) is disabled in driver mode.
+  profile 1 active and saves that to flash if another one was active
+  ([details](firmware.md#mode-switch)). Snap Tap (`02:21`) is disabled in driver mode.
+- Profile `0` is RAM only for every command, as on V2.
 - Profiles: `0` is the working copy in RAM, `1`–`6` are persistent. Synapse uses 5
   slots (`OBMSlots: 5`) and stores profile names in the firmware, including the first.
 
@@ -108,6 +110,9 @@ corner differs between the models.
 ## Not verified
 
 - Everything in this file is without hardware.
+- First on hardware: `05:84` before and after `00:04 03` with startup slot 2 — it
+  should become `01`; whether that survives a replug. And whether `02:92` after
+  `00:04` reads what was written to profile 0.
 - Reports `04`, `05`, `07` on MI_01 and interface MI_05.
 - fwIDs of the wheel and media buttons, and exact key geometry.
 - Effect `0A`, flag `02:1F`, the meaning of bytes `+1`, `+2` in threshold entries.

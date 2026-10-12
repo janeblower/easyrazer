@@ -37,7 +37,7 @@ Details and caveats: [user guide](docs/en/usage.md).
 | Model | Actuation | Rapid Trigger | Snap Tap | Remapping | Macros | Hypershift | Lighting | Status | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Supported, tested on hardware | Rapid Trigger and Snap Tap are computed by the app (driver mode); some macro modes are untested |
-| Huntsman V3 Pro (`1532:02A6`) | — | — | — | — | — | — | — | Not supported: protocol studied without hardware | Rapid Trigger and Snap Tap (one key pair) are built into the firmware; a tester with the keyboard is needed |
+| Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 | In development, not tested on hardware | Read only by default; writes to the keyboard's RAM after allowing it in Settings, never to its memory. In HW mode the firmware runs Rapid Trigger and one Snap Tap pair; a tester with the keyboard is needed |
 
 Protocol and firmware notes for each model: [docs/en/devices](docs/en/devices/README.md).
 

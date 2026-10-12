@@ -143,6 +143,23 @@ whatever follows. Config is left untouched.
   `02:20`, `02:21`, `02:07`, `02:15`) immediately erases at least two pages —
   data and CRC. A batch of 15 keys costs as much as a single key, so flash
   writes should go in large batches, and live changes to profile 0.
+- Profile 0 stays in RAM: `02:12` goes to `0x20019BA0`, `02:1A` to `0x20019B24`
+  with the "do not save" flag, `02:21` writes `0x20027B14` directly; none of them
+  calls `0x2000C430`. Live changes work as on V2.
+- Config and settings are saved with a delay, like the V2 profiles: `0x200161E8`
+  sets a dirty bit in `0x2002AF28` (`1` settings, `2` config) and a countdown of
+  `0x67` in `0x2002AF2A`; `0x200151C4` writes the page once it runs out.
+
+## Mode switch
+
+`00:04` (`0x2001189C`): switching from another mode to `03` with an active profile
+other than 1 makes profile 1 active (`0x20029002 = 1`) and marks the settings for
+saving, so `0x49C00` is erased about `0x67` ticks later. Once profile 1 is active,
+further switches write nothing; leaving driver mode does not bring the old profile
+back. So the profile the keyboard starts with without the app silently becomes 1, and
+an app that sets another startup slot and enters driver mode again costs one erase
+each time. Mode `01` sets only `0x2002686D` (probably a request to reboot into the
+bootloader).
 
 ## Key matrix
 
@@ -176,6 +193,9 @@ releasing it presses the other again if it is held. Pair state is `0x200283CC`�
 `0x200283CE` and `0x040019C8`–`0x040019CA`.
 
 ## Not analyzed
+
+- Whether profile 0 is reloaded from profile 1 when driver mode makes it active, and on
+  a switch back to hardware mode.
 
 - Format of config, settings and macros; flash page endurance.
 - Sensor polling, calibration and press decision.

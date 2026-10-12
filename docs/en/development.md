@@ -49,8 +49,8 @@ Protocol and firmware per model — [devices/](devices/README.md).
 
 ## New keyboard model
 
-Data-driven description is done only for lighting. The rest is still tied to the
-Huntsman V2 Analog, and a second model is the reason to move it into the description.
+Lighting, the press-point scale and the depth stream come from the description;
+layout and key bindings are still shared with the Huntsman V2 Analog.
 
 1. **Recon.** `razer-probe list` — HID interfaces; the control one is a 91-byte feature
    report (MI_03 on the V2 Analog). `razer-probe info` — firmware and mode.
@@ -58,18 +58,21 @@ Huntsman V2 Analog, and a second model is the reason to move it into the descrip
    change it for the recon.
 2. **`crates/core/devices/<vid>-<pid>.json`** — name, `vid`, `pid`,
    `control_interface`, `tid` (transaction id), `lighting.protocol` and `led`,
-   list of supported effects, `lamp_array` (if there is HID LampArray).
+   list of supported effects, `lamp_array` (if there is HID LampArray), `analog` (below)
+   and `verified` once checked on hardware: until then the app writes only the keyboard's
+   RAM, and only with "Write to keyboards not yet checked on hardware" on.
    Add the file to `DEVICES` in `crates/core/src/devices.rs`.
 3. **Lighting protocol.** If the commands or effect bytes differ — a new
    `protocols/<name>.json` and a line in `PROTOCOLS`. An effect template is the bytes after
    `profile led` with the substitutions `{rgb1}`, `{rgb2}`, `{dir}`, `{speed}`.
 4. **Layout and `fwID`** — `keymap.rs` and `layout.rs` are currently shared by all. For
    another layout they will have to become part of the model description.
-5. **Analog.** The threshold formula (`analog.rs`: 0..255 ↔ 1.5..3.6 mm), commands `02:12`/
-   `02:92`, the depth stream collections (MI_01 Col06/Col04 in `app/src-tauri/src/engine.rs`)
-   and the scancode table there — all for the V2 Analog. On the V3 Pro actuation and RT are
-   separate onboard commands `02:19`/`02:1A`; it needs no host engine
-   ([V3 Pro protocol](devices/huntsman-v3-pro/protocol.md)).
+5. **Analog** (`analog` in the description, `analog.rs`): `02:12` thresholds and depth
+   0..255 map onto `zero_mm..full_mm`; `range` is what the window offers, `hw_range` where
+   the firmware clamps in HW mode; `depth` is the MI_01 collection and report id of the
+   depth stream, `wide` for a u16 depth. `firmware_rapid` — the firmware runs Rapid Trigger
+   and Snap Tap in HW mode (`02:1A`/`02:21`, `trigger.rs`); in driver mode the host engine
+   does it for every model.
 6. A fake in `fake.rs` if the model answers differently; an `--ignored` test on hardware.
 7. **Docs** — a model folder in `docs/devices/` (`protocol.md`, and `firmware.md` if the
    firmware is analyzed) and a line in the [model overview](devices/README.md).
