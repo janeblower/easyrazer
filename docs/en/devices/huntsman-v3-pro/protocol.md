@@ -103,9 +103,10 @@ changes is unknown.
 ## Keys
 
 Sensor matrix is 8 × 14, 111 keys. fwIDs are the same as on V2, except `152` / `153`
-(Hanja / Hangeul): the table in `crates/core/src/keymap.rs` fits. The geometry
-(`layout.rs`) needs checking against photos: the wheel block in the top right
-corner differs between the models.
+(Hanja / Hangeul): the table in `crates/core/src/keymap.rs` fits. Per photos the key
+layout is the same as on V2 (ANSI, 104 keys, three buttons and a dial above the
+numpad), so `layout.rs` fits too. Lighting differs: no case edge and wrist rest
+rows, whether the buttons and the dial are lit is unknown.
 
 ## Not verified
 
@@ -114,5 +115,5 @@ corner differs between the models.
   should become `01`; whether that survives a replug. And whether `02:92` after
   `00:04` reads what was written to profile 0.
 - Reports `04`, `05`, `07` on MI_01 and interface MI_05.
-- fwIDs of the wheel and media buttons, and exact key geometry.
+- fwIDs of the dial and the three buttons, and whether they are lit.
 - Effect `0A`, flag `02:1F`, the meaning of bytes `+1`, `+2` in threshold entries.
