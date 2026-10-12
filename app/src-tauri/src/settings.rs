@@ -99,9 +99,29 @@ pub struct DevWindow {
     pub h: f64,
 }
 
+/// Settings from before per-model storage hold the profiles of the only model supported then.
+const LEGACY_MODEL: u16 = 0x0266;
+
+/// Profiles and macros of a model the app is not connected to: thresholds and slot caches
+/// mean nothing to another model.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelData {
+    pub profiles: Vec<Profile>,
+    pub loaded: Option<u32>,
+    pub slots: BTreeMap<u8, Snapshot>,
+    pub next_profile_id: u32,
+    pub macros: BTreeMap<u16, Macro>,
+    pub snap_tap_bound: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// PID of the model the profiles, slots and macros below belong to.
+    pub model: Option<u16>,
+    /// The same for every other model seen, by PID.
+    pub other_models: BTreeMap<u16, ModelData>,
     /// Order of the list and of Fn+Menu.
     pub profiles: Vec<Profile>,
     pub loaded: Option<u32>,
@@ -135,11 +155,33 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, unverified_writes: false, dev_panel: None, dev_window: None }
+        Self { model: None, other_models: BTreeMap::new(), profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, unverified_writes: false, dev_panel: None, dev_window: None }
     }
 }
 
 impl Settings {
+    /// Puts the data of `pid` in place of the current model's; `true` when the model changed.
+    pub fn switch_model(&mut self, pid: u16) -> bool {
+        let current = self.model.unwrap_or(LEGACY_MODEL);
+        self.model = Some(pid);
+        if current == pid {
+            return false;
+        }
+        let incoming = self.other_models.remove(&pid).unwrap_or_default();
+        let outgoing = ModelData {
+            profiles: std::mem::replace(&mut self.profiles, incoming.profiles),
+            loaded: std::mem::replace(&mut self.loaded, incoming.loaded),
+            slots: std::mem::replace(&mut self.slots, incoming.slots),
+            next_profile_id: std::mem::replace(&mut self.next_profile_id, incoming.next_profile_id),
+            macros: std::mem::replace(&mut self.macros, incoming.macros),
+            snap_tap_bound: std::mem::replace(&mut self.snap_tap_bound, incoming.snap_tap_bound),
+        };
+        if outgoing != ModelData::default() {
+            self.other_models.insert(current, outgoing);
+        }
+        true
+    }
+
     /// Binds the Snap Tap switch to Fn+LShift in every profile, once: one removed later stays removed.
     pub fn bind_snap_tap_once(&mut self) {
         if self.snap_tap_bound {
@@ -226,6 +268,27 @@ mod tests {
     }
 
     #[test]
+    fn each_model_keeps_its_own_profiles() {
+        let mut s = Settings { profiles: vec![profile(1, Some(1))], loaded: Some(1), next_profile_id: 1, ..Default::default() };
+        assert!(!s.switch_model(LEGACY_MODEL), "old settings belong to the V2 Analog");
+        assert!(s.switch_model(0x02A6));
+        assert!(s.profiles.is_empty() && s.loaded.is_none());
+        s.profiles = vec![profile(7, None)];
+        assert!(s.switch_model(LEGACY_MODEL));
+        assert_eq!((s.profiles[0].id, s.loaded), (1, Some(1)));
+        assert!(s.switch_model(0x02A6));
+        assert_eq!(s.profiles[0].id, 7);
+        assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
+    }
+
+    #[test]
+    fn a_model_without_data_leaves_nothing_behind() {
+        let mut s = Settings::default();
+        s.switch_model(0x02A6);
+        assert!(s.other_models.is_empty());
+    }
+
+    #[test]
     fn snap_tap_switch_is_bound_once() {
         let mut p = profile(1, None);
         p.data = snap(&[31, 44]);
@@ -276,6 +339,8 @@ mod tests {
     #[test]
     fn round_trips() {
         let s = Settings {
+            model: Some(0x0266),
+            other_models: [(0x02A6, ModelData { profiles: vec![profile(2, None)], ..Default::default() })].into(),
             profiles: vec![profile(1, Some(1))],
             loaded: Some(1),
             slots: BTreeMap::new(),

@@ -192,6 +192,10 @@ impl Device {
             self.control = hid::open_control(&self.api).ok().flatten().map(|(t, d)| (Logged::new(t, self.log.clone()), d));
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
+                if self.settings.switch_model(d.pid) {
+                    self.backed_up.clear();
+                    let _ = settings::save(&self.settings);
+                }
                 if let Some(sink) = &self.sink {
                     // Fn+Menu is rebound only once someone listens, or it would do nothing.
                     self.menu = MenuListener::start(&self.api, d.pid, sink.clone()).ok();
