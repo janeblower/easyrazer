@@ -76,7 +76,7 @@ erases a whole page. So EasyRazer:
   already stored;
 - keeps Rapid Trigger and the custom colour layout in the app, never in flash.
 
-Firmware analysis: [firmware.md](docs/firmware.md) (in Russian).
+Firmware analysis: [firmware.md](docs/devices/huntsman-v2-analog/firmware.md) (in Russian).
 
 ### What Synapse still has
 
@@ -108,7 +108,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 
 - [User guide](docs/usage.md) — features, controls, limitations.
 - [Development](docs/development.md) — layout, rules, adding a keyboard model.
-- [Protocol](docs/protocol.md) — Razer commands and everything verified on hardware.
+- [Keyboard models](docs/devices/README.md) — protocol and firmware of each supported or studied model.
 
 ## Roadmap
 
