@@ -248,7 +248,12 @@ async function mockBackend() {
       },
       free: 1536,
     },
-    profiles: null,
+    profiles: {
+      profiles: [{ id: 1, name: "Dev", slot: 1, unsaved: false }],
+      loaded: 1,
+      startup: 1,
+      free_slot: true,
+    },
     status: {
       device: true,
       synapse: false,
@@ -256,7 +261,8 @@ async function mockBackend() {
       driver_mode: true,
       profile: 1,
       profile_name: "Dev",
-      model: "Phantom Analog 104",
+      model: "Huntsman V2 Analog",
+      verified: true,
       unsupported: null,
       error: null,
     },
