@@ -57,7 +57,7 @@ NXP LPC55xx, Cortex-M33; probably LPC55S6x with 640 KB flash:
   - `len = t >> 4`, if `0` — the next byte (it comes before the literals); `len = 0`
     means no match;
   - back offset is the next byte plus `(t & 0x0C) << 6`, and when
-    `t & 0x0C = 0x0C` — plus one more byte `<< 8`; `len + 2` bytes are copied.
+    `t & 0x0C = 0x0C` — plus one more byte `<< 8` instead; `len + 2` bytes are copied.
 
 After decompression the USB descriptors, the profile pointer and other data
 become visible, which are not in the image in plain form.
