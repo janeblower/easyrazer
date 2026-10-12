@@ -34,12 +34,12 @@ Details and caveats: [user guide](docs/en/usage.md).
 
 ## Supported keyboards
 
-| Model | Actuation | Rapid Trigger | Snap Tap | Remapping | Macros | Hypershift | Lighting | Status | Notes |
-|---|---|---|---|---|---|---|---|---|---|
-| Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Supported, tested on hardware | Rapid Trigger and Snap Tap are computed by the app (driver mode); some macro modes are untested |
-| Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 | In development, not tested on hardware | Read only by default; writes to the keyboard's RAM after allowing it in Settings, never to its memory. In HW mode the firmware runs Rapid Trigger and one Snap Tap pair; a tester with the keyboard is needed |
+| Model | Support |
+|---|---|
+| Huntsman V2 Analog (`1532:0266`) | full |
+| Huntsman V3 Pro (`1532:02A6`) | in development, not tested on hardware |
 
-Protocol and firmware notes for each model: [docs/en/devices](docs/en/devices/README.md).
+Features per model and caveats: [full table](docs/en/supported.md).
 
 ## Compared to Synapse
 
