@@ -32,6 +32,15 @@ memory, after which it works with no software running at all.
 
 Details and caveats: [user guide](docs/usage.md) (in Russian).
 
+## Supported keyboards
+
+| Model | Actuation | Rapid Trigger | Snap Tap | Remapping | Macros | Hypershift | Lighting | Status | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Supported, tested on hardware | Rapid Trigger and Snap Tap are computed by the app (driver mode); some macro modes are untested |
+| Huntsman V3 Pro (`1532:02A6`) | — | — | — | — | — | — | — | Not supported: protocol studied without hardware | Rapid Trigger and Snap Tap (one key pair) are built into the firmware; a tester with the keyboard is needed |
+
+Protocol and firmware notes for each model: [docs/devices](docs/devices/README.md) (in Russian).
+
 ## Compared to Synapse
 
 Measured on the same PC: Synapse 4.0.827 right after launch, EasyRazer 0.2.3 in the
