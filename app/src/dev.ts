@@ -3,10 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AppSettings, CommandInfo, DevPanel, DevWindow, LogEntry } from "./types";
 
-const CAPACITY = 1000; // logged::CAPACITY
-
 export const dev = reactive({
   mode: false,
+  /** Entries the backend keeps in this mode; the window keeps as many. */
+  logSize: 10_000,
   panel: null as DevPanel | null,
   window: null as DevWindow | null,
   language: null as string | null,
@@ -26,7 +26,7 @@ export const nameOf = (cmd: string) => Object.entries(registry.value).find(([, c
 
 async function loadSettings() {
   const s = await invoke<AppSettings>("app_settings");
-  Object.assign(dev, { mode: s.dev_mode, panel: s.dev_panel, window: s.dev_window, language: s.language });
+  Object.assign(dev, { mode: s.dev_mode, logSize: s.dev_log_size, panel: s.dev_panel, window: s.dev_window, language: s.language });
 }
 
 let started: Promise<void> | undefined;
@@ -35,7 +35,7 @@ let pending: LogEntry[] = [];
 // A timer, not a frame: frames stop while the window is hidden and the batch would grow unbounded.
 function flush() {
   const last = log.value.at(-1)?.seq ?? -1;
-  log.value = [...log.value, ...pending.filter((e) => e.seq > last)].slice(-CAPACITY);
+  log.value = [...log.value, ...pending.filter((e) => e.seq > last)].slice(-dev.logSize);
   pending = [];
 }
 

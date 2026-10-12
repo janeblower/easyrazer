@@ -80,6 +80,18 @@ onUnmounted(() => {
       <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
       {{ $t(o.label) }}
     </label>
+    <label v-if="s.dev_mode" class="field">
+      <span class="field-label min-w-[160px]">{{ $t("settings.devLogSize") }}</span>
+      <input
+        type="number"
+        min="1000"
+        max="50000"
+        step="1000"
+        class="w-24"
+        :value="s.dev_log_size"
+        @change="set('set_dev_log_size', { size: Number(($event.target as HTMLInputElement).value) })"
+      />
+    </label>
     <p v-if="message" class="text-error m-0">{{ message }}</p>
   </section>
 </template>

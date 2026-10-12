@@ -174,6 +174,7 @@ fn main() {
             dev::set_dev_panel,
             dev::set_dev_window,
             dev::dev_log,
+            dev::set_dev_log_size,
             dev::dev_commands,
             dev::dev_device,
             dev::dev_exchange,

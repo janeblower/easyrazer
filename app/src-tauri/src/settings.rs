@@ -99,6 +99,10 @@ pub struct DevWindow {
     pub h: f64,
 }
 
+pub const DEV_LOG_SIZE: usize = 10_000;
+/// Bounds of `dev_log_size`: entries hold whole reports, and every window keeps a copy.
+pub const DEV_LOG_SIZES: std::ops::RangeInclusive<usize> = 1000..=50_000;
+
 /// Settings from before per-model storage hold the profiles of the only model supported then.
 const LEGACY_MODEL: u16 = 0x0266;
 
@@ -144,6 +148,8 @@ pub struct Settings {
     /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
     pub snap_tap_bound: bool,
     pub dev_mode: bool,
+    /// Entries the developer log keeps while the mode is on.
+    pub dev_log_size: usize,
     /// RAM writes to keyboard models nobody has checked on hardware yet.
     pub unverified_writes: bool,
     /// `None` until the mode is first switched on.
@@ -155,7 +161,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { model: None, other_models: BTreeMap::new(), profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, unverified_writes: false, dev_panel: None, dev_window: None }
+        Self { model: None, other_models: BTreeMap::new(), profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None }
     }
 }
 
@@ -354,6 +360,7 @@ mod tests {
             language: Some("ru".into()),
             snap_tap_bound: true,
             dev_mode: true,
+            dev_log_size: 2000,
             unverified_writes: true,
             dev_panel: Some(DevPanel { open: false, dock: Dock::Bottom, size: 300 }),
             dev_window: Some(DevWindow { x: 10.0, y: 20.0, w: 800.0, h: 600.0 }),

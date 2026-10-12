@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
 use crate::device::Device;
-use crate::settings::{DevPanel, DevWindow, Settings};
+use crate::settings::{DEV_LOG_SIZES, DevPanel, DevWindow, Settings};
 
 /// Log lines a bug report carries.
 const REPORT_ENTRIES: usize = 200;
@@ -42,8 +42,10 @@ pub struct DevKey {
     hypershift: Option<RawKey>,
 }
 
-/// Streams the log to every window while the mode is on.
+/// Streams the log to every window and keeps the larger log while the mode is on.
 pub fn sync_listener(app: &AppHandle, device: &Device) {
+    let s = device.settings();
+    device.log().set_capacity(if s.dev_mode { s.dev_log_size } else { logged::CAPACITY });
     let listener = device.settings().dev_mode.then(|| {
         let app = app.clone();
         Box::new(move |e: &Entry| {
@@ -62,6 +64,15 @@ pub async fn set_dev_mode(app: AppHandle, state: State<'_, AppState>, on: bool) 
             s.dev_panel = Some(DevPanel::default());
         }
     })?;
+    sync_listener(&app, &device);
+    let _ = app.emit("settings-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_dev_log_size(app: AppHandle, state: State<'_, AppState>, size: usize) -> Result<(), String> {
+    let mut device = state.device();
+    device.update_settings(|s| s.dev_log_size = size.clamp(*DEV_LOG_SIZES.start(), *DEV_LOG_SIZES.end()))?;
     sync_listener(&app, &device);
     let _ = app.emit("settings-changed", ());
     Ok(())
