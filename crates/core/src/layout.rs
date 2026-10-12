@@ -1,6 +1,6 @@
-//! Our own ANSI full-size geometry of the Huntsman V2 Analog, in key units.
+//! Our own ANSI geometry of the supported boards, in key units.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::keymap;
 
@@ -23,6 +23,17 @@ pub enum Shape {
     Round,
     /// A frame along the edges of its box; only the frame is lit and clickable.
     Ring,
+}
+
+/// Key geometry of a model, named in its device description.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Board {
+    /// Full size with the media buttons and dial of the Huntsman V2 Analog and V3 Pro.
+    #[default]
+    Full,
+    /// 60%: the main block of `Full`, Esc in place of the tilde.
+    Mini,
 }
 
 /// Lit areas that are not keys; ids above every `fwID`.
@@ -154,9 +165,20 @@ const KEYS: &[(&str, &str, f32, f32, f32, f32)] = &[
     ("NUMPAD_PERIOD", ".", 20.5, 5.25, 1.0, 1.0),
 ];
 
-pub fn keys() -> Vec<LayoutKey> {
-    KEYS.iter()
-        .map(|&(name, label, x, y, w, h)| LayoutKey {
+pub fn keys(board: Board) -> Vec<LayoutKey> {
+    let keys: Vec<_> = match board {
+        Board::Full => KEYS.to_vec(),
+        Board::Mini => KEYS
+            .iter()
+            .filter(|k| k.3 >= 1.0 && k.2 < 15.0)
+            .map(|&(name, label, x, y, w, h)| {
+                let (name, label) = if name == "TILDE" { ("ESC", "Esc") } else { (name, label) };
+                (name, label, x, y - 1.25, w, h)
+            })
+            .collect(),
+    };
+    keys.into_iter()
+        .map(|(name, label, x, y, w, h)| LayoutKey {
             key: keymap::by_name(name).unwrap_or_else(|| panic!("layout names unknown key {name}")),
             label,
             x,
@@ -190,7 +212,7 @@ pub fn cells(id: u8) -> Vec<(u8, u8)> {
 pub fn lighting_keys() -> Vec<LayoutKey> {
     let zone = |key, label, x, y, w, h, shape| LayoutKey { key, label, x, y, w, h, editable: true, shape };
     let mut out: Vec<LayoutKey> =
-        keys().into_iter().map(|k| LayoutKey { x: k.x + 0.5, y: k.y + 0.5, editable: true, ..k }).collect();
+        keys(Board::Full).into_iter().map(|k| LayoutKey { x: k.x + 0.5, y: k.y + 0.5, editable: true, ..k }).collect();
     out.extend([
         zone(MEDIA, "● ● ●", 19.0, 0.5, 3.0, 1.0, Shape::Round),
         zone(DIAL, "◎", 22.0, 0.5, 1.0, 1.0, Shape::Round),
@@ -207,7 +229,7 @@ mod tests {
 
     #[test]
     fn has_104_keys_with_unique_known_ids() {
-        let keys = keys();
+        let keys = keys(Board::Full);
         assert_eq!(keys.len(), 104);
         let mut ids: Vec<u8> = keys.iter().map(|k| k.key).collect();
         ids.sort();
@@ -218,19 +240,38 @@ mod tests {
 
     #[test]
     fn keys_do_not_overlap() {
-        let keys = keys();
-        for (i, a) in keys.iter().enumerate() {
-            for b in &keys[i + 1..] {
-                let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
-                assert!(apart, "{} overlaps {}", a.label, b.label);
+        for board in [Board::Full, Board::Mini] {
+            let keys = keys(board);
+            for (i, a) in keys.iter().enumerate() {
+                for b in &keys[i + 1..] {
+                    let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                    assert!(apart, "{board:?}: {} overlaps {}", a.label, b.label);
+                }
             }
         }
     }
 
     #[test]
     fn only_fn_is_not_editable() {
-        let fixed: Vec<u8> = keys().iter().filter(|k| !k.editable).map(|k| k.key).collect();
-        assert_eq!(fixed, [keymap::by_name("RIGHT_GUI").unwrap()]);
+        for board in [Board::Full, Board::Mini] {
+            let fixed: Vec<u8> = keys(board).iter().filter(|k| !k.editable).map(|k| k.key).collect();
+            assert_eq!(fixed, [keymap::by_name("RIGHT_GUI").unwrap()], "{board:?}");
+        }
+    }
+
+    #[test]
+    fn mini_keys_are_in_its_sensor_matrix() {
+        // The 5 × 14 matrix of the V3 Pro Mini firmware 2.01.00, `0x200269C0` after scatter-load.
+        const MATRIX: [u8; 70] = [
+            110, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 25, 10, 11, 12, 13, 14, 15, 0, 30, 31, 32,
+            33, 34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50, 51, 52, 58, 127, 60, 150, 61, 154, 151, 62, 59, 27, 28, 29,
+            39, 40, 41, 42, 43, 0, 53, 54, 55, 56, 57, 129, 64,
+        ];
+        let keys = keys(Board::Mini);
+        assert_eq!(keys.len(), 61);
+        assert!(keys.iter().all(|k| MATRIX.contains(&k.key)), "{keys:?}");
+        assert_eq!(keys[0].key, keymap::by_name("ESC").unwrap());
+        assert!(keys.iter().all(|k| k.y >= 0.0 && k.y < 5.0 && k.x + k.w <= 15.0));
     }
 
     fn cell(name: &str) -> Vec<(u8, u8)> {
@@ -239,7 +280,7 @@ mod tests {
 
     #[test]
     fn every_key_lights_its_own_cell() {
-        let mut seen: Vec<(u8, u8)> = keys().iter().flat_map(|k| cells(k.key)).collect();
+        let mut seen: Vec<(u8, u8)> = keys(Board::Full).iter().flat_map(|k| cells(k.key)).collect();
         assert_eq!(seen.len(), 104);
         assert!(seen.iter().all(|&(r, c)| r < 6 && c < 23), "{seen:?}");
         seen.sort();
@@ -284,7 +325,7 @@ mod tests {
     fn lighting_map_has_every_key_and_zone_selectable() {
         let map = lighting_keys();
         assert!(map.iter().all(|k| k.editable && k.x >= 0.0 && k.y >= 0.0));
-        for id in keys().iter().map(|k| k.key).chain([MEDIA, DIAL, EDGE, WRIST]) {
+        for id in keys(Board::Full).iter().map(|k| k.key).chain([MEDIA, DIAL, EDGE, WRIST]) {
             assert!(map.iter().any(|k| k.key == id), "{id}");
         }
     }

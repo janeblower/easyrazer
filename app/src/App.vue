@@ -47,6 +47,8 @@ const { t } = useI18n();
 const version = __APP_VERSION__;
 const status = ref<DeviceStatus | null>(null);
 const layout = ref<KeyView[]>([]);
+// Kept when the keyboard is unplugged, so the map does not jump to another board.
+let layoutModel: string | null = null;
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
 const edits = ref<KeyMap<number>>({}); // mm, not applied yet
 const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4 };
@@ -396,6 +398,10 @@ async function onStatus(s: DeviceStatus) {
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
   if (busy.value) return;
   status.value = s;
+  if (s.model && s.model !== layoutModel) {
+    layoutModel = s.model;
+    layout.value = await invoke<KeyView[]>("layout", { model: s.model });
+  }
   if (!s.device || s.synapse) {
     loadedProfile = null;
     progress.value = null;

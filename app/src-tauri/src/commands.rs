@@ -8,7 +8,8 @@ use razer_core::actuation::Outcome;
 use razer_core::binding::{self, Action};
 use razer_core::lighting::Look;
 use razer_core::keymap;
-use razer_core::layout as kb_layout;
+use razer_core::devices;
+use razer_core::layout::{self as kb_layout, Board};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
@@ -130,8 +131,9 @@ pub fn window_ready(state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-pub fn layout() -> Vec<KeyView> {
-    key_views(kb_layout::keys())
+pub fn layout(model: Option<String>) -> Vec<KeyView> {
+    let spec = devices::all().iter().find(|d| model.as_deref() == Some(d.name.as_str()));
+    key_views(kb_layout::keys(spec.map_or(Board::Full, |d| d.layout)))
 }
 
 #[tauri::command]
