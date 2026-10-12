@@ -6,18 +6,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
 use razer_core::actuation::{self, Outcome};
-use razer_core::analog::{self, KeyAssignment};
+use razer_core::analog::{self, Analog, KeyAssignment};
 use razer_core::binding::{self, Action};
-use razer_core::devices::DeviceSpec;
+use razer_core::devices::{self, DeviceSpec};
 use razer_core::hid::{self, HidTransport};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
-use razer_core::rapid::{self, Config, Trigger};
+use razer_core::rapid::{Config, SnapRule, Trigger};
 use razer_core::logged::{Entry, Log, Logged};
 use razer_core::packet::Command;
 use razer_core::transport::{Error, exchange};
 use razer_core::macros::{self, Event};
 use razer_core::profiles::{self as slots, RawKey, Snapshot};
-use razer_core::{control, layout};
+use razer_core::{control, layout, trigger};
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
@@ -42,6 +42,10 @@ pub struct Status {
     pub profile: Option<u32>,
     pub profile_name: Option<String>,
     pub model: Option<String>,
+    /// The model is checked on hardware; others get RAM writes only when the settings allow.
+    pub verified: bool,
+    /// The keyboard's press-point scale and what its firmware runs.
+    pub analog: Option<&'static Analog>,
     /// PID of a Razer keyboard without a description.
     pub unsupported: Option<u16>,
     /// Restoring applied settings after a connect failed; reported once.
@@ -62,6 +66,7 @@ pub struct Written {
     pub bindings: Vec<(u8, Outcome)>,
     pub unsaved_bindings: Vec<u8>,
     pub hypershift: Hypershift,
+    pub scale: &'static Analog,
 }
 
 /// The loaded profile's Hypershift layer as the window edits it.
@@ -146,8 +151,8 @@ pub struct Device {
     previewed: bool,
 }
 
-/// Reports a slot read: reads done, reads in all, the key when the window shows it.
-pub type Progress = Arc<dyn Fn(usize, usize, Option<&KeyAssignment>) + Send + Sync>;
+/// Reports a slot read: reads done, reads in all, the key and its press point when the window shows it.
+pub type Progress = Arc<dyn Fn(usize, usize, Option<(u8, f32)>) + Send + Sync>;
 
 impl Device {
     pub fn new() -> Result<Self, Error> {
@@ -187,6 +192,10 @@ impl Device {
             self.control = hid::open_control(&self.api).ok().flatten().map(|(t, d)| (Logged::new(t, self.log.clone()), d));
             if let Some((_, d)) = &self.control {
                 self.last_spec = Some(*d);
+                if self.settings.switch_model(d.pid) {
+                    self.backed_up.clear();
+                    let _ = settings::save(&self.settings);
+                }
                 if let Some(sink) = &self.sink {
                     // Fn+Menu is rebound only once someone listens, or it would do nothing.
                     self.menu = MenuListener::start(&self.api, d.pid, sink.clone()).ok();
@@ -226,7 +235,7 @@ impl Device {
     }
 
     /// Reads the slots into the settings, importing and migrating what is not there yet.
-    fn sync(&mut self, progress: impl FnMut(usize, usize, Option<&KeyAssignment>)) -> Result<(), String> {
+    fn sync(&mut self, mut progress: impl FnMut(usize, usize, Option<(u8, f32)>)) -> Result<(), String> {
         let keys = editable_keys();
         let lang = self.lang().to_string();
         let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
@@ -237,6 +246,7 @@ impl Device {
         if !self.synced {
             self.settings.slots.remove(&startup);
         }
+        let progress = |n, total, a: Option<&KeyAssignment>| progress(n, total, a.map(|a| (a.key, mm(&d.analog, a.threshold_low))));
         profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
         self.settings.bind_snap_tap_once();
         self.startup = Some(startup);
@@ -251,7 +261,7 @@ impl Device {
     /// Loads the loaded profile into profile 0: the keyboard forgets it on unplug, on a mode switch
     /// and on `05:04`, and Synapse overwrites it.
     fn restore(&mut self) {
-        if !self.synced || self.synapse {
+        if !self.synced || self.synapse || !self.may_write() {
             return;
         }
         let menu = self.hw_menu();
@@ -262,7 +272,7 @@ impl Device {
             (None, Some(s)) => s.clone(),
             (None, None) => Snapshot::default(),
         };
-        match profiles::load(t, d, &self.settings, id, &base, menu) {
+        match profiles::load(t, d, &self.settings, id, &base, menu).and_then(|after| self.sync_firmware_rapid().map(|()| after)) {
             Ok(after) => self.ram = Some(after),
             Err(e) => {
                 // Profile 0 holds a partial write, so the next load must write every key.
@@ -270,6 +280,40 @@ impl Device {
                 self.restore_error = Some(i18n::tf(self.lang(), "backend.restoreProfile", &[("error", &e.to_string())]));
             }
         }
+    }
+
+    /// Scale of the last keyboard seen; the profiles in the settings were read from it.
+    pub fn scale(&self) -> &'static Analog {
+        &self.last_spec.unwrap_or(&devices::all()[0]).analog
+    }
+
+    /// RAM writes: always to a model checked on hardware, to others only when the settings allow.
+    fn may_write(&self) -> bool {
+        self.control.as_ref().is_some_and(|(_, d)| d.verified || self.settings.unverified_writes)
+    }
+
+    fn writable(&mut self) -> Result<(), String> {
+        let d = self.keyboard()?.1;
+        if self.may_write() { Ok(()) } else { Err(i18n::tf(self.lang(), "backend.unverified", &[("model", &d.name)])) }
+    }
+
+    /// The flash of a model nobody has checked on hardware stays untouched.
+    fn flashable(&mut self) -> Result<(), String> {
+        let d = self.keyboard()?.1;
+        if d.verified { Ok(()) } else { Err(i18n::tf(self.lang(), "backend.unverifiedFlash", &[("model", &d.name)])) }
+    }
+
+    /// Hardware mode on a model whose firmware runs Rapid Trigger and Snap Tap: profile 0 gets the
+    /// loaded profile's, again after every load of profile 0.
+    fn sync_firmware_rapid(&self) -> Result<(), Error> {
+        let (Some((t, d)), Some(p)) = (&self.control, self.settings.loaded_profile()) else { return Ok(()) };
+        if !d.analog.firmware_rapid || self.engine.is_some() {
+            return Ok(());
+        }
+        let keys: Vec<(u8, Option<(f32, f32)>)> =
+            editable_keys().into_iter().map(|k| (k, p.rapid.get(&k).filter(|r| r.enabled).map(|r| (r.press, r.release)))).collect();
+        trigger::set_rapid(t, actuation::LIVE, &keys)?;
+        trigger::set_snap_tap(t, actuation::LIVE, firmware_pair(&p.snap_tap))
     }
 
     pub fn lang(&self) -> &str {
@@ -308,7 +352,7 @@ impl Device {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
             let driver_mode = self.settings.driver_mode;
-            return Status { device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, unsupported, error };
+            return Status { device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, unsupported, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
@@ -317,15 +361,16 @@ impl Device {
         let Some((t, spec)) = &self.control else { unreachable!() };
         let released = should_release_driver_mode(synapse, mode, running) && control::set_hardware_mode(t).is_ok();
         let model = Some(spec.name.clone());
+        let (verified, analog) = (spec.verified, Some(&spec.analog));
         if released {
             self.ram = None;
             self.restore();
         }
-        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, profile_name, model, unsupported: None, error }
+        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, profile_name, model, verified, analog, unsupported: None, error }
     }
 
-    /// Reads the slots once per connect and loads the profile; returns its Normal layer.
-    pub fn read_all(&mut self, progress: impl FnMut(usize, usize, Option<&KeyAssignment>)) -> Result<Vec<KeyAssignment>, String> {
+    /// Reads the slots once per connect and loads the profile; returns its Normal press points.
+    pub fn read_all(&mut self, progress: impl FnMut(usize, usize, Option<(u8, f32)>)) -> Result<Vec<(u8, f32)>, String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -334,7 +379,7 @@ impl Device {
         self.sync_engine();
         let missing = self.msg("backend.noKeyboard");
         let p = self.settings.loaded_profile().ok_or(missing)?;
-        Ok(p.data.normal.iter().map(|(&k, r)| r.at(actuation::LIVE, analog::Layer::Normal, k)).collect())
+        Ok(p.data.normal.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect())
     }
 
     /// What each key does now; `None` when the app cannot show it.
@@ -347,7 +392,7 @@ impl Device {
         let Some(p) = self.settings.loaded_profile() else { return Hypershift::default() };
         let layer = &p.data.hypershift;
         Hypershift {
-            values: layer.iter().map(|(&k, r)| (k, mm(r.thr_low))).collect(),
+            values: layer.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect(),
             bindings: layer.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect(),
             unsaved: profiles::unsaved_hypershift(p, &self.settings.slots),
         }
@@ -445,6 +490,7 @@ impl Device {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.flashable()?;
         let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
         let (t, _) = self.keyboard()?;
         slots::write_name(t, slot, &new).map_err(|e| e.to_string())
@@ -455,6 +501,7 @@ impl Device {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.flashable()?;
         let startup = self.startup.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         let missing = self.msg("backend.noKeyboard");
         let Some((t, _)) = &self.control else { return Err(missing) };
@@ -548,6 +595,7 @@ impl Device {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.writable()?;
         let host = self.engine.is_some();
         let unwritten = self.msg("backend.macroUnwritten");
         let missing = self.msg("backend.noKeyboard");
@@ -560,8 +608,8 @@ impl Device {
             return Err(unwritten.clone());
         }
         let mut layer = self.settings.loaded_profile().map(|p| p.data.hypershift.clone()).unwrap_or_default();
-        edit_layer(&mut layer, hs)?;
-        let (t, _) = self.keyboard()?;
+        let (t, d) = self.keyboard()?;
+        edit_layer(&d.analog, &mut layer, hs)?;
         let bound: Vec<(u8, Outcome)> = if host {
             bindings.iter().map(|&(k, a)| (k, host_bound(k, a))).collect()
         } else {
@@ -574,7 +622,7 @@ impl Device {
                 })
                 .collect()
         };
-        let results = actuation::apply(t, actuation::LIVE, changes);
+        let results = actuation::apply(t, &d.analog, actuation::LIVE, changes);
         let Some(p) = self.settings.loaded_mut() else { return Err(missing) };
         p.data.hypershift = layer;
         for (k, o) in &results {
@@ -616,6 +664,8 @@ impl Device {
         // The Hypershift layer reaches profile 0 only through `restore`, its press points in driver mode too.
         if (!host && !(results.is_empty() && bound.is_empty())) || !hs.is_empty() {
             self.restore();
+        } else if !rapid.is_empty() || snap.is_some() {
+            self.sync_firmware_rapid().map_err(|e| e.to_string())?;
         }
         self.sync_engine();
         Ok(self.written(results, bound))
@@ -638,6 +688,7 @@ impl Device {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.flashable()?;
         if self.settings.profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
             return Err(self.msg("backend.noFreeSlot"));
         }
@@ -677,7 +728,7 @@ impl Device {
 
     fn written(&self, results: Vec<(u8, Outcome)>, bindings: Vec<(u8, Outcome)>) -> Written {
         let (unsaved, unsaved_bindings) = self.unsaved();
-        Written { results, unsaved, bindings, unsaved_bindings, hypershift: self.hypershift() }
+        Written { results, unsaved, bindings, unsaved_bindings, hypershift: self.hypershift(), scale: self.scale() }
     }
 
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
@@ -702,6 +753,7 @@ impl Device {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.writable()?;
         self.previewed = true;
         let (t, d) = self.keyboard()?;
         lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())
@@ -714,6 +766,7 @@ impl Device {
         }
         let state = self.lighting_state()?;
         let Some(look) = state.applied.or(state.saved) else { return Ok(()) };
+        self.writable()?;
         let (t, d) = self.keyboard()?;
         lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())
     }
@@ -728,6 +781,9 @@ impl Device {
             return Err(missing);
         }
         self.previewed = false;
+        if self.connect().is_some() {
+            self.writable()?;
+        }
         if let Some((t, d)) = self.connect() {
             lighting::set_look(t, d, Store::Temporary, &look).map_err(|e| e.to_string())?;
         }
@@ -804,6 +860,7 @@ impl Device {
         if on {
             return Ok(());
         }
+        self.writable()?;
         let d = self.keyboard()?.1;
         let r = hid::set_autonomous(&self.api, d, true);
         self.log.note("LampArray autonomous", &[1], r.as_ref().err().map(ToString::to_string));
@@ -826,6 +883,9 @@ impl Device {
     pub fn set_driver_mode(&mut self, on: bool) -> Result<(), String> {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
+        }
+        if on {
+            self.writable()?;
         }
         self.settings.driver_mode = on;
         self.sync_engine();
@@ -850,13 +910,13 @@ impl Device {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if self.synapse || self.blocked || !self.settings.driver_mode || self.control.is_none() {
+        if self.synapse || self.blocked || !self.settings.driver_mode || !self.may_write() {
             self.stop_engine();
             return;
         }
         let Some(p) = self.settings.loaded_profile() else { return };
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
-        let mut cfg = engine_config(&thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
+        let mut cfg = engine_config(self.scale(), &thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
@@ -865,12 +925,14 @@ impl Device {
         let Some(sink) = self.sink.clone() else { return };
         let (t, d) = self.control.as_ref().unwrap();
         // Readers first: if they cannot open, the keyboard never leaves hardware mode.
-        let started = EngineHandle::start(&self.api, d.pid, cfg, sink)
+        let started = EngineHandle::start(&self.api, d, cfg, sink)
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
             Ok(h) => {
                 self.engine = Some(h);
                 self.ram = None;
+                // The V3 Pro makes slot 1 the startup one on entering driver mode.
+                self.startup = control::active_profile(t).ok().or(self.startup);
                 // A new engine starts with game mode off.
                 let _ = control::set_led(t, control::LED_GAME, false, false);
                 self.restore();
@@ -923,6 +985,7 @@ impl Device {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
+        self.flashable()?;
         let body = self.settings.macros.get(&id).and_then(|m| macros::encode(&m.events)).ok_or_else(|| format!("no macro {id}"))?;
         let (t, _) = self.keyboard()?;
         macros::write(t, id, &body).map_err(|e| e.to_string())?;
@@ -938,6 +1001,7 @@ impl Device {
             if self.check_synapse() {
                 return Err(self.msg("backend.synapseRunning"));
             }
+            self.flashable()?;
             let (t, _) = self.keyboard()?;
             macros::delete(t, id).map_err(|e| e.to_string())?;
         }
@@ -974,8 +1038,16 @@ impl Device {
 }
 
 /// Press point in the UI's 0.1 mm steps.
-pub fn mm(threshold: u8) -> f32 {
-    (analog::threshold_to_mm(threshold) * 10.0).round() / 10.0
+pub fn mm(scale: &Analog, threshold: u8) -> f32 {
+    (scale.mm(threshold) * 10.0).round() / 10.0
+}
+
+/// The one pair a firmware Snap Tap runs: the first group's first two keys, under the rule it follows.
+fn firmware_pair(s: &SnapTap) -> Option<(u8, u8)> {
+    match s.groups.first().filter(|_| s.enabled).map(|g| (g.rule, g.keys.as_slice())) {
+        Some((SnapRule::Last, &[a, b, ..])) => Some((a, b)),
+        _ => None,
+    }
 }
 
 fn written_macros(s: &Settings) -> Vec<u16> {
@@ -1006,13 +1078,13 @@ fn host_bound(key: u8, a: Action) -> Outcome {
 }
 
 /// Applies `hs` to a copy of the layer; refused whole, so nothing is written on a bad request.
-fn edit_layer(layer: &mut BTreeMap<u8, RawKey>, hs: &HypershiftEdits) -> Result<(), String> {
+fn edit_layer(scale: &Analog, layer: &mut BTreeMap<u8, RawKey>, hs: &HypershiftEdits) -> Result<(), String> {
     let editable = editable_keys();
     if let Some(k) = hs.values.iter().map(|v| v.0).chain(hs.bindings.iter().map(|b| b.0)).find(|k| !editable.contains(k)) {
         return Err(format!("key {k} is not editable"));
     }
     for &(k, mm) in &hs.values {
-        let thr = actuation::threshold(mm).map_err(|e| e.to_string())?;
+        let thr = actuation::threshold(scale, mm).map_err(|e| e.to_string())?;
         layer.get_mut(&k).ok_or_else(|| format!("no key {k}"))?.thr_low = thr;
     }
     for &(k, a) in &hs.bindings {
@@ -1049,6 +1121,7 @@ fn should_release_driver_mode(synapse: bool, mode: Option<u8>, engine: bool) -> 
 }
 
 fn engine_config(
+    scale: &Analog,
     thresholds: &BTreeMap<u8, u8>,
     bindings: &BTreeMap<u8, Option<Action>>,
     fn_layer: &BTreeMap<u8, RawKey>,
@@ -1056,7 +1129,7 @@ fn engine_config(
     snap: &SnapTap,
     (repeat_delay, repeat_interval): (Duration, Duration),
 ) -> Config {
-    let mut c = Config { act: [0; 256], fn_act: [0; 256], rapid: [None; 256], bind: [None; 256], fn_bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled };
+    let mut c = Config { act: [0; 256], fn_act: [0; 256], rapid: [None; 256], bind: [None; 256], fn_bind: [None; 256], repeat_delay, repeat_interval, macros: BTreeMap::new(), snap: snap.groups.clone(), snap_on: snap.enabled, margin: scale.units(0.1) };
     for (&k, &thr) in thresholds {
         c.act[k as usize] = thr;
     }
@@ -1068,7 +1141,7 @@ fn engine_config(
         c.fn_bind[k as usize] = binding::decode(r.fn_id, &r.fn_data);
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
-        c.rapid[k as usize] = Some(Trigger { press: rapid::mm_to_depth(r.press), release: rapid::mm_to_depth(r.release) });
+        c.rapid[k as usize] = Some(Trigger { press: scale.units(r.press), release: scale.units(r.release) });
     }
     c
 }
@@ -1170,6 +1243,10 @@ mod tests {
     use razer_core::rapid::{SnapGroup, SnapRule};
     use super::*;
 
+    fn v2() -> &'static Analog {
+        &devices::by_pid(0x0266).unwrap().analog
+    }
+
     fn plain(k: u8) -> RawKey {
         RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
     }
@@ -1203,8 +1280,8 @@ mod tests {
     fn hypershift_edits_change_the_layer() {
         let mut layer = BTreeMap::from([(31, plain(0x04)), (44, plain(0xE1))]);
         let hs = HypershiftEdits { values: vec![(31, 2.0)], bindings: vec![(44, Action::System { action: System::SnapTap })] };
-        edit_layer(&mut layer, &hs).unwrap();
-        assert_eq!(layer[&31].thr_low, analog::mm_to_threshold(2.0));
+        edit_layer(v2(), &mut layer, &hs).unwrap();
+        assert_eq!(layer[&31].thr_low, v2().threshold(2.0));
         assert_eq!((layer[&44].fn_id, layer[&44].fn_data.as_slice()), (0x11, &[0x21][..]));
     }
 
@@ -1213,11 +1290,11 @@ mod tests {
         let layer = BTreeMap::from([(31, plain(0x04)), (44, plain(0xE1))]);
         let snap = Action::System { action: System::SnapTap };
         let twice = HypershiftEdits { values: Vec::new(), bindings: vec![(31, snap), (44, snap)] };
-        assert!(edit_layer(&mut layer.clone(), &twice).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &twice).is_err());
         let deep = HypershiftEdits { values: vec![(31, 9.0)], bindings: Vec::new() };
-        assert!(edit_layer(&mut layer.clone(), &deep).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &deep).is_err());
         let missing = HypershiftEdits { values: vec![(200, 2.0)], bindings: Vec::new() };
-        assert!(edit_layer(&mut layer.clone(), &missing).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &missing).is_err());
     }
 
     #[test]
@@ -1225,18 +1302,18 @@ mod tests {
         let snap = RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] };
         let layer = BTreeMap::from([(31, snap.clone()), (44, snap), (30, plain(0x05))]);
         let thr = HypershiftEdits { values: vec![(30, 2.0)], bindings: Vec::new() };
-        assert!(edit_layer(&mut layer.clone(), &thr).is_ok());
+        assert!(edit_layer(v2(), &mut layer.clone(), &thr).is_ok());
         let again = HypershiftEdits { values: Vec::new(), bindings: vec![(30, Action::System { action: System::SnapTap })] };
-        assert!(edit_layer(&mut layer.clone(), &again).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &again).is_err());
     }
 
     #[test]
     fn hypershift_edits_refuse_the_fn_key() {
         let layer = BTreeMap::from([(59, plain(0x04))]);
         let thr = HypershiftEdits { values: vec![(59, 2.0)], bindings: Vec::new() };
-        assert!(edit_layer(&mut layer.clone(), &thr).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &thr).is_err());
         let bind = HypershiftEdits { values: Vec::new(), bindings: vec![(59, Action::System { action: System::GameMode })] };
-        assert!(edit_layer(&mut layer.clone(), &bind).is_err());
+        assert!(edit_layer(v2(), &mut layer.clone(), &bind).is_err());
     }
 
     #[test]
@@ -1256,9 +1333,18 @@ mod tests {
     }
 
     #[test]
+    fn firmware_snap_tap_takes_one_pair_under_the_last_rule() {
+        let snap = |enabled, keys: &[u8], rule| SnapTap { enabled, groups: vec![SnapGroup { keys: keys.to_vec(), rule }] };
+        assert_eq!(firmware_pair(&snap(true, &[31, 33, 32], SnapRule::Last)), Some((31, 33)));
+        assert_eq!(firmware_pair(&snap(false, &[31, 33], SnapRule::Last)), None);
+        assert_eq!(firmware_pair(&snap(true, &[31, 33], SnapRule::Neutral)), None);
+        assert_eq!(firmware_pair(&snap(true, &[31], SnapRule::Last)), None);
+    }
+
+    #[test]
     fn engine_config_keeps_snap_groups_while_off() {
         let snap = SnapTap { enabled: false, groups: vec![SnapGroup { keys: vec![31, 33], rule: SnapRule::Last }] };
-        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
+        let c = engine_config(v2(), &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &snap, (Duration::ZERO, Duration::ZERO));
         assert_eq!(c.snap, snap.groups);
         assert!(!c.snap_on);
     }
@@ -1270,7 +1356,7 @@ mod tests {
             (32, RawKey { thr_low: 0, thr_high: 0, fn_id: 0x11, fn_data: vec![0x01] }),
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
-        let c = engine_config(&BTreeMap::new(), &BTreeMap::new(), &fn_layer, &BTreeMap::new(), &SnapTap::default(), t);
+        let c = engine_config(v2(), &BTreeMap::new(), &BTreeMap::new(), &fn_layer, &BTreeMap::new(), &SnapTap::default(), t);
         assert_eq!((c.fn_act[31], c.fn_act[32]), (200, 0));
         assert_eq!((c.fn_bind[31], c.fn_bind[32]), (Some(Action::System { action: System::SnapTap }), None));
     }
@@ -1284,7 +1370,7 @@ mod tests {
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
-        let c = engine_config(&thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
+        let c = engine_config(v2(), &thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
         assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
@@ -1301,7 +1387,7 @@ mod tests {
         assert_eq!(usable(d, Some(ok.clone())), Some(ok));
     }
 
-    use razer_core::{analog, keymap};
+    use razer_core::keymap;
 
     #[test]
     #[ignore = "needs the keyboard connected and Synapse closed"]
@@ -1318,8 +1404,8 @@ mod tests {
         let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
         let (t, _) = dev.connect().unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
-        dev.apply(&[(a, mm(live.threshold_low))], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
-        assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == analog::mm_to_threshold(2.4)), "{:?}", w.results);
+        dev.apply(&[(a, mm(v2(), live.threshold_low))], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
+        assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == v2().threshold(2.4)), "{:?}", w.results);
         assert_eq!(w.unsaved, [a]);
         assert_eq!(profile_after, saved);
     }

@@ -1,25 +1,16 @@
 //! Host-side key engine for driver mode, where the keyboard only reports key depth.
 //!
-//! Depth and press points share one scale: 0..=255 over 1.5..3.6 mm, like `02:12` thresholds.
+//! Depth and press points share one scale, the model's `02:12` thresholds.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::analog::{MAX_MM, MIN_MM};
+use crate::analog::DepthReport;
 use crate::binding::{self, Action, MODIFIERS, MacroMode, Mouse, System};
 use crate::macros::Event;
 
-/// Release sits this far above the press point, like Synapse's `minBreak` (0.1 mm);
-/// without it a key resting at the point chatters on sensor noise.
-const HYSTERESIS: u8 = 12;
-/// Under `SnapRule::Deeper` the typing key gives way only to a key this much deeper (0.1 mm),
-/// so two keys held level do not trade places on sensor noise.
-const SNAP_MARGIN: u8 = 12;
-
-/// MI_01 Col06: `07 (fwID depth)* 00`; keys missing from a report are up.
-const DEPTH_REPORT: u8 = 0x07;
 /// MI_01 Col04: `04 code*`, all zero when nothing is held.
 const RAZER_REPORT: u8 = 0x04;
 const RAZER_FN: u8 = 0x01;
@@ -52,18 +43,16 @@ pub struct SnapGroup {
     pub rule: SnapRule,
 }
 
-pub fn mm_to_depth(mm: f32) -> u8 {
-    (mm / (MAX_MM - MIN_MM) * 255.0).round().clamp(1.0, 255.0) as u8
-}
-
-pub fn parse_depth(report: &[u8]) -> Option<[u8; 256]> {
-    let (&id, pairs) = report.split_first()?;
-    if id != DEPTH_REPORT {
+/// `id (fwID depth)* 00`, the depth one byte or a u16 BE whose high byte is on the threshold
+/// scale; keys missing from a report are up.
+pub fn parse_depth(report: &[u8], r: &DepthReport) -> Option<[u8; 256]> {
+    let (&id, entries) = report.split_first()?;
+    if id != r.id {
         return None;
     }
     let mut depth = [0u8; 256];
-    for p in pairs.chunks_exact(2).take_while(|p| p[0] != 0) {
-        depth[p[0] as usize] = p[1];
+    for e in entries.chunks_exact(if r.wide { 3 } else { 2 }).take_while(|e| e[0] != 0) {
+        depth[e[0] as usize] = e[1];
     }
     Some(depth)
 }
@@ -87,10 +76,10 @@ struct KeyState {
 /// One depth sample of a key; `Some(down)` on a transition.
 /// With Rapid Trigger, above the release line the key goes down after moving `press`
 /// deeper than its shallowest point and up after rising `release` from its deepest one.
-fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>) -> Option<bool> {
+fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>, margin: u8) -> Option<bool> {
     let was = k.down;
     let act = act.max(1);
-    if depth == 0 || depth < act.saturating_sub(HYSTERESIS) {
+    if depth == 0 || depth < act.saturating_sub(margin) {
         k.down = false;
         k.extreme = depth;
     } else if let Some(r) = rt.filter(|_| k.down || depth >= act) {
@@ -104,7 +93,7 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>) -> Option<boo
             }
         } else {
             k.extreme = k.extreme.min(depth);
-            if d >= u16::from(k.extreme) + u16::from(r.press) || k.extreme <= act.saturating_sub(HYSTERESIS) {
+            if d >= u16::from(k.extreme) + u16::from(r.press) || k.extreme <= act.saturating_sub(margin) {
                 k.down = true;
                 k.extreme = depth;
             }
@@ -172,6 +161,10 @@ pub struct Config {
     /// Kept while Snap Tap is off, so the Hypershift Snap Tap key has groups to turn back on.
     pub snap: Vec<SnapGroup>,
     pub snap_on: bool,
+    /// 0.1 mm in depth units. Release sits this far above the press point, like Synapse's
+    /// `minBreak`, so a key resting at the point does not chatter on sensor noise; under
+    /// `SnapRule::Deeper` the typing key gives way only to a key this much deeper.
+    pub margin: u8,
 }
 
 /// Razer report codes, taken from one capture of the keys pressed left to right.
@@ -306,7 +299,7 @@ impl Engine {
             // A key keeps the layer it went down in until it is up again.
             let fn_layer = if k.down { k.fn_layer } else { fn_held };
             let (act, rt) = if fn_layer { (self.cfg.fn_act[id], None) } else { (self.cfg.act[id], self.cfg.rapid[id]) };
-            let Some(down) = step(k, depth[id], act, rt) else { continue };
+            let Some(down) = step(k, depth[id], act, rt, self.cfg.margin) else { continue };
             k.fn_layer = fn_layer;
             let key = id as u8;
             match self.group(key).filter(|_| !fn_layer) {
@@ -345,7 +338,7 @@ impl Engine {
                     // max_by_key keeps the last of equals: a tie goes to the newest press.
                     let deepest = held.iter().copied().max_by_key(|&k| depth[k as usize]).unwrap_or_default();
                     match held.iter().copied().find(|&k| typing(k)) {
-                        Some(c) if depth[deepest as usize] < depth[c as usize].saturating_add(SNAP_MARGIN) => vec![c],
+                        Some(c) if depth[deepest as usize] < depth[c as usize].saturating_add(self.cfg.margin) => vec![c],
                         _ => vec![deepest],
                     }
                 }
@@ -523,7 +516,7 @@ mod tests {
 
     fn run(depths: &[u8], act: u8, rt: Option<Trigger>) -> Vec<bool> {
         let mut k = KeyState::default();
-        depths.iter().filter_map(|&d| step(&mut k, d, act, rt)).collect()
+        depths.iter().filter_map(|&d| step(&mut k, d, act, rt, 12)).collect()
     }
 
     const RT10: Option<Trigger> = Some(Trigger { press: 10, release: 10 });
@@ -572,18 +565,24 @@ mod tests {
         assert_eq!(run(&[0, 255, 255, 200], 100, Some(Trigger { press: 255, release: 50 })), [true, false]);
     }
 
-    #[test]
-    fn sensitivity_in_depth_units() {
-        assert_eq!(mm_to_depth(0.1), 12);
-        assert_eq!(mm_to_depth(0.4), 49);
-        assert_eq!(mm_to_depth(0.0), 1);
+    fn depth_report(pid: u16) -> &'static DepthReport {
+        &crate::devices::by_pid(pid).unwrap().analog.depth
     }
 
     #[test]
     fn parses_depth_reports() {
-        let d = parse_depth(&[0x07, 31, 100, 18, 5, 0, 0, 44, 9]).unwrap();
+        let r = depth_report(0x0266);
+        let d = parse_depth(&[0x07, 31, 100, 18, 5, 0, 0, 44, 9], r).unwrap();
         assert_eq!((d[31], d[18], d[44], d[1]), (100, 5, 0, 0));
-        assert!(parse_depth(&[0x04, 1]).is_none());
+        assert!(parse_depth(&[0x04, 1], r).is_none());
+    }
+
+    #[test]
+    fn parses_wide_depth_reports() {
+        let r = depth_report(0x02A6);
+        let d = parse_depth(&[0x0B, 31, 0x4C, 0xC8, 18, 0x06, 0x66, 0, 0, 0, 44, 9, 9], r).unwrap();
+        assert_eq!((d[31], d[18], d[44]), (0x4C, 6, 0));
+        assert!(parse_depth(&[0x07, 31, 100], r).is_none());
     }
 
     const A: u8 = 31;
@@ -614,6 +613,7 @@ mod tests {
             macros: BTreeMap::new(),
             snap: Vec::new(),
             snap_on: false,
+            margin: 12,
         })
     }
 

@@ -91,8 +91,8 @@ impl From<Written> for WriteResult {
             .results
             .into_iter()
             .map(|(key, o)| match o {
-                Outcome::Ok(a) => ApplyResult::Ok { key, mm: mm(a.threshold_low) },
-                Outcome::Unconfirmed(a) => ApplyResult::Unconfirmed { key, mm: mm(a.threshold_low) },
+                Outcome::Ok(a) => ApplyResult::Ok { key, mm: mm(w.scale, a.threshold_low) },
+                Outcome::Unconfirmed(a) => ApplyResult::Unconfirmed { key, mm: mm(w.scale, a.threshold_low) },
                 Outcome::Failed(e) => ApplyResult::Error { key, message: e.to_string() },
             })
             .collect();
@@ -140,8 +140,8 @@ pub fn lighting_layout() -> Vec<KeyView> {
 }
 
 /// The window fills the key map from these while a slot is read.
-pub fn emit_progress(app: &AppHandle, done: usize, total: usize, a: Option<&KeyAssignment>) {
-    let _ = app.emit("read-progress", (done, total, a.map(|a| a.key), a.map(|a| mm(a.threshold_low))));
+pub fn emit_progress(app: &AppHandle, done: usize, total: usize, key: Option<(u8, f32)>) {
+    let _ = app.emit("read-progress", (done, total, key.map(|k| k.0), key.map(|k| k.1)));
 }
 
 #[tauri::command]
@@ -150,7 +150,7 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actu
     let all = device.read_all(|done, total, a| emit_progress(&app, done, total, a))?;
     let (unsaved, unsaved_bindings) = device.unsaved();
     Ok(Actuation {
-        values: all.iter().map(|a| (a.key, mm(a.threshold_low))).collect(),
+        values: all.into_iter().collect(),
         unsaved,
         rapid: device.rapid(),
         snap: device.snap_tap(),
@@ -254,6 +254,7 @@ pub struct AppSettings {
     autostart_offered: bool,
     language: Option<String>,
     dev_mode: bool,
+    unverified_writes: bool,
     dev_panel: Option<DevPanel>,
     dev_window: Option<DevWindow>,
 }
@@ -269,6 +270,7 @@ pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
         autostart_offered: s.autostart_offered,
         language: s.language,
         dev_mode: s.dev_mode,
+        unverified_writes: s.unverified_writes,
         dev_panel: s.dev_panel,
         dev_window: s.dev_window,
     })
@@ -298,6 +300,11 @@ pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
     state.device().update_settings(|s| s.watch_synapse = on)
+}
+
+#[tauri::command]
+pub async fn set_unverified_writes(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.device().update_settings(|s| s.unverified_writes = on)
 }
 
 #[tauri::command]

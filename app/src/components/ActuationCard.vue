@@ -2,6 +2,7 @@
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import type { Analog } from "../types";
 
 interface RapidView {
   enabled: boolean | null;
@@ -18,6 +19,8 @@ const props = defineProps<{
   hs: number | null;
   hsSplit: boolean;
   driver: boolean;
+  /** Scale of the connected keyboard; `null` falls back to the Huntsman V2 Analog's. */
+  analog: Analog | null;
 }>();
 const emit = defineEmits<{
   set: [mm: number];
@@ -32,14 +35,17 @@ const { t } = useI18n();
 
 const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10;
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
-const rtOn = computed(() => props.driver && props.rapid.enabled === true);
+// The host runs Rapid Trigger in driver mode, some firmwares in HW mode too.
+const rtHere = computed(() => props.driver || !!props.analog?.firmware_rapid);
+const rtOn = computed(() => rtHere.value && props.rapid.enabled === true);
 const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
 
-const MIN = 1.5;
-const MAX = 3.6;
-// In hardware mode the firmware clamps the press point to thresholds 15..250.
-const HW_MIN = 1.62;
-const HW_MAX = 3.56;
+const V2: Analog = { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false };
+const scale = computed(() => props.analog ?? V2);
+const MIN = computed(() => scale.value.range[0]);
+const MAX = computed(() => scale.value.range[1]);
+// Where the firmware clamps the press point in HW mode, if it does.
+const hwMarks = computed(() => (props.driver ? [] : (scale.value.hw_range ?? [])));
 const RT_MIN = 0.1;
 const RT_MAX = 1;
 // Half of the slider thumb: the thumb centre never reaches the track ends.
@@ -47,24 +53,26 @@ const THUMB = 8;
 
 // Where `f` of the slider's range sits along the track.
 const at = (f: number) => `calc(${THUMB}px + ${f} * (100% - ${2 * THUMB}px))`;
-const markTop = (v: number) => at((v - MIN) / (MAX - MIN));
+const frac = (v: number) => (v - MIN.value) / (MAX.value - MIN.value);
+const markTop = (v: number) => at(frac(v));
 // The mark lights up only when the chosen point is past it and the firmware will clamp it.
-const clamped = (m: number) => props.value != null && (m === HW_MIN ? props.value < HW_MIN : props.value > HW_MAX);
+const clamped = (m: number) => props.value != null && (m === hwMarks.value[0] ? props.value < m : props.value > m);
 
-// The first key held, streamed only in driver mode: depth 0..255 over MIN..MAX, travel since its
-// last extreme on the same scale, and whether it is down.
+// The first key held, streamed only in driver mode: depth 0..255 over zero_mm..full_mm, travel since
+// its last extreme on the same scale, and whether it is down.
 const lead = ref<[number, number, boolean]>([0, 0, false]);
 let unlisten: UnlistenFn | undefined;
 onMounted(async () => (unlisten = await listen<[number, number, boolean]>("key-depth", (e) => (lead.value = e.payload))));
 onUnmounted(() => unlisten?.());
-const units = (mm: number) => (mm / (MAX - MIN)) * 255;
+const units = (mm: number) => (mm / (scale.value.full_mm - scale.value.zero_mm)) * 255;
+const depthMm = (d: number) => scale.value.zero_mm + (d / 255) * (scale.value.full_mm - scale.value.zero_mm);
 // With nothing selected the thumbs rest mid-track; "any" lets them sit between the 0.1 steps.
 const step = computed(() => (props.count ? 0.1 : "any"));
 const mid = (min: number, max: number, v: number | null | undefined, fallback: number) => (props.count ? (v ?? fallback) : (min + max) / 2);
 
 const NONE = { "--from": "0px", "--to": "0px" };
 const span = (from: number, to: number) => ({ "--from": at(from), "--to": at(to) });
-const fill = computed(() => (props.driver && lead.value[0] ? span(0, lead.value[0] / 255) : NONE));
+const fill = computed(() => (props.driver && lead.value[0] ? span(0, Math.min(1, Math.max(0, frac(depthMm(lead.value[0]))))) : NONE));
 // Next move of the key: up to release once it is down, down to press otherwise.
 const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "up" : "down") : null));
 // Press grows down from the top and meets the thumb as the key goes down; release grows up
@@ -78,8 +86,8 @@ function rtFill(v: number, down: boolean) {
   return span(thumb * (1 - Math.min(1, travel / units(v))), thumb);
 }
 
-const shown = computed(() => mid(MIN, MAX, props.value, MIN));
-const hsShown = computed(() => mid(MIN, MAX, props.hs, MIN));
+const shown = computed(() => mid(MIN.value, MAX.value, props.value, MIN.value));
+const hsShown = computed(() => mid(MIN.value, MAX.value, props.hs, MIN.value));
 const rtShown = computed(() => [mid(RT_MIN, RT_MAX, props.rapid.press, 0.4), mid(RT_MIN, RT_MAX, props.rapid.release, 0.4)]);
 const rtSliders = computed(() => {
   const both = [
@@ -116,7 +124,7 @@ const rtSliders = computed(() => {
       <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
       <div class="flex w-[144px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
         <div class="flex flex-col gap-1 items-center">
-          <span class="text-xs text-muted">1.5</span>
+          <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
           <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
           <div class="mx-7 relative">
             <input
@@ -140,9 +148,9 @@ const rtSliders = computed(() => {
             >
               <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
             </svg>
-            <template v-if="!driver">
+            <template v-if="hwMarks.length > 0">
               <div
-                v-for="m in [HW_MIN, HW_MAX]"
+                v-for="m in hwMarks"
                 :key="m"
                 class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
                 :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
@@ -151,13 +159,13 @@ const rtSliders = computed(() => {
                 <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
               </div>
             </template>
-            <span class="thumb-value" :style="{ top: at((shown - MIN) / (MAX - MIN)) }">{{ label(value) }}</span>
+            <span class="thumb-value" :style="{ top: at(frac(shown)) }">{{ label(value) }}</span>
           </div>
-          <span class="text-xs text-muted">3.6</span>
+          <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
           <span class="text-xs text-muted" :class="{ invisible: !hsSplit }">{{ $t("actuation.normal") }}</span>
         </div>
         <div v-if="hsSplit" class="flex flex-col gap-1 items-center">
-          <span class="text-xs text-muted">1.5</span>
+          <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
           <div class="mx-7 relative">
             <input
               class="depth depth-hs h-[200px] block [writing-mode:vertical-lr]"
@@ -170,9 +178,9 @@ const rtSliders = computed(() => {
               :style="fill"
               @input="emit('hs', mm($event))"
             />
-            <span class="thumb-value" :style="{ top: at((hsShown - MIN) / (MAX - MIN)) }">{{ label(hs) }}</span>
+            <span class="thumb-value" :style="{ top: at(frac(hsShown)) }">{{ label(hs) }}</span>
           </div>
-          <span class="text-xs text-muted">3.6</span>
+          <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
           <span class="text-xs text-hs">Hypershift</span>
         </div>
       </div>
@@ -203,12 +211,12 @@ const rtSliders = computed(() => {
           role="switch"
           :checked="rapid.enabled === true"
           :indeterminate="count > 0 && rapid.enabled === null"
-          :disabled="!count || !driver"
+          :disabled="!count || !rtHere"
           @change="emit('rapid', checked($event))"
         />
         {{ $t("rapid.title") }}, {{ $t("actuation.unit") }}
       </label>
-      <span v-if="!driver" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
+      <span v-if="!rtHere" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
       <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
         <button
           v-for="on in [false, true]"

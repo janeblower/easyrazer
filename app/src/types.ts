@@ -9,8 +9,20 @@ export interface Status {
   profile: number | null; // id of the loaded profile
   profile_name: string | null;
   model: string | null;
+  /** Checked on hardware; others are written only when the settings allow, and never their flash. */
+  verified: boolean;
+  analog: Analog | null;
   unsupported: number | null;
   error: string | null;
+}
+
+/** A model's press-point scale: thresholds and depth 0..255 map onto zero_mm..full_mm. */
+export interface Analog {
+  zero_mm: number;
+  full_mm: number;
+  range: [number, number];
+  hw_range: [number, number] | null;
+  firmware_rapid: boolean;
 }
 
 export interface KeyView {
@@ -151,6 +163,7 @@ export interface AppSettings {
   autostart_offered: boolean;
   language: string | null;
   dev_mode: boolean;
+  unverified_writes: boolean;
   dev_panel: DevPanel | null;
   dev_window: DevWindow | null;
 }

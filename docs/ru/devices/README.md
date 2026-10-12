@@ -5,7 +5,7 @@
 | Модель | VID:PID | MCU | EasyRazer | Документы |
 |---|---|---|---|---|
 | Huntsman V2 Analog | `1532:0266` | STM32L4+ | поддерживается | [протокол](huntsman-v2-analog/protocol.md), [прошивка](huntsman-v2-analog/firmware.md) |
-| Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, вероятно LPC55S6x | нет, только разбор | [протокол](huntsman-v3-pro/protocol.md), [прошивка](huntsman-v3-pro/firmware.md) |
+| Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, вероятно LPC55S6x | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro/protocol.md), [прошивка](huntsman-v3-pro/firmware.md) |
 
 V3 Pro не проверялась на железе: всё о ней — из модуля Synapse 4 и прошивки
 1.03.00. Модули Synapse для V2 Analog, Huntsman Mini Analog (`0282`), V3 Pro,

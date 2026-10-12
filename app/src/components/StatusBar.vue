@@ -26,6 +26,7 @@ const view = computed(() => {
   }
   if (!s.device) return { kind: "warn", text: t("status.notFound") };
   if (props.message) return { kind: "info", text: props.message };
+  if (!s.verified) return { kind: "warn", text: t("status.unverified", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
   return { kind: "ok", text: t("status.connected", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
 });
 </script>

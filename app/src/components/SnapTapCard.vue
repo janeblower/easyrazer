@@ -8,6 +8,8 @@ const props = defineProps<{
   selection: Set<number>;
   layout: KeyView[];
   driver: boolean;
+  /** HW mode on a keyboard whose firmware runs Snap Tap: one pair only. */
+  firmware: boolean;
   /** Fn combination of the switch; null when none has it. */
   combo: string | null;
 }>();
@@ -31,7 +33,7 @@ function add() {
         type="checkbox"
         role="switch"
         :checked="snap.enabled"
-        :disabled="!driver"
+        :disabled="!driver && !firmware"
         @change="emit('update', { ...snap, enabled: ($event.target as HTMLInputElement).checked })"
       />
       {{ $t("snap.title") }}
@@ -57,7 +59,9 @@ function add() {
       </li>
     </ul>
     <span v-if="snap.groups.length === 0" class="hint">{{ $t("snap.empty") }}</span>
-    <button class="self-start" :disabled="!driver || selection.size < 2" @click="add">{{ $t("snap.add", { n: selection.size }) }}</button>
+    <button class="self-start" :disabled="(!driver && !firmware) || selection.size < 2" @click="add">
+      {{ $t("snap.add", { n: selection.size }) }}
+    </button>
     <template v-if="current != null">
       <div class="field">
         <span class="field-label">{{ $t("snap.rule") }}</span>
@@ -75,6 +79,6 @@ function add() {
       </div>
       <span class="hint">{{ $t(`snap.hints.${snap.groups[current].rule}`) }}</span>
     </template>
-    <span class="text-xs text-muted" :class="{ invisible: driver }">{{ $t("rapid.hwOnly") }}</span>
+    <span class="text-xs text-muted" :class="{ invisible: driver }">{{ $t(firmware ? "snap.firmwarePair" : "rapid.hwOnly") }}</span>
   </div>
 </template>

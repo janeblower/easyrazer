@@ -161,6 +161,7 @@ fn key_label(id: u8) -> String {
 }
 
 fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
+    let scale = &devices::by_pid(PID).ok_or("device description missing")?.analog;
     let mut out = String::new();
     for layer in [Layer::Normal, Layer::Hypershift] {
         for &key in keys {
@@ -171,9 +172,9 @@ fn actuation(dev: &HidTransport, profile: u8, keys: &[u8]) -> Result<String> {
                 layer,
                 key_label(a.key),
                 a.threshold_low,
-                analog::threshold_to_mm(a.threshold_low),
+                scale.mm(a.threshold_low),
                 a.threshold_high,
-                analog::threshold_to_mm(a.threshold_high),
+                scale.mm(a.threshold_high),
                 a.fn_id,
                 hex(&a.fn_data)
             );
