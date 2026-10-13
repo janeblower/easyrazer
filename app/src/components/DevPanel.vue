@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
-import { call, keyboard } from "../keyboard";
-import type { DeviceInfo, Dock } from "../types";
+import { call, keyboard, ours } from "../keyboard";
+import type { DeviceInfo, Dock, Status } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
 import { dev, followKeyboard, selected, setPanel, startDev } from "../dev";
 import { trackDetached } from "../devWindow";
@@ -103,7 +104,19 @@ function onKey(e: KeyboardEvent) {
   else drawer.open = !drawer.open;
 }
 
+let unlisten: UnlistenFn | null = null;
+// The firmware mode, the startup slot and the loaded profile change with these, so the tab follows them.
+let seen = "";
+
 onMounted(async () => {
+  unlisten = await listen<Status>("status", (e) => {
+    const s = e.payload;
+    if (!ours(s.id)) return;
+    const now = `${s.device}:${s.driver_mode}:${s.profile}`;
+    if (now === seen) return;
+    seen = now;
+    if (tab.value === "device") void loadInfo();
+  });
   if (!props.detached) return;
   window.addEventListener("keydown", onKey);
   root.value?.focus();
@@ -114,6 +127,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  unlisten?.();
   window.removeEventListener("keydown", onKey);
 });
 
