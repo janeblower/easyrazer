@@ -80,18 +80,26 @@ fn main() {
                 if shown {
                     let _ = ready.recv_timeout(Duration::from_secs(10));
                 }
+                // A board busy when the list changed gets its listener on a later poll.
+                let mut unsynced = std::collections::BTreeSet::new();
                 loop {
                     // One failed step must not end the watching for the rest of the session.
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         let state = handle.state::<commands::AppState>();
                         let (statuses, changed, synapse) = commands::poll(&state);
                         if changed {
+                            unsynced.extend(state.boards.all().into_iter().map(|(id, _)| id));
+                        }
+                        if !unsynced.is_empty() {
                             let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
-                            for (id, d) in state.boards.all() {
-                                if let Some(dev) = commands::try_lock(&d) {
-                                    dev::sync_listener(&handle, mode, size, &id, &dev);
-                                }
-                            }
+                            unsynced.retain(|id| {
+                                let Some(d) = state.boards.get(id) else { return false };
+                                let Some(dev) = boards::try_guard(&d) else { return true };
+                                dev::sync_listener(&handle, mode, size, id, &dev);
+                                false
+                            });
+                        }
+                        if changed {
                             let _ = handle.emit("devices", ());
                         }
                         if state.boards.is_empty() {

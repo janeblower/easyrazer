@@ -1,14 +1,13 @@
 //! Every keyboard the app has met this session, by id; the commands reach them through here.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use hidapi::HidApi;
 use razer_core::control;
 use razer_core::hid::{self, Unit};
 use serde::Serialize;
 
-use crate::commands::try_lock;
 use crate::device::{Device, Progress, Status};
 use crate::engine::Sink;
 use crate::settings::{self, Settings, Shared};
@@ -48,21 +47,33 @@ pub struct Boards {
     api: Mutex<HidApi>,
     /// PID of the unsupported Razer keyboard seen by the last discovery.
     unsupported: Mutex<Option<u16>>,
+    /// Container -> id of a unit that read the id of a connected board, so later polls skip it unopened.
+    twins: Mutex<BTreeMap<String, String>>,
 }
 
 fn guard<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Units no board holds. A board without a container holds any unit, the way it was before
-/// containers were read: two such keyboards of one model cannot be told apart.
-pub fn units_to_attach(units: Vec<Unit>, held: &[Option<String>]) -> Vec<Unit> {
-    units.into_iter().filter(|u| !held.iter().any(|c| c.is_none() || *c == u.container)).collect()
+/// Like `guard`, but `None` while someone holds the mutex.
+pub fn try_guard<T>(m: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match m.try_lock() {
+        Ok(g) => Some(g),
+        Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
+    }
+}
+
+/// Units no board holds and not known to be a twin of one. A board without a container holds any
+/// unit, the way it was before containers were read: two such keyboards of one model cannot be told apart.
+pub fn units_to_attach(units: Vec<Unit>, held: &[Option<String>], twins: &BTreeMap<String, String>) -> Vec<Unit> {
+    let twin = |u: &Unit| u.container.as_ref().is_some_and(|c| twins.contains_key(c));
+    units.into_iter().filter(|u| !twin(u) && !held.iter().any(|c| c.is_none() || *c == u.container)).collect()
 }
 
 impl Boards {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { boards: Mutex::new(BTreeMap::new()), api: Mutex::new(HidApi::new().map_err(|e| e.to_string())?), unsupported: Mutex::new(None) })
+        Ok(Self { boards: Mutex::new(BTreeMap::new()), api: Mutex::new(HidApi::new().map_err(|e| e.to_string())?), unsupported: Mutex::new(None), twins: Mutex::default() })
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Mutex<Device>>> {
@@ -78,9 +89,9 @@ impl Boards {
         guard(&self.boards).iter().map(|(id, b)| (id.clone(), b.device.clone())).collect()
     }
 
-    fn board_for(&self, id: &str, container: Option<String>, make: impl FnOnce() -> Arc<Mutex<Device>>) -> Arc<Mutex<Device>> {
+    fn board_for(&self, id: &str, container: Option<String>, device: Arc<Mutex<Device>>) -> Arc<Mutex<Device>> {
         let mut boards = guard(&self.boards);
-        let b = boards.entry(id.to_string()).or_insert_with(|| Board { device: make(), container: None, connected: false });
+        let b = boards.entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false });
         b.container = container;
         b.connected = true;
         b.device.clone()
@@ -94,6 +105,11 @@ impl Boards {
         changed
     }
 
+    /// PID of the unsupported Razer keyboard the last discovery saw.
+    pub fn unsupported(&self) -> Option<u16> {
+        *guard(&self.unsupported)
+    }
+
     /// `true` when the unsupported keyboard differs from the last one noted.
     fn note_unsupported(&self, now: Option<u16>) -> bool {
         std::mem::replace(&mut *guard(&self.unsupported), now) != now
@@ -105,7 +121,7 @@ impl Boards {
         let mut changed = false;
         let mut out = Vec::new();
         for (id, d) in self.all() {
-            let Some(mut dev) = try_lock(&d) else { continue };
+            let Some(mut dev) = try_guard(&d) else { continue };
             let s = dev.status(synapse);
             drop(dev);
             changed |= self.set_connected(&id, s.device);
@@ -124,19 +140,33 @@ impl Boards {
         let mut api = guard(&self.api);
         let _ = api.refresh_devices();
         let mut changed = self.note_unsupported(hid::unsupported_keyboard(&api));
-        for unit in units_to_attach(hid::units(&api), &held) {
+        let units = hid::units(&api);
+        let mut twins = guard(&self.twins);
+        twins.retain(|c, id| self.is_connected(id) && units.iter().any(|u| u.container.as_ref() == Some(c)));
+        for unit in units_to_attach(units, &held, &twins) {
             // A failed serial read would file the keyboard's data under another key; the next poll retries.
             let Ok(t) = hid::open_control(&api, &unit) else { continue };
             let Ok(serial) = control::serial(&t) else { continue };
             let id = settings::device_id(unit.spec.pid, &serial);
             // Keyboards without a readable serial share an id; taking the live board's device would detach it.
             if self.is_connected(&id) {
+                twins.extend(unit.container.clone().map(|c| (c, id)));
                 continue;
             }
-            let device = self.board_for(&id, unit.container.clone(), || {
-                Arc::new(Mutex::new(Device::new(shared.clone()).expect("hidapi init")))
-            });
-            crate::commands::lock(&device).attach(unit, t, &id, (hooks.sink)(&id), (hooks.progress)(&id), synapse);
+            let device = match self.get(&id) {
+                Some(d) => d,
+                None => match Device::new(shared.clone()) {
+                    Ok(d) => Arc::new(Mutex::new(d)),
+                    Err(_) => continue,
+                },
+            };
+            let device = self.board_for(&id, unit.container.clone(), device);
+            // A command may hold a disconnected device for long; waiting here would stall every board.
+            let Some(mut dev) = try_guard(&device) else {
+                self.set_connected(&id, false);
+                continue;
+            };
+            dev.attach(unit, t, &id, (hooks.sink)(&id), (hooks.progress)(&id), synapse);
             changed = true;
         }
         changed
@@ -169,13 +199,20 @@ mod tests {
     #[test]
     fn units_to_attach_skips_held_containers() {
         let units = vec![unit(Some("A")), unit(Some("B")), unit(None)];
-        let got: Vec<_> = units_to_attach(units, &[Some("A".into())]).into_iter().map(|u| u.container).collect();
+        let got: Vec<_> = units_to_attach(units, &[Some("A".into())], &BTreeMap::new()).into_iter().map(|u| u.container).collect();
         assert_eq!(got, [Some("B".into()), None]);
     }
 
     #[test]
-    fn a_unit_without_container_is_held_by_any_board_of_its_model() {
-        assert!(units_to_attach(vec![unit(None)], &[None]).is_empty());
+    fn a_board_without_container_holds_any_unit() {
+        assert!(units_to_attach(vec![unit(None), unit(Some("A"))], &[None], &BTreeMap::new()).is_empty());
+    }
+
+    #[test]
+    fn a_known_twin_is_skipped_before_it_is_opened() {
+        let twins = BTreeMap::from([("A".to_string(), "66:noserial".to_string())]);
+        let got: Vec<_> = units_to_attach(vec![unit(Some("A")), unit(Some("B")), unit(None)], &[], &twins).into_iter().map(|u| u.container).collect();
+        assert_eq!(got, [Some("B".into()), None]);
     }
 
     #[test]
@@ -247,7 +284,7 @@ mod tests {
         let shared: Shared = Default::default();
         let device = Arc::new(Mutex::new(Device::new(shared).unwrap()));
         boards.boards.lock().unwrap().insert("A".into(), Board { device: device.clone(), container: Some("C1".into()), connected: false });
-        let again = boards.board_for("A", Some("C2".into()), || unreachable!("a known id gets its device back"));
+        let again = boards.board_for("A", Some("C2".into()), Arc::new(Mutex::new(Device::new(Default::default()).unwrap())));
         assert!(Arc::ptr_eq(&again, &device));
         assert_eq!(boards.boards.lock().unwrap()["A"].container.as_deref(), Some("C2"));
     }

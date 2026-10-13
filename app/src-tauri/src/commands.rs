@@ -10,8 +10,6 @@ use razer_core::lighting::Look;
 use razer_core::keymap;
 use razer_core::devices;
 use razer_core::layout::{self as kb_layout, Board};
-use hidapi::HidApi;
-use razer_core::hid;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
@@ -34,15 +32,6 @@ pub struct AppState {
 /// A command that panicked mid-way leaves the device in a usable state, so poisoning is ignored.
 pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
     d.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// Like `lock`, but `None` while a command holds the device.
-pub fn try_lock(d: &Mutex<Device>) -> Option<MutexGuard<'_, Device>> {
-    match d.try_lock() {
-        Ok(g) => Some(g),
-        Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
-        Err(std::sync::TryLockError::WouldBlock) => None,
-    }
 }
 
 impl AppState {
@@ -172,9 +161,8 @@ pub async fn status(state: State<'_, AppState>, id: Option<String>) -> Result<St
 
 #[tauri::command]
 pub async fn devices(state: State<'_, AppState>) -> Result<DevicesView, String> {
-    let unsupported = hid::unsupported_keyboard(&HidApi::new().map_err(|e| e.to_string())?);
     let s = state.settings().clone();
-    Ok(DevicesView { devices: state.boards.list(&s), unsupported })
+    Ok(DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported() })
 }
 
 #[tauri::command]
