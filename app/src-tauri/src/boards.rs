@@ -46,6 +46,8 @@ pub struct Boards {
     boards: Mutex<BTreeMap<String, Board>>,
     /// Enumerates for discovery; each device has its own for its interfaces.
     api: Mutex<HidApi>,
+    /// PID of the unsupported Razer keyboard seen by the last discovery.
+    unsupported: Mutex<Option<u16>>,
 }
 
 fn guard<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -60,7 +62,7 @@ pub fn units_to_attach(units: Vec<Unit>, held: &[Option<String>]) -> Vec<Unit> {
 
 impl Boards {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { boards: Mutex::new(BTreeMap::new()), api: Mutex::new(HidApi::new().map_err(|e| e.to_string())?) })
+        Ok(Self { boards: Mutex::new(BTreeMap::new()), api: Mutex::new(HidApi::new().map_err(|e| e.to_string())?), unsupported: Mutex::new(None) })
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Mutex<Device>>> {
@@ -87,6 +89,11 @@ impl Boards {
         changed
     }
 
+    /// `true` when the unsupported keyboard differs from the last one noted.
+    fn note_unsupported(&self, now: Option<u16>) -> bool {
+        std::mem::replace(&mut *guard(&self.unsupported), now) != now
+    }
+
     /// The status of every board not busy with a command; a busy one reports for itself when it
     /// finishes, and waiting here would stall the others. `true` when a connection changed.
     pub fn statuses(&self, synapse: bool) -> (Vec<Status>, bool) {
@@ -102,12 +109,12 @@ impl Boards {
         (out, changed)
     }
 
-    /// Attaches every unit no board holds; `true` when a keyboard appeared.
+    /// Attaches every unit no board holds; `true` when a keyboard appeared or the unsupported one changed.
     pub fn discover(&self, shared: &Shared, hooks: &Hooks, synapse: bool) -> bool {
         let held: Vec<Option<String>> = guard(&self.boards).values().filter(|b| b.connected).map(|b| b.container.clone()).collect();
         let mut api = guard(&self.api);
         let _ = api.refresh_devices();
-        let mut changed = false;
+        let mut changed = self.note_unsupported(hid::unsupported_keyboard(&api));
         for unit in units_to_attach(hid::units(&api), &held) {
             // A failed serial read would file the keyboard's data under another key; the next poll retries.
             let Ok(t) = hid::open_control(&api, &unit) else { continue };
@@ -187,6 +194,15 @@ mod tests {
         assert!(changed);
         let boards_map = boards.boards.lock().unwrap();
         assert!(boards_map["A"].connected && !boards_map["B"].connected);
+    }
+
+    #[test]
+    fn a_new_unsupported_keyboard_counts_as_a_change() {
+        let boards = Boards::new().unwrap();
+        assert!(!boards.note_unsupported(None));
+        assert!(boards.note_unsupported(Some(0x1234)));
+        assert!(!boards.note_unsupported(Some(0x1234)));
+        assert!(boards.note_unsupported(None));
     }
 
     #[test]
