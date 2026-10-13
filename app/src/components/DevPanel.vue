@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { call } from "../keyboard";
 import type { DeviceInfo, Dock } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
-import { dev, selected, setPanel, startDev } from "../dev";
+import { dev, followKeyboard, selected, setPanel, startDev } from "../dev";
 import { trackDetached } from "../devWindow";
 import DevConsole from "./DevConsole.vue";
 import DevTraffic from "./DevTraffic.vue";
@@ -102,6 +102,7 @@ onMounted(async () => {
   if (!props.detached) return;
   window.addEventListener("keydown", onKey);
   root.value?.focus();
+  await followKeyboard();
   await startDev();
   setLanguage(dev.language ?? systemLanguage());
   await trackDetached();

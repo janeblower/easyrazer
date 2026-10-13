@@ -327,7 +327,9 @@ function showError(e: unknown) {
 async function loadMacros() {
   if (!keyboard.value) return;
   try {
-    macroState.value = await call<MacroState>("macros");
+    const id = keyboard.value;
+    const r = await call<MacroState>("macros");
+    if (ours(id)) macroState.value = r;
   } catch (error) {
     showError(error);
   }
@@ -336,15 +338,19 @@ async function loadMacros() {
 async function loadProfiles() {
   if (!keyboard.value) return;
   try {
-    profiles.value = await call<ProfilesView>("profiles");
+    const id = keyboard.value;
+    const r = await call<ProfilesView>("profiles");
+    if (ours(id)) profiles.value = r;
   } catch (error) {
     showError(error);
   }
 }
 
 async function load() {
+  const id = keyboard.value;
   busy.value = true;
   progress.value = [0, 1];
+  let stale = false;
   try {
     const {
       values: base,
@@ -356,6 +362,11 @@ async function load() {
       hypershift,
       profile,
     } = await call<Actuation>("read_all");
+    // The keyboard changed while reading: nothing here is for the new one.
+    if (!ours(id)) {
+      stale = true;
+      return;
+    }
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -385,6 +396,8 @@ async function load() {
     progress.value = null;
     busy.value = false;
   }
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- refresh and load call each other
+  if (stale) await refresh();
 }
 
 function revert() {
@@ -474,7 +487,9 @@ function selectAll() {
 async function profileOp(command: string, args: Record<string, unknown> = {}) {
   busy.value = true;
   try {
-    profiles.value = await call<ProfilesView>(command, args);
+    const id = keyboard.value;
+    const r = await call<ProfilesView>(command, args);
+    if (ours(id)) profiles.value = r;
   } catch (error) {
     showError(error);
   } finally {
@@ -527,6 +542,7 @@ function merge<O extends Written, V, E>(
 }
 
 async function write(command: "apply" | "save", done: string) {
+  const id = keyboard.value;
   busy.value = true;
   let failed = false;
   try {
@@ -548,6 +564,8 @@ async function write(command: "apply" | "save", done: string) {
       command,
       rapid ? { changes, rapid, snap: snapNext, bindings, hypershift } : { changes, bindings, hypershift },
     );
+    // The window moved to another keyboard meanwhile; its edits were dropped with the switch.
+    if (!ours(id)) return;
     // The backend takes the layer whole or refuses it, so a result means every edit is in.
     takeHypershift(layer);
     hsEdits.value = {};

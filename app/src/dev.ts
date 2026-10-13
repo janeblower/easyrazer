@@ -1,8 +1,8 @@
 import { reactive, ref, shallowRef } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { call, keyboard, ours } from "./keyboard";
-import type { AppSettings, CommandInfo, DevPanel, DevWindow, LogEntry } from "./types";
+import { call, keyboard, ours, pick } from "./keyboard";
+import type { AppSettings, CommandInfo, DevPanel, DevWindow, DevicesView, LogEntry } from "./types";
 
 export const dev = reactive({
   mode: false,
@@ -49,6 +49,21 @@ export async function reloadLog() {
   // Entries that arrived while the log was fetched.
   const last = fetched.at(-1)?.seq ?? -1;
   log.value = [...fetched, ...log.value.filter((e) => e.seq > last)];
+}
+
+/** The detached window has no App to pick a keyboard, so it follows the same choice itself. */
+export async function followKeyboard() {
+  const take = async () => {
+    const view = await invoke<DevicesView>("devices");
+    const next = pick(view.devices, keyboard.value);
+    if (next === keyboard.value) return;
+    keyboard.value = next;
+    if (started) await reloadLog();
+  };
+  await listen("devices", () => {
+    void take();
+  });
+  await take();
 }
 
 /** Loads the mode, the log and the registry once per window and follows their changes. */
