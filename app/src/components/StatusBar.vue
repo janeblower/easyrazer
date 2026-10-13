@@ -27,13 +27,13 @@ const view = computed(() => {
       kind: "warn",
       text: t("status.synapse"),
     };
+  if (props.message) return { kind: "info", text: props.message };
   if (!s.device && s.model) return { kind: "warn", text: t("status.offline", { name: props.name ?? s.model }) };
   if (!s.device && props.unsupported != null) {
     const pid = props.unsupported.toString(16).toUpperCase().padStart(4, "0");
     return { kind: "warn", text: t("status.unsupported", { pid }) };
   }
   if (!s.device) return { kind: "warn", text: t("status.notFound") };
-  if (props.message) return { kind: "info", text: props.message };
   if (!s.verified) return { kind: "warn", text: t("status.unverified", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
   return { kind: "ok", text: t("status.connected", { model: s.model ?? "", profile: s.profile_name ?? "?" }) };
 });

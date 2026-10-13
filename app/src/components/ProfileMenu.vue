@@ -171,7 +171,7 @@ watch(
           >
             <AppIcon name="write" class="ic" />{{ $t("profiles.write") }}
           </button>
-          <button class="item" :disabled="!editable" @click="startRename(p.id, p.name)">
+          <button class="item" :disabled="!(p.slot ? writable : editable)" @click="startRename(p.id, p.name)">
             <span class="ic">✎</span>{{ $t("profiles.rename") }}
           </button>
           <button class="item" :disabled="!editable" @click="emit('duplicate', p.id)">
