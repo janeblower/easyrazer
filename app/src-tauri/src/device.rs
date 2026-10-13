@@ -250,6 +250,17 @@ impl Device {
         }
     }
 
+    /// Shows a keyboard known from the settings while it is unplugged.
+    pub fn offline(&mut self, id: &str) {
+        let pid = settings::lock(&self.shared).devices.get(id).map(|d| d.pid);
+        if let Some(pid) = pid {
+            self.adopt(id, pid);
+        }
+        if self.last_spec.is_none() {
+            self.last_spec = devices::by_pid(self.data.pid);
+        }
+    }
+
     /// Makes `id` the keyboard this device drives and takes its saved data; callers claim it first.
     fn checkout(&mut self, id: &str) {
         self.data = settings::lock(&self.shared).devices.get(id).cloned().unwrap_or_default();
@@ -407,15 +418,17 @@ impl Device {
             self.synced = false;
             self.reload();
         }
+        if self.control.is_none() {
+            let error = self.restore_error.take();
+            let driver_mode = self.data().driver_mode;
+            let (profile, profile_name) = self.data().loaded_profile().map_or((None, None), |p| (Some(p.id), Some(p.name.clone())));
+            let spec = self.last_spec;
+            return Status { id: self.id.clone(), device: false, synapse, driver_mode, profile, profile_name, model: spec.map(|d| d.name.clone()), verified: spec.is_none_or(|d| d.verified), analog: spec.map(|d| &d.analog), error };
+        }
         let (profile, profile_name) = match self.data().loaded_profile() {
             Some(p) if self.synced => (Some(p.id), Some(p.name.clone())),
             _ => (None, None),
         };
-        if self.control.is_none() {
-            let error = self.restore_error.take();
-            let driver_mode = self.data().driver_mode;
-            return Status { id: self.id.clone(), device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, error };
-        }
         self.sync_engine();
         let error = self.restore_error.take();
         let running = self.engine.is_some();
@@ -436,9 +449,11 @@ impl Device {
         if self.synapse {
             return Err(self.msg("backend.synapseRunning"));
         }
-        self.sync(progress)?;
-        self.restore();
-        self.sync_engine();
+        if self.control.is_some() {
+            self.sync(progress)?;
+            self.restore();
+            self.sync_engine();
+        }
         let missing = self.msg("backend.noKeyboard");
         let p = self.data().loaded_profile().ok_or(missing)?;
         Ok(p.data.normal.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect())
@@ -1297,7 +1312,7 @@ mod tests {
     use razer_core::rapid::{SnapGroup, SnapRule};
     use std::sync::Mutex;
     use super::*;
-    use crate::settings::Settings;
+    use crate::settings::{Profile, Settings};
 
     fn v2() -> &'static Analog {
         &devices::by_pid(0x0266).unwrap().analog
@@ -1570,5 +1585,22 @@ mod tests {
         assert_eq!(next_macro_id(&BTreeMap::new()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m())].into()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m()), (0x8004, m())].into()), 0x8005);
+    }
+
+    #[test]
+    fn an_offline_device_reports_its_loaded_profile() {
+        let shared: Shared = Default::default();
+        let mut data = DeviceData { pid: 0x0266, ..Default::default() };
+        let id = data.new_profile_id();
+        data.profiles.push(Profile { id, name: "Office".into(), ..Default::default() });
+        data.loaded = Some(id);
+        settings::lock(&shared).devices.insert("K".into(), data);
+        let mut d = Device::new(shared).unwrap();
+        d.offline("K");
+        let s = d.status(false);
+        assert!(!s.device);
+        assert_eq!((s.profile, s.profile_name.as_deref()), (Some(id), Some("Office")));
+        assert_eq!(s.model.as_deref(), Some("Razer Huntsman V2 Analog"));
+        assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read gives the stored profile");
     }
 }

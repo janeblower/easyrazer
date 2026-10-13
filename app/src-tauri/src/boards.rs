@@ -89,6 +89,21 @@ impl Boards {
         guard(&self.boards).iter().map(|(id, b)| (id.clone(), b.device.clone())).collect()
     }
 
+    /// The board of `id`, creating an offline one from the settings when the id is known there.
+    pub fn get_or_offline(&self, id: &str, shared: &Shared) -> Option<Arc<Mutex<Device>>> {
+        if let Some(d) = self.get(id) {
+            return Some(d);
+        }
+        let known = settings::lock(shared).devices.contains_key(id);
+        if !known {
+            return None;
+        }
+        let mut device = Device::new(shared.clone()).ok()?;
+        device.offline(id);
+        let device = Arc::new(Mutex::new(device));
+        Some(guard(&self.boards).entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false }).device.clone())
+    }
+
     fn board_for(&self, id: &str, container: Option<String>, device: Arc<Mutex<Device>>) -> Arc<Mutex<Device>> {
         let mut boards = guard(&self.boards);
         let b = boards.entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false });
@@ -190,6 +205,7 @@ impl Boards {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::DeviceData;
     use razer_core::devices;
 
     fn unit(container: Option<&str>) -> Unit {
@@ -287,5 +303,26 @@ mod tests {
         let again = boards.board_for("A", Some("C2".into()), Arc::new(Mutex::new(Device::new(Default::default()).unwrap())));
         assert!(Arc::ptr_eq(&again, &device));
         assert_eq!(boards.boards.lock().unwrap()["A"].container.as_deref(), Some("C2"));
+    }
+
+    #[test]
+    fn a_known_keyboard_gets_an_offline_board() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).expect("known id");
+        assert!(!boards.is_connected("K"));
+        assert_eq!(guard(&d).name(), "Razer Huntsman V2 Analog");
+        assert!(boards.get_or_offline("unknown", &shared).is_none());
+    }
+
+    #[test]
+    fn an_offline_board_attaches_in_place() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let offline = boards.get_or_offline("K", &shared).unwrap();
+        let attached = boards.board_for("K", Some("C".into()), offline.clone());
+        assert!(Arc::ptr_eq(&offline, &attached), "discovery reuses the offline device");
     }
 }

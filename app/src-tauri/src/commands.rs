@@ -36,7 +36,7 @@ pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
 
 impl AppState {
     pub fn device(&self, id: &str) -> Result<Arc<Mutex<Device>>, String> {
-        self.boards.get(id).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
+        self.boards.get_or_offline(id, &self.settings).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
     }
 
     pub fn lang(&self) -> String {
@@ -153,7 +153,7 @@ pub fn idle_status(state: &AppState, id: Option<String>, synapse: bool) -> Statu
 pub async fn status(state: State<'_, AppState>, id: Option<String>) -> Result<Status, String> {
     let watch = state.settings().watch_synapse;
     let synapse = watch && device::synapse_running();
-    match id.as_deref().and_then(|id| state.boards.get(id)) {
+    match id.as_deref().and_then(|id| state.boards.get_or_offline(id, &state.settings)) {
         Some(d) => Ok(lock(&d).status(synapse)),
         None => Ok(idle_status(&state, id, synapse)),
     }
