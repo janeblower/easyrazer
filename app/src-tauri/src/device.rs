@@ -207,14 +207,7 @@ impl Device {
                 && let Ok(serial) = control::serial(&t)
             {
                 let id = settings::device_id(unit.spec.pid, &serial);
-                if self.id.as_deref() != Some(&id) {
-                    self.backed_up.clear();
-                }
-                let claimed = settings::lock(&self.shared).claim(&id, unit.spec.pid);
-                self.checkout(&id);
-                if claimed {
-                    let _ = self.save();
-                }
+                self.attach(&id, unit.spec.pid);
                 self.control = Some((Logged::new(t, self.log.clone()), unit.spec));
                 self.unit = Some(unit);
             }
@@ -242,6 +235,18 @@ impl Device {
             return Err(self.msg("backend.noKeyboard"));
         }
         Ok(&mut self.data)
+    }
+
+    /// Replugging the same keyboard keeps the working copy, which may hold edits not yet saved.
+    fn attach(&mut self, id: &str, pid: u16) {
+        let claimed = settings::lock(&self.shared).claim(id, pid);
+        if self.id.as_deref() != Some(id) {
+            self.backed_up.clear();
+            self.checkout(id);
+        }
+        if claimed {
+            let _ = self.save();
+        }
     }
 
     /// Makes `id` the keyboard this device drives and takes its saved data; callers claim it first.
@@ -1394,6 +1399,18 @@ mod tests {
         let s = settings::lock(&shared);
         assert!(s.devices["A"].driver_mode && s.devices["A"].macros.is_empty());
         assert!(!s.devices["B"].driver_mode && s.devices["B"].macros.contains_key(&1));
+    }
+
+    #[test]
+    fn replugging_the_same_keyboard_keeps_unsaved_edits() {
+        let shared: settings::Shared = Default::default();
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.attach("A", 0x0266);
+        d.data_mut().unwrap().driver_mode = true;
+        d.attach("A", 0x0266);
+        assert!(d.data().driver_mode);
+        d.attach("B", 0x0266);
+        assert!(!d.data().driver_mode);
     }
 
     #[test]
