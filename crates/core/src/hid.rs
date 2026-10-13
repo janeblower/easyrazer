@@ -47,8 +47,9 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// An interface whose container cannot be read goes by its PID, as before containers were read.
     pub fn owns(&self, pid: u16, container: Option<&str>) -> bool {
-        pid == self.spec.pid && (self.container.is_none() || self.container.as_deref() == container)
+        pid == self.spec.pid && (self.container.is_none() || container.is_none() || self.container.as_deref() == container)
     }
 }
 
@@ -189,7 +190,13 @@ mod tests {
         let u = &group([(V2, 3, c("A"))])[0];
         assert!(u.owns(V2, Some("A")));
         assert!(!u.owns(V2, Some("B")));
-        assert!(!u.owns(V2, None));
         assert!(!u.owns(0x02A6, Some("A")));
+    }
+
+    #[test]
+    fn an_interface_without_container_belongs_to_its_pid() {
+        let u = &group([(V2, 3, c("A"))])[0];
+        assert!(u.owns(V2, None), "a container that cannot be read must not cost the interface");
+        assert!(!u.owns(0x02A6, None));
     }
 }

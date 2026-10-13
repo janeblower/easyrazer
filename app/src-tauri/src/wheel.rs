@@ -141,7 +141,7 @@ unsafe fn is_ours(unit: &Unit, device: HANDLE) -> bool {
         return false;
     }
     let Ok(path) = std::ffi::CString::new(name) else { return false };
-    unit.container.is_none() || hid::container_id(&path) == unit.container
+    unit.owns(unit.spec.pid, hid::container_id(&path).as_deref())
 }
 
 unsafe extern "system" fn hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
