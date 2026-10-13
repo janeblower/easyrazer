@@ -5,12 +5,13 @@
 //! `WM_INPUT` of a wheel notch before it calls the hook for it (checked on hardware).
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use razer_core::hid::{self, Unit};
 use razer_core::rapid::Media;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::{
     GetRawInputData, GetRawInputDeviceInfoW, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
@@ -29,8 +30,9 @@ const STALE: Duration = Duration::from_millis(100);
 
 struct State {
     hwnd: HWND,
-    /// `VID_1532&PID_xxxx&MI_02`, upper case like the device path.
-    device: String,
+    unit: Unit,
+    /// Whether each Raw Input device is this keyboard's MI_02; resolving one takes CfgMgr calls.
+    ours: HashMap<isize, bool>,
     /// Wheel notches Raw Input saw, oldest first: when, and whether the keyboard sent it.
     seen: VecDeque<(Instant, bool)>,
 }
@@ -45,11 +47,12 @@ pub struct Wheel {
 }
 
 impl Wheel {
-    pub fn start(pid: u16) -> Self {
+    pub fn start(unit: &Unit) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let unit = unit.clone();
         let join = std::thread::spawn(move || {
             let _ = tx.send(unsafe { GetCurrentThreadId() });
-            unsafe { run(format!("VID_1532&PID_{pid:04X}&MI_02")) };
+            unsafe { run(unit) };
         });
         Self { thread: rx.recv().unwrap_or(0), join: Some(join) }
     }
@@ -65,7 +68,7 @@ impl Drop for Wheel {
     }
 }
 
-unsafe fn run(device: String) {
+unsafe fn run(unit: Unit) {
     unsafe {
         let class: Vec<u16> = "EasyRazerWheel\0".encode_utf16().collect();
         let wc = WNDCLASSW { lpfnWndProc: Some(window), lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
@@ -77,7 +80,7 @@ unsafe fn run(device: String) {
         let mut rid = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
         let size = size_of::<RAWINPUTDEVICE>() as u32;
         let hook = if RegisterRawInputDevices(&rid, 1, size) != 0 {
-            STATE.set(Some(State { hwnd, device, seen: VecDeque::new() }));
+            STATE.set(Some(State { hwnd, unit, ours: HashMap::new(), seen: VecDeque::new() }));
             SetWindowsHookExW(WH_MOUSE_LL, Some(hook), std::ptr::null_mut(), 0)
         } else {
             std::ptr::null_mut()
@@ -116,16 +119,29 @@ unsafe fn record(handle: HRAWINPUT) {
         if u32::from(ri.data.mouse.Anonymous.Anonymous.usButtonFlags) & RI_MOUSE_WHEEL == 0 {
             return;
         }
-        let mut name = [0u16; 256];
-        let mut len = name.len() as u32;
-        GetRawInputDeviceInfoW(ri.header.hDevice, RIDI_DEVICENAME, name.as_mut_ptr().cast(), &mut len);
-        let name = String::from_utf16_lossy(&name).to_uppercase();
+        let device = ri.header.hDevice;
         STATE.with_borrow_mut(|s| {
-            if let Some(s) = s {
-                s.seen.push_back((Instant::now(), name.contains(&s.device)));
-            }
+            let Some(s) = s else { return };
+            let ours = *s.ours.entry(device as isize).or_insert_with(|| is_ours(&s.unit, device));
+            s.seen.push_back((Instant::now(), ours));
         });
     }
+}
+
+/// Raw Input names are device interface paths, so they resolve to a container like hidapi's.
+unsafe fn is_ours(unit: &Unit, device: HANDLE) -> bool {
+    let mut name = [0u16; 256];
+    let mut len = name.len() as u32;
+    if unsafe { GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, name.as_mut_ptr().cast(), &mut len) } == u32::MAX {
+        return false;
+    }
+    let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    let name = String::from_utf16_lossy(&name[..end]);
+    if !name.to_uppercase().contains(&format!("VID_1532&PID_{:04X}&MI_02", unit.spec.pid)) {
+        return false;
+    }
+    let Ok(path) = std::ffi::CString::new(name) else { return false };
+    unit.container.is_none() || hid::container_id(&path) == unit.container
 }
 
 unsafe extern "system" fn hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {

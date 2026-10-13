@@ -91,9 +91,11 @@ fn list(api: &HidApi) -> Result<()> {
 }
 
 fn open(api: &HidApi) -> Result<HidTransport> {
-    hid::open_control(api)?
-        .map(|(t, _)| t)
-        .ok_or_else(|| "control interface MI_03 not found".into())
+    Ok(hid::open_control(api, &unit(api)?)?)
+}
+
+fn unit(api: &HidApi) -> Result<hid::Unit> {
+    hid::units(api).into_iter().find(|u| u.spec.pid == PID).ok_or_else(|| "control interface MI_03 not found".into())
 }
 
 fn warn_if_synapse_running() {
@@ -233,8 +235,7 @@ fn actuate(dev: &HidTransport, a: &[String]) -> Result<String> {
 }
 
 fn open_lamps(api: &HidApi) -> Result<HidDevice> {
-    let spec = devices::by_pid(PID).ok_or("device description missing")?;
-    Ok(hid::open_lamp_array(api, spec)?)
+    Ok(hid::open_lamp_array(api, &unit(api)?)?)
 }
 
 fn lamp_bytes(a: &[String]) -> Result<Vec<u8>> {
@@ -245,8 +246,7 @@ fn lamp_auto(api: &HidApi, a: &[String]) -> Result<()> {
     let &[on @ (0 | 1)] = lamp_bytes(a)?.as_slice() else {
         return Err(USAGE.into());
     };
-    let spec = devices::by_pid(PID).ok_or("device description missing")?;
-    Ok(hid::set_autonomous(api, spec, on == 1)?)
+    Ok(hid::set_autonomous(api, &unit(api)?, on == 1)?)
 }
 
 fn lamp_fill(api: &HidApi, a: &[String]) -> Result<()> {

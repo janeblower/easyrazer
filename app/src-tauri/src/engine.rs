@@ -7,11 +7,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use hidapi::{HidApi, HidDevice};
-use razer_core::hid::VID;
+use razer_core::hid::{self, Unit};
 use razer_core::binding::Mouse;
 use razer_core::profiles;
 use razer_core::analog::DepthReport;
-use razer_core::devices::DeviceSpec;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
 use windows_sys::Win32::System::Power::SetSuspendState;
 use windows_sys::Win32::System::Shutdown::LockWorkStation;
@@ -49,14 +48,9 @@ fn lock(e: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
     e.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn open(api: &HidApi, pid: u16, col: &str) -> Result<HidDevice, String> {
-    api.device_list()
-        .find(|d| {
-            d.vendor_id() == VID
-                && d.product_id() == pid
-                && d.interface_number() == 1
-                && d.path().to_string_lossy().to_lowercase().contains(col)
-        })
+fn open(api: &HidApi, unit: &Unit, col: &str) -> Result<HidDevice, String> {
+    hid::interfaces(api, unit)
+        .find(|d| d.interface_number() == 1 && d.path().to_string_lossy().to_lowercase().contains(col))
         .ok_or_else(|| format!("MI_01 {col} not found"))?
         .open_device(api)
         .map_err(|e| e.to_string())
@@ -70,8 +64,8 @@ pub struct MenuListener {
 
 impl MenuListener {
     /// Opens Col04 and reports each Fn+Menu press to `sink` until dropped.
-    pub fn start(api: &HidApi, pid: u16, sink: Sink) -> Result<Self, String> {
-        let dev = open(api, pid, "col04")?;
+    pub fn start(api: &HidApi, unit: &Unit, sink: Sink) -> Result<Self, String> {
+        let dev = open(api, unit, "col04")?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let thread = std::thread::spawn(move || {
@@ -106,10 +100,10 @@ impl Drop for MenuListener {
 
 impl EngineHandle {
     /// Opens the report collections and starts reading; the keyboard only reports once in driver mode.
-    pub fn start(api: &HidApi, d: &DeviceSpec, cfg: Config, sink: Sink) -> Result<Self, String> {
-        let report = &d.analog.depth;
-        let depth = open(api, d.pid, &report.collection)?;
-        let razer = open(api, d.pid, "col04")?;
+    pub fn start(api: &HidApi, unit: &Unit, cfg: Config, sink: Sink) -> Result<Self, String> {
+        let report = &unit.spec.analog.depth;
+        let depth = open(api, unit, &report.collection)?;
+        let razer = open(api, unit, "col04")?;
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
@@ -122,7 +116,7 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, Box::new(feed_depth(report.clone()))), spawn(razer, Box::new(feed_razer))];
-        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(d.pid) })
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit) })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
