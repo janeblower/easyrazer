@@ -267,10 +267,16 @@ impl Device {
         self.id = Some(id.to_string());
     }
 
+    /// Forgets which keyboard this is, so a command already holding it cannot save the old data back.
+    pub fn release(&mut self) {
+        self.id = None;
+        self.data = DeviceData::default();
+    }
+
     /// An empty name goes back to the model's.
     pub fn rename_device(&mut self, name: &str) -> Result<(), String> {
         let name = name.trim();
-        self.data_mut()?.name = (!name.is_empty()).then(|| name.chars().take(40).collect());
+        self.data_mut()?.name = (!name.is_empty()).then(|| name.chars().take(40).collect::<String>().trim_end().to_string());
         self.save()
     }
 
@@ -1610,5 +1616,18 @@ mod tests {
         assert_eq!((s.profile, s.profile_name.as_deref()), (Some(id), Some("Office")));
         assert_eq!(s.model.as_deref(), Some("Razer Huntsman V2 Analog"));
         assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read gives the stored profile");
+    }
+
+    #[test]
+    fn a_released_device_adopts_from_the_settings_not_its_old_copy() {
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, next_profile_id: 7, ..Default::default() });
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.offline("K");
+        assert_eq!(d.data().next_profile_id, 7);
+        settings::lock(&shared).devices.remove("K");
+        d.release();
+        d.adopt("K", 0x0266);
+        assert_eq!(d.data().next_profile_id, 0);
     }
 }

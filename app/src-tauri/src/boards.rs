@@ -216,13 +216,16 @@ impl Boards {
     /// Drops a keyboard that is not plugged in, with its data; nothing re-creates it until it is plugged in again.
     pub fn forget(&self, id: &str, shared: &Shared) -> Result<(), String> {
         let lang = settings::lock(shared).language.clone().unwrap_or_else(|| "en".into());
-        {
-            let mut boards = guard(&self.boards);
-            if boards.get(id).is_some_and(|b| b.connected) {
+        // Held until the settings are cleared, so no ghost board appears in between.
+        let mut boards = guard(&self.boards);
+        if let Some(b) = boards.get(id) {
+            if b.connected {
                 return Err(crate::i18n::t(&lang, "backend.forgetConnected"));
             }
-            boards.remove(id);
+            let Some(mut dev) = try_guard(&b.device) else { return Err(crate::i18n::t(&lang, "backend.busy")) };
+            dev.release();
         }
+        boards.remove(id);
         let mut s = settings::lock(shared);
         s.devices.remove(id);
         if s.last_device.as_deref() == Some(id) {
@@ -393,6 +396,29 @@ mod tests {
     fn a_noserial_id_gets_no_tail() {
         let names = display_names(&[("0266:noserial".into(), 0x0266, None), ("S1".into(), 0x0266, None)]);
         assert_eq!(names[0], razer_core::devices::by_pid(0x0266).unwrap().name);
+        assert_eq!(names[1], format!("{} ·S1", razer_core::devices::by_pid(0x0266).unwrap().name));
+    }
+
+    #[test]
+    fn a_forgotten_device_cannot_write_its_data_back() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).unwrap();
+        boards.forget("K", &shared).unwrap();
+        assert!(guard(&d).rename_device("x").is_err());
+        assert!(!settings::lock(&shared).devices.contains_key("K"));
+    }
+
+    #[test]
+    fn a_busy_board_is_not_forgotten() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).unwrap();
+        let _held = guard(&d);
+        assert!(boards.forget("K", &shared).is_err());
+        assert!(boards.get("K").is_some() && settings::lock(&shared).devices.contains_key("K"));
     }
 
     #[test]
