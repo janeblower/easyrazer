@@ -9,7 +9,7 @@ use razer_core::actuation::{self, Outcome};
 use razer_core::analog::{self, Analog, KeyAssignment};
 use razer_core::binding::{self, Action};
 use razer_core::devices::{self, DeviceSpec};
-use razer_core::hid::{self, HidTransport};
+use razer_core::hid::{self, HidTransport, Unit};
 use razer_core::lighting::{self, EffectInfo, Look, Rgb, Store};
 use razer_core::rapid::{Config, SnapRule, Trigger};
 use razer_core::logged::{Entry, Log, Logged};
@@ -124,6 +124,8 @@ pub struct ProfilesView {
 pub struct Device {
     api: HidApi,
     control: Option<(Control, &'static DeviceSpec)>,
+    /// The keyboard `control` belongs to; its other interfaces are opened from it.
+    unit: Option<Unit>,
     /// Outlives reconnects, so the developer log keeps what led up to one.
     log: Arc<Log>,
     /// Last known Synapse state; assumed running until checked.
@@ -161,6 +163,7 @@ impl Device {
         Ok(Self {
             api,
             control: None,
+            unit: None,
             log: Arc::new(Log::default()),
             synapse: true,
             backed_up: BTreeSet::new(),
@@ -189,9 +192,15 @@ impl Device {
             self.synced = false;
             self.startup = None;
             self.control = None;
+            self.unit = None;
             let _ = self.api.refresh_devices();
-            self.control = hid::open_control(&self.api).ok().flatten().map(|(t, d)| (Logged::new(t, self.log.clone()), d));
-            if let Some((_, d)) = &self.control {
+            if let Some(unit) = hid::units(&self.api).into_iter().next()
+                && let Ok(t) = hid::open_control(&self.api, &unit)
+            {
+                self.control = Some((Logged::new(t, self.log.clone()), unit.spec));
+                self.unit = Some(unit);
+            }
+            if let (Some((_, d)), Some(unit)) = (&self.control, &self.unit) {
                 self.last_spec = Some(*d);
                 if self.settings.switch_model(d.pid) {
                     self.backed_up.clear();
@@ -199,7 +208,7 @@ impl Device {
                 }
                 if let Some(sink) = &self.sink {
                     // Fn+Menu is rebound only once someone listens, or it would do nothing.
-                    self.menu = MenuListener::start(&self.api, d.pid, sink.clone()).ok();
+                    self.menu = MenuListener::start(&self.api, unit, sink.clone()).ok();
                 }
                 if !self.synapse {
                     self.reload();
@@ -863,7 +872,8 @@ impl Device {
         }
         self.writable()?;
         let d = self.keyboard()?.1;
-        let r = hid::set_autonomous(&self.api, d, true);
+        let unit = self.unit.as_ref().ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let r = hid::set_autonomous(&self.api, unit, true);
         self.log.note("LampArray autonomous", &[1], r.as_ref().err().map(ToString::to_string));
         r.map_err(|e| e.to_string())?;
         if let (Some((t, _)), Some(look)) = (&self.control, self.settings.loaded_profile().and_then(|p| p.data.look.as_ref())) {
@@ -924,9 +934,9 @@ impl Device {
             return;
         }
         let Some(sink) = self.sink.clone() else { return };
-        let (t, d) = self.control.as_ref().unwrap();
+        let (t, _) = self.control.as_ref().unwrap();
         // Readers first: if they cannot open, the keyboard never leaves hardware mode.
-        let started = EngineHandle::start(&self.api, d, cfg, sink)
+        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink)
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
             Ok(h) => {
@@ -1149,10 +1159,11 @@ fn engine_config(
 
 /// Last resort when the process is going down: a keyboard left in driver mode types nothing.
 pub fn release_keyboard() {
-    if let Ok(api) = HidApi::new()
-        && let Ok(Some((t, _))) = hid::open_control(&api)
-    {
-        let _ = control::set_hardware_mode(&t);
+    let Ok(api) = HidApi::new() else { return };
+    for unit in hid::units(&api) {
+        if let Ok(t) = hid::open_control(&api, &unit) {
+            let _ = control::set_hardware_mode(&t);
+        }
     }
 }
 
@@ -1321,7 +1332,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, unit: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }

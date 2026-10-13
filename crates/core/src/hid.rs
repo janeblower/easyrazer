@@ -38,19 +38,47 @@ fn io(e: hidapi::HidError) -> Error {
     Error::Io(e.to_string())
 }
 
-/// Opens the control interface of the first described keyboard; `Ok(None)` when none is connected.
-pub fn open_control(api: &HidApi) -> Result<Option<(HidTransport, &'static DeviceSpec)>, Error> {
-    for info in api.device_list().filter(|d| d.vendor_id() == VID) {
-        let Some(spec) = devices::by_pid(info.product_id()) else {
-            continue;
-        };
-        if info.interface_number() != spec.control_interface {
+/// The interfaces of one physical keyboard.
+#[derive(Clone, Debug)]
+pub struct Unit {
+    pub spec: &'static DeviceSpec,
+    /// `None` where Windows gave no container: the unit then takes every interface of its PID.
+    pub container: Option<String>,
+}
+
+impl Unit {
+    /// An interface whose container cannot be read goes by its PID, as before containers were read.
+    pub fn owns(&self, pid: u16, container: Option<&str>) -> bool {
+        pid == self.spec.pid && (self.container.is_none() || container.is_none() || self.container.as_deref() == container)
+    }
+}
+
+/// Keyboards among `(pid, interface, container)` entries, in order of their control interface.
+pub fn group(ifaces: impl IntoIterator<Item = (u16, i32, Option<String>)>) -> Vec<Unit> {
+    let mut units: Vec<Unit> = Vec::new();
+    for (pid, interface, container) in ifaces {
+        let Some(spec) = devices::by_pid(pid) else { continue };
+        if interface != spec.control_interface || units.iter().any(|u| u.spec.pid == pid && u.container == container) {
             continue;
         }
-        let dev = info.open_device(api).map_err(io)?;
-        return Ok(Some((HidTransport { dev, tid: spec.tid }, spec)));
+        units.push(Unit { spec, container });
     }
-    Ok(None)
+    units
+}
+
+pub fn units(api: &HidApi) -> Vec<Unit> {
+    group(api.device_list().filter(|d| d.vendor_id() == VID).map(|d| (d.product_id(), d.interface_number(), container_id(d.path()))))
+}
+
+pub fn interfaces<'a>(api: &'a HidApi, unit: &'a Unit) -> impl Iterator<Item = &'a hidapi::DeviceInfo> + 'a {
+    api.device_list().filter(move |d| d.vendor_id() == VID && unit.owns(d.product_id(), container_id(d.path()).as_deref()))
+}
+
+pub fn open_control(api: &HidApi, unit: &Unit) -> Result<HidTransport, Error> {
+    let info = interfaces(api, unit)
+        .find(|d| d.interface_number() == unit.spec.control_interface)
+        .ok_or_else(|| Error::Io("control interface not found".into()))?;
+    Ok(HidTransport { dev: info.open_device(api).map_err(io)?, tid: unit.spec.tid })
 }
 
 /// PID of a connected Razer keyboard we have no description for.
@@ -67,15 +95,108 @@ pub fn unsupported_keyboard(api: &HidApi) -> Option<u16> {
 
 /// Hands the lamps back to the firmware (`on`) or to the host. Going from host to firmware
 /// restarts the factory spectrum, so callers re-send their effect afterwards.
-pub fn set_autonomous(api: &HidApi, d: &DeviceSpec, on: bool) -> Result<(), Error> {
+pub fn set_autonomous(api: &HidApi, unit: &Unit, on: bool) -> Result<(), Error> {
+    let d = unit.spec;
     let report = d.lamp_array.as_ref().ok_or_else(|| Error::Io(format!("{}: no LampArray", d.name)))?.control_report;
-    open_lamp_array(api, d)?.send_feature_report(&[report, on as u8]).map_err(io)
+    open_lamp_array(api, unit)?.send_feature_report(&[report, on as u8]).map_err(io)
 }
 
-pub fn open_lamp_array(api: &HidApi, d: &DeviceSpec) -> Result<HidDevice, Error> {
-    let info = api
-        .device_list()
-        .find(|i| i.vendor_id() == d.vid && i.product_id() == d.pid && i.usage_page() == USAGE_PAGE_LAMP_ARRAY)
+pub fn open_lamp_array(api: &HidApi, unit: &Unit) -> Result<HidDevice, Error> {
+    let info = interfaces(api, unit)
+        .find(|i| i.usage_page() == USAGE_PAGE_LAMP_ARRAY)
         .ok_or_else(|| Error::Io("LampArray collection not found".into()))?;
     info.open_device(api).map_err(io)
+}
+
+/// The ContainerId Windows gives every interface of one USB device; `None` where it cannot be read.
+#[cfg(windows)]
+pub fn container_id(path: &std::ffi::CStr) -> Option<String> {
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_Get_DevNode_PropertyW, CM_Get_Device_Interface_PropertyW, CM_LOCATE_DEVNODE_NORMAL, CM_Locate_DevNodeW, CR_SUCCESS,
+    };
+    use windows_sys::Win32::Devices::Properties::{DEVPKEY_Device_ContainerId, DEVPKEY_Device_InstanceId};
+    use windows_sys::core::GUID;
+
+    let path: Vec<u16> = path.to_str().ok()?.encode_utf16().chain([0]).collect();
+    unsafe {
+        let mut ty = 0;
+        let mut id = [0u16; 512];
+        let mut size = size_of_val(&id) as u32;
+        if CM_Get_Device_Interface_PropertyW(path.as_ptr(), &DEVPKEY_Device_InstanceId, &mut ty, id.as_mut_ptr().cast(), &mut size, 0) != CR_SUCCESS {
+            return None;
+        }
+        let mut node = 0;
+        if CM_Locate_DevNodeW(&mut node, id.as_ptr(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS {
+            return None;
+        }
+        let mut g: GUID = std::mem::zeroed();
+        let mut size = size_of::<GUID>() as u32;
+        if CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_ContainerId, &mut ty, (&raw mut g).cast(), &mut size, 0) != CR_SUCCESS {
+            return None;
+        }
+        let tail: String = g.data4.iter().map(|b| format!("{b:02X}")).collect();
+        Some(format!("{:08X}-{:04X}-{:04X}-{}-{}", g.data1, g.data2, g.data3, &tail[..4], &tail[4..]))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn container_id(_path: &std::ffi::CStr) -> Option<String> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const V2: u16 = 0x0266;
+
+    fn c(s: &str) -> Option<String> {
+        Some(s.into())
+    }
+
+    #[test]
+    fn interfaces_of_one_keyboard_are_one_unit() {
+        let units = group([(V2, 1, c("A")), (V2, 2, c("A")), (V2, 3, c("A")), (V2, 4, c("A"))]);
+        assert_eq!(units.len(), 1);
+        assert_eq!((units[0].spec.pid, units[0].container.as_deref()), (V2, Some("A")));
+    }
+
+    #[test]
+    fn same_pid_in_two_containers_is_two_units() {
+        let units = group([(V2, 3, c("A")), (V2, 1, c("B")), (V2, 3, c("B")), (V2, 1, c("A"))]);
+        let found: Vec<_> = units.iter().map(|u| u.container.as_deref()).collect();
+        assert_eq!(found, [Some("A"), Some("B")]);
+    }
+
+    #[test]
+    fn a_unit_needs_its_control_interface() {
+        assert!(group([(V2, 1, c("A")), (V2, 2, c("A"))]).is_empty());
+    }
+
+    #[test]
+    fn unknown_pids_are_skipped() {
+        assert!(group([(0xFFFF, 3, c("A"))]).is_empty());
+    }
+
+    #[test]
+    fn group_without_container_keeps_the_pid() {
+        let units = group([(V2, 3, None), (V2, 1, None)]);
+        assert_eq!(units.len(), 1);
+        assert!(units[0].owns(V2, None) && units[0].owns(V2, Some("anything")));
+    }
+
+    #[test]
+    fn owns_only_its_container() {
+        let u = &group([(V2, 3, c("A"))])[0];
+        assert!(u.owns(V2, Some("A")));
+        assert!(!u.owns(V2, Some("B")));
+        assert!(!u.owns(0x02A6, Some("A")));
+    }
+
+    #[test]
+    fn an_interface_without_container_belongs_to_its_pid() {
+        let u = &group([(V2, 3, c("A"))])[0];
+        assert!(u.owns(V2, None), "a container that cannot be read must not cost the interface");
+        assert!(!u.owns(0x02A6, None));
+    }
 }
