@@ -20,8 +20,8 @@ use windows_sys::Win32::UI::Input::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW, PostThreadMessageW, RI_MOUSE_WHEEL, RegisterClassW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WHEEL_DELTA, WM_INPUT, WM_MOUSEWHEEL, WM_QUIT, WNDCLASSW,
+    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PM_REMOVE, PeekMessageW, PostThreadMessageW, RI_MOUSE_WHEEL, RegisterClassW,
+    SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WHEEL_DELTA, WM_INPUT, WM_MOUSEWHEEL, WM_QUIT, WM_USER, WNDCLASSW,
 };
 
 use crate::engine;
@@ -95,6 +95,10 @@ impl Wheel {
         if first {
             let (tx, rx) = std::sync::mpsc::channel();
             let join = std::thread::spawn(move || {
+                // A thread has no message queue until it first asks for one; without it a WM_QUIT
+                // posted before `run` gets there fails and the join in Drop would never return.
+                let mut msg: MSG = unsafe { std::mem::zeroed() };
+                unsafe { PeekMessageW(&mut msg, std::ptr::null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };
                 let _ = tx.send(unsafe { GetCurrentThreadId() });
                 unsafe { run() };
             });
@@ -109,7 +113,8 @@ impl Drop for Wheel {
         let mut thread = THREAD.lock().unwrap_or_else(|e| e.into_inner());
         let last = registry().remove(self.id);
         if last && let Some((tid, join)) = thread.take() {
-            // Posted before the loop starts it stays queued, so the loop still sees it.
+            // Posted before the loop starts it stays queued, so the loop still sees it. It can only
+            // fail once the thread has exited, which the join below then returns from at once.
             unsafe { PostThreadMessageW(tid, WM_QUIT, 0, 0) };
             let _ = join.join();
         }
@@ -236,6 +241,35 @@ mod tests {
 
     fn unit(container: &str) -> Unit {
         Unit { spec: razer_core::devices::by_pid(0x0266).unwrap(), container: Some(container.into()) }
+    }
+
+    /// Wheel::start and drop share one global thread, so these tests must not overlap.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn dropping_right_after_start_does_not_hang() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                drop(Wheel::start(&unit("A")));
+            }
+            let _ = tx.send(());
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(20)).is_ok(), "an early drop never stopped the thread");
+    }
+
+    #[test]
+    fn units_share_one_thread() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let a = Wheel::start(&unit("A"));
+        let tid = THREAD.lock().unwrap().as_ref().map(|(t, _)| *t);
+        let b = Wheel::start(&unit("B"));
+        assert_eq!(THREAD.lock().unwrap().as_ref().map(|(t, _)| *t), tid);
+        drop(a);
+        assert!(THREAD.lock().unwrap().is_some(), "B still needs the thread");
+        drop(b);
+        assert!(THREAD.lock().unwrap().is_none());
     }
 
     #[test]
