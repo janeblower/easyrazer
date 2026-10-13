@@ -6,7 +6,7 @@ use razer_core::binding::{self, Action};
 use razer_core::devices;
 use razer_core::layout;
 use razer_core::lighting::Rgb;
-use razer_core::macros::Event;
+use razer_core::macros::{self, Event};
 use razer_core::profiles::Snapshot;
 use serde::{Deserialize, Serialize};
 
@@ -80,10 +80,14 @@ pub fn export(d: &DeviceData, profile: u32) -> Option<ProfileFile> {
 
 pub fn parse(text: &str) -> Result<ProfileFile, Refused> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| Refused::Broken(e.to_string()))?;
-    if v.get("format").and_then(|f| f.as_u64()) != Some(FORMAT.into()) {
+    if v.get("format").and_then(|f| f.as_u64()).is_some_and(|f| f > FORMAT.into()) {
         return Err(Refused::Format);
     }
-    serde_json::from_value(v).map_err(|e| Refused::Broken(e.to_string()))
+    let f: ProfileFile = serde_json::from_value(v).map_err(|e| Refused::Broken(e.to_string()))?;
+    if f.format != FORMAT {
+        return Err(Refused::Broken(format!("format {}", f.format)));
+    }
+    Ok(f)
 }
 
 /// Changes `d` only once the whole profile is converted.
@@ -92,6 +96,10 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
     let source = u16::from_str_radix(&f.pid, 16).ok().ok_or_else(unknown)?;
     let from = devices::by_pid(source).ok_or_else(unknown)?;
     let to = devices::by_pid(d.pid).ok_or_else(unknown)?;
+
+    if f.macros.values().any(|m| macros::encode(&m.events).is_none()) {
+        return Err(Refused::Broken("a macro has a key the keyboard cannot play".into()));
+    }
 
     let mut library = d.macros.clone();
     let mut ids = BTreeMap::new();
@@ -116,16 +124,16 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
     let Exported { name, mut data, mut rapid, mut snap_tap, mut custom } = f.profile;
 
     let rescale = source != d.pid;
-    let convert = |t: u8| to.analog.threshold(from.analog.mm(t).clamp(to.analog.range[0], to.analog.range[1]));
+    let [lo, hi] = to.analog.range.map(|mm| to.analog.threshold(mm));
+    // The same scale needs no round trip through mm, which could shift in-range values.
+    let convert = |t: u8| if rescale { to.analog.threshold(from.analog.mm(t).clamp(to.analog.range[0], to.analog.range[1])) } else { t.clamp(lo, hi) };
     for layer in [&mut data.normal, &mut data.hypershift] {
         layer.retain(|&k, _| keep(k));
         for (&k, r) in layer.iter_mut() {
-            if rescale {
-                r.thr_low = convert(r.thr_low);
-                // Opaque to the app, which writes only thr_low; 0 means unset.
-                if r.thr_high != 0 {
-                    r.thr_high = convert(r.thr_high);
-                }
+            r.thr_low = convert(r.thr_low);
+            // Opaque to the app, which writes only thr_low; 0 means unset.
+            if r.thr_high != 0 {
+                r.thr_high = convert(r.thr_high);
             }
             if let Some(Action::Macro { id, mode, count }) = binding::decode(r.fn_id, &r.fn_data) {
                 let action = ids.get(&id).map(|&id| Action::Macro { id, mode, count }).unwrap_or_else(|| binding::factory(k));
@@ -212,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn a_binding_to_a_macro_not_in_the_file_is_dropped() {
+    fn a_binding_to_a_macro_not_in_the_file_falls_back_to_factory() {
         let mut src = board(0x0266);
         let p = with_profile(&mut src, "Game", &[(1, key(100, play(0x9999)))], &[]);
         let mut f = export(&src, p).unwrap();
@@ -222,6 +230,42 @@ mod tests {
         let got = import(&mut dst, f).unwrap();
         let r = &dst.profile(got.id).unwrap().data.normal[&1];
         assert_eq!(binding::decode(r.fn_id, &r.fn_data), Some(binding::factory(1)), "the key keeps its press point and falls back to its factory binding");
+    }
+
+    #[test]
+    fn a_macro_that_cannot_be_encoded_refuses_the_import() {
+        let mut src = board(0x0266);
+        src.macros.insert(0x8000, mac("m"));
+        let p = with_profile(&mut src, "Game", &[(1, key(100, play(0x8000)))], &[]);
+        let mut f = export(&src, p).unwrap();
+        f.macros.get_mut(&0x8000).unwrap().events = vec![Event::Key { key: 255, down: true }];
+        let mut dst = board(0x0266);
+        let before = dst.clone();
+        assert!(matches!(import(&mut dst, f), Err(Refused::Broken(_))));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
+    fn only_a_newer_numeric_format_is_a_format_refusal() {
+        let file = |format: &str| format!(r#"{{"format":{format},"pid":"0266","model":"x","profile":{{"name":"a","data":{{"normal":{{}},"hypershift":{{}},"look":null}},"rapid":{{}},"snap_tap":{{}},"custom":null}},"macros":{{}}}}"#);
+        assert!(matches!(parse(&file("2")), Err(Refused::Format)));
+        for bad in ["null", r#""1""#, "0", "true"] {
+            assert!(matches!(parse(&file(bad)), Err(Refused::Broken(_))), "{bad}");
+        }
+        assert!(parse(&file("1")).is_ok());
+    }
+
+    #[test]
+    fn a_threshold_outside_the_range_is_clamped_on_the_same_model() {
+        let spec = devices::by_pid(0x02E6).unwrap();
+        let [lo, hi] = spec.analog.range.map(|mm| spec.analog.threshold(mm));
+        let inside = (lo + hi) / 2;
+        let mut src = board(0x02E6);
+        let p = with_profile(&mut src, "Game", &[(1, key(255, None)), (2, key(0, None)), (3, key(inside, None))], &[]);
+        let mut dst = board(0x02E6);
+        let got = import(&mut dst, export(&src, p).unwrap()).unwrap();
+        let n = &dst.profile(got.id).unwrap().data.normal;
+        assert_eq!((n[&1].thr_low, n[&2].thr_low, n[&3].thr_low), (hi, lo, inside));
     }
 
     #[test]
