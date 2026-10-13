@@ -332,8 +332,7 @@ async function mockBackend() {
         const view = replies.profiles as { profiles: unknown[]; loaded: number };
         const id = view.profiles.length + 1;
         view.profiles.push({ id, name: "Imported", slot: null, unsaved: true });
-        view.loaded = id;
-        return { view, name: "Imported", dropped: 2 };
+        return { view: structuredClone(view), name: "Imported", dropped: 2 };
       }
       if (cmd === "app_settings") return { ...(replies.app_settings as object), ...devSettings };
       return cmd in devReplies ? devReplies[cmd](args as Record<string, unknown>) : replies[cmd];
