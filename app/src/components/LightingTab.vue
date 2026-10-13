@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
 import { dev, log, nameOf } from "../dev";
-import { call } from "../keyboard";
+import { call, keyboard, ours } from "../keyboard";
 import { hex } from "../devConsole";
 import { useConfirmWrite } from "../confirmWrite";
 import { trackUnapplied } from "../unapplied";
@@ -269,7 +269,9 @@ watch(draft, (now, before) => {
 async function load() {
   try {
     if (layout.value.length === 0) layout.value = await invoke<KeyView[]>("lighting_layout");
+    const id = keyboard.value;
     const s = await call<LightingState>("lighting_state");
+    if (!ours(id)) return;
     effects.value = s.effects;
     custom.value = s.custom;
     applied.value = s.applied;
@@ -293,7 +295,9 @@ async function send(command: "lighting_apply" | "lighting_write", done: string) 
   busy.value = true;
   try {
     const look = norm(draft.value);
+    const id = keyboard.value;
     await call(command, { look });
+    if (!ours(id)) return;
     applied.value = look;
     if (command === "lighting_write") saved.value = look;
     else if (look?.effect.colors) custom.value = look.effect.colors;

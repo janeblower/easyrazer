@@ -901,7 +901,7 @@ onUnmounted(() => {
             <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
-        <LightingTab v-else-if="tab === 'lighting'" :status="status" />
+        <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
         <SettingsTab v-else />
         <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
         <ConfirmWrite
