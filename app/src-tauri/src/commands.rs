@@ -504,6 +504,27 @@ pub async fn write_profile(state: State<'_, AppState>, id: String, profile: u32)
     Ok(d.profiles_view())
 }
 
+#[derive(Serialize)]
+pub struct ImportView {
+    view: ProfilesView,
+    name: String,
+    dropped: usize,
+}
+
+#[tauri::command]
+pub async fn export_profile(state: State<'_, AppState>, id: String, profile: u32, path: String) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).export_profile(profile, path.as_ref())
+}
+
+#[tauri::command]
+pub async fn import_profile(state: State<'_, AppState>, id: String, path: String) -> Result<ImportView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    let got = d.import_profile(path.as_ref())?;
+    Ok(ImportView { view: d.profiles_view(), name: got.name, dropped: got.dropped })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

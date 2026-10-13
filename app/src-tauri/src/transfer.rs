@@ -1,0 +1,281 @@
+//! Profile files: one profile with the macros it plays, portable between keyboards.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use razer_core::binding::{self, Action};
+use razer_core::devices;
+use razer_core::layout;
+use razer_core::lighting::{self, Rgb};
+use razer_core::macros::Event;
+use razer_core::profiles::Snapshot;
+use serde::{Deserialize, Serialize};
+
+use crate::device::next_macro_id;
+use crate::profiles;
+use crate::settings::{DeviceData, Macro, Profile, Rapid, SnapTap};
+
+const FORMAT: u32 = 1;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProfileFile {
+    pub format: u32,
+    /// Hex, the way Windows shows it.
+    pub pid: String,
+    pub model: String,
+    pub profile: Exported,
+    pub macros: BTreeMap<u16, FileMacro>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Exported {
+    pub name: String,
+    pub data: Snapshot,
+    pub rapid: BTreeMap<u8, Rapid>,
+    pub snap_tap: SnapTap,
+    pub custom: Option<BTreeMap<u8, Rgb>>,
+}
+
+/// A macro as the file holds it: what is flash state on one keyboard does not travel.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileMacro {
+    pub name: String,
+    pub events: Vec<Event>,
+}
+
+#[derive(Debug)]
+pub enum Refused {
+    Format,
+    Broken(String),
+    UnknownModel(String),
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct Imported {
+    pub id: u32,
+    pub name: String,
+    /// Keys the target keyboard does not have, counted once across everything the profile keeps per key.
+    pub dropped: usize,
+}
+
+fn macro_ids(s: &Snapshot) -> impl Iterator<Item = u16> + '_ {
+    [&s.normal, &s.hypershift].into_iter().flat_map(|l| l.values()).filter_map(|r| match binding::decode(r.fn_id, &r.fn_data) {
+        Some(Action::Macro { id, .. }) => Some(id),
+        _ => None,
+    })
+}
+
+pub fn export(d: &DeviceData, profile: u32) -> Option<ProfileFile> {
+    let p = d.profile(profile)?;
+    let macros = macro_ids(&p.data)
+        .filter_map(|id| d.macros.get(&id).map(|m| (id, FileMacro { name: m.name.clone(), events: m.events.clone() })))
+        .collect();
+    Some(ProfileFile {
+        format: FORMAT,
+        pid: format!("{:04X}", d.pid),
+        model: devices::by_pid(d.pid).map(|s| s.name.clone()).unwrap_or_default(),
+        profile: Exported { name: p.name.clone(), data: p.data.clone(), rapid: p.rapid.clone(), snap_tap: p.snap_tap.clone(), custom: p.custom.clone() },
+        macros,
+    })
+}
+
+pub fn parse(text: &str) -> Result<ProfileFile, Refused> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| Refused::Broken(e.to_string()))?;
+    if v.get("format").and_then(|f| f.as_u64()) != Some(FORMAT.into()) {
+        return Err(Refused::Format);
+    }
+    serde_json::from_value(v).map_err(|e| Refused::Broken(e.to_string()))
+}
+
+/// Changes `d` only once the whole profile is converted.
+pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
+    let unknown = || Refused::UnknownModel(f.pid.clone());
+    let source = u16::from_str_radix(&f.pid, 16).ok().ok_or_else(unknown)?;
+    let from = devices::by_pid(source).ok_or_else(unknown)?;
+    let to = devices::by_pid(d.pid).ok_or_else(unknown)?;
+
+    let mut library = d.macros.clone();
+    let mut ids = BTreeMap::new();
+    for (old, m) in f.macros {
+        let new = next_macro_id(&library);
+        library.insert(new, Macro { name: m.name, events: m.events, written: false });
+        ids.insert(old, new);
+    }
+
+    let keys: BTreeSet<u8> = layout::keys(to.layout).into_iter().filter(|k| k.editable).map(|k| k.key).collect();
+    let mut dropped = BTreeSet::new();
+    let mut keep = |k: u8| {
+        let has = keys.contains(&k);
+        if !has {
+            dropped.insert(k);
+        }
+        has
+    };
+    let Exported { name, mut data, mut rapid, mut snap_tap, mut custom } = f.profile;
+
+    let rescale = source != d.pid;
+    let convert = |t: u8| to.analog.threshold(from.analog.mm(t).clamp(to.analog.range[0], to.analog.range[1]));
+    for layer in [&mut data.normal, &mut data.hypershift] {
+        layer.retain(|&k, _| keep(k));
+        for r in layer.values_mut() {
+            if rescale {
+                (r.thr_low, r.thr_high) = (convert(r.thr_low), convert(r.thr_high));
+            }
+            if let Some(Action::Macro { id, mode, count }) = binding::decode(r.fn_id, &r.fn_data) {
+                let action = ids.get(&id).map(|&id| Action::Macro { id, mode, count });
+                (r.fn_id, r.fn_data) = action.and_then(binding::encode).unwrap_or((0, Vec::new()));
+            }
+        }
+    }
+    rapid.retain(|&k, _| keep(k));
+    for g in &mut snap_tap.groups {
+        g.keys.retain(|&k| keep(k));
+    }
+    snap_tap.groups.retain(|g| g.keys.len() >= 2);
+    if let Some(c) = &mut custom {
+        c.retain(|&k, _| keep(k));
+    }
+    if data.look.as_ref().is_some_and(|l| l.effect.name != lighting::CUSTOM && !to.lighting.effects.contains(&l.effect.name)) {
+        data.look = None;
+    }
+
+    let name = profiles::free_name(d, &name, |n| if n == 1 { String::new() } else { format!(" ({n})") });
+    let id = d.new_profile_id();
+    d.profiles.push(Profile { id, name: name.clone(), slot: None, data, rapid, snap_tap, custom });
+    d.macros = library;
+    Ok(Imported { id, name, dropped: dropped.len() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use razer_core::binding::{self, Action, MacroMode};
+    use razer_core::devices;
+    use razer_core::layout::{self, Board};
+    use razer_core::lighting::{Effect, Look};
+    use razer_core::profiles::RawKey;
+
+    use crate::settings::{DeviceData, Macro, Profile, Rapid};
+
+    fn key(thr: u8, a: Option<Action>) -> RawKey {
+        let (fn_id, fn_data) = a.and_then(binding::encode).unwrap_or((0, Vec::new()));
+        RawKey { thr_low: thr, thr_high: thr, fn_id, fn_data }
+    }
+    fn play(id: u16) -> Option<Action> { Some(Action::Macro { id, mode: MacroMode::Times, count: 1 }) }
+    fn board(pid: u16) -> DeviceData { DeviceData { pid, ..Default::default() } }
+    fn with_profile(d: &mut DeviceData, name: &str, normal: &[(u8, RawKey)], hs: &[(u8, RawKey)]) -> u32 {
+        let id = d.new_profile_id();
+        let data = Snapshot { normal: normal.iter().cloned().collect(), hypershift: hs.iter().cloned().collect(), look: None };
+        d.profiles.push(Profile { id, name: name.into(), data, ..Default::default() });
+        id
+    }
+    fn mac(name: &str) -> Macro { Macro { name: name.into(), events: Vec::new(), written: true } }
+
+    #[test]
+    fn export_takes_the_profile_and_only_its_macros() {
+        let mut d = board(0x0266);
+        d.macros.insert(0x8000, mac("used"));
+        d.macros.insert(0x8001, mac("other"));
+        let p = with_profile(&mut d, "Game", &[(1, key(100, play(0x8000)))], &[]);
+        let f = export(&d, p).unwrap();
+        assert_eq!((f.format, f.pid.as_str(), f.profile.name.as_str()), (1, "0266", "Game"));
+        assert_eq!(f.macros.keys().copied().collect::<Vec<_>>(), [0x8000]);
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(!json.contains("\"slot\"") && !json.contains("\"written\""));
+    }
+
+    #[test]
+    fn import_renumbers_macros_and_rewrites_bindings() {
+        let mut src = board(0x0266);
+        src.macros.insert(0x8000, mac("m"));
+        let p = with_profile(&mut src, "Game", &[(1, key(100, play(0x8000)))], &[(2, key(100, play(0x8000)))]);
+        let f = export(&src, p).unwrap();
+        let mut dst = board(0x0266);
+        dst.macros.insert(0x8000, mac("theirs"));
+        let got = import(&mut dst, f).unwrap();
+        let new_id = *dst.macros.keys().max().unwrap();
+        assert_ne!(new_id, 0x8000);
+        assert!(!dst.macros[&new_id].written);
+        let prof = dst.profile(got.id).unwrap();
+        for layer in [&prof.data.normal, &prof.data.hypershift] {
+            let a = layer.values().next().map(|r| binding::decode(r.fn_id, &r.fn_data)).unwrap();
+            assert_eq!(a, play(new_id));
+        }
+        assert_eq!(dst.macros[&0x8000].name, "theirs");
+    }
+
+    #[test]
+    fn a_binding_to_a_macro_not_in_the_file_is_dropped() {
+        let mut src = board(0x0266);
+        let p = with_profile(&mut src, "Game", &[(1, key(100, play(0x9999)))], &[]);
+        let mut f = export(&src, p).unwrap();
+        f.macros.clear();
+        let mut dst = board(0x0266);
+        dst.macros.insert(0x9999, mac("unrelated"));
+        let got = import(&mut dst, f).unwrap();
+        let r = &dst.profile(got.id).unwrap().data.normal[&1];
+        assert_eq!(binding::decode(r.fn_id, &r.fn_data), Some(Action::Disabled), "the key keeps its press point but loses the stale macro");
+    }
+
+    #[test]
+    fn import_takes_a_free_name_and_never_loads() {
+        let mut d = board(0x0266);
+        let p = with_profile(&mut d, "Game", &[], &[]);
+        d.loaded = Some(p);
+        let f = export(&d, p).unwrap();
+        let got = import(&mut d, f).unwrap();
+        assert_eq!(got.name, "Game (2)");
+        assert_eq!(d.loaded, Some(p));
+        assert_eq!(d.profile(got.id).unwrap().slot, None);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn import_from_another_model_maps_and_clamps() {
+        // The V3 Pro Low-profile TKL: no numpad, another scale, press points only up to 2.8 mm.
+        const TARGET: u16 = 0x02E6;
+        let fw = |label: &str| layout::keys(Board::Full).into_iter().find(|k| k.label == label).unwrap().key;
+        let (KEPT, MISSING) = (fw("Esc"), fw("Num"));
+        let src_spec = devices::by_pid(0x0266).unwrap();
+        let dst_spec = devices::by_pid(TARGET).unwrap();
+        let mut src = board(0x0266);
+        let deep = src_spec.analog.threshold(src_spec.analog.range[1]);
+        let p = with_profile(&mut src, "Game", &[(KEPT, key(deep, None)), (MISSING, key(100, None))], &[(MISSING, key(100, None))]);
+        src.profiles[0].rapid.insert(MISSING, Rapid { enabled: true, press: 0.3, release: 0.3 });
+        src.profiles[0].custom = Some([(MISSING, [1, 2, 3]), (KEPT, [4, 5, 6])].into());
+        let f = export(&src, p).unwrap();
+        let mut dst = board(TARGET);
+        let got = import(&mut dst, f).unwrap();
+        let prof = dst.profile(got.id).unwrap();
+        assert!(!prof.data.normal.contains_key(&MISSING) && !prof.data.hypershift.contains_key(&MISSING));
+        assert!(!prof.rapid.contains_key(&MISSING));
+        assert_eq!(prof.custom.as_ref().unwrap().keys().copied().collect::<Vec<_>>(), [KEPT]);
+        let mm = dst_spec.analog.mm(prof.data.normal[&KEPT].thr_low);
+        assert!(mm <= dst_spec.analog.range[1] + 0.05, "clamped to the target's range");
+        assert_eq!(got.dropped, 1);
+    }
+
+    #[test]
+    fn an_effect_the_target_lacks_is_dropped() {
+        let look = |name: &str| Some(Look { effect: Effect { name: name.into(), ..Default::default() }, brightness: 100 });
+        let kept = devices::by_pid(0x02E6).unwrap().lighting.effects[0].clone();
+        for (name, survives) in [(kept.as_str(), true), ("no-such-effect", false)] {
+            let mut src = board(0x0266);
+            let p = with_profile(&mut src, "Game", &[], &[]);
+            src.profiles[0].data.look = look(name);
+            let mut dst = board(0x02E6);
+            let got = import(&mut dst, export(&src, p).unwrap()).unwrap();
+            assert_eq!(dst.profile(got.id).unwrap().data.look.is_some(), survives, "{name}");
+        }
+    }
+
+    #[test]
+    fn bad_files_are_refused() {
+        assert!(matches!(parse("not json"), Err(Refused::Broken(_))));
+        assert!(matches!(parse(r#"{"format":2,"pid":"0266","model":"x","profile":{"name":"a","data":{"normal":{},"hypershift":{},"look":null},"rapid":{},"snap_tap":{},"custom":null},"macros":{}}"#), Err(Refused::Format)));
+        let mut d = board(0x0266);
+        let before = d.clone();
+        let f = parse(r#"{"format":1,"pid":"FFFF","model":"x","profile":{"name":"a","data":{"normal":{},"hypershift":{},"look":null},"rapid":{},"snap_tap":{},"custom":null},"macros":{}}"#).unwrap();
+        assert!(matches!(import(&mut d, f), Err(Refused::UnknownModel(_))));
+        assert_eq!(d, before, "a refused import changes nothing");
+    }
+}

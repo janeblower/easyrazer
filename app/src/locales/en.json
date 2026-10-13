@@ -309,6 +309,10 @@
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
     "noKeyboard": "No supported Razer keyboard found",
+    "importFormat": "This file is from a newer EasyRazer",
+    "importBroken": "Not a profile file: {error}",
+    "importModel": "Unknown keyboard model {pid}",
+    "noProfile": "No such profile",
     "forgetConnected": "Unplug the keyboard first",
     "busy": "The keyboard is busy, try again",
     "macroUnwritten": "The macro is not in the keyboard: write it in Macros, or write the binding",

@@ -1,6 +1,7 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -27,6 +28,7 @@ use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
+use crate::transfer;
 use crate::settings::{self, DeviceData, Macro, Rapid, Shared, SnapTap};
 
 pub type Control = Logged<HidTransport>;
@@ -665,6 +667,26 @@ impl Device {
         self.restore();
     }
 
+    pub fn export_profile(&self, profile: u32, path: &Path) -> Result<(), String> {
+        let file = transfer::export(self.data(), profile).ok_or_else(|| self.msg("backend.noProfile"))?;
+        let text = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| e.to_string())
+    }
+
+    /// Adds the profile to the list; it is neither loaded nor written until the user does that.
+    pub fn import_profile(&mut self, path: &Path) -> Result<transfer::Imported, String> {
+        let lang = self.lang();
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let got = transfer::parse(&text).and_then(|f| transfer::import(self.data_mut().map_err(transfer::Refused::Broken)?, f));
+        let got = got.map_err(|r| match r {
+            transfer::Refused::Format => i18n::t(&lang, "backend.importFormat"),
+            transfer::Refused::Broken(e) => i18n::tf(&lang, "backend.importBroken", &[("error", &e)]),
+            transfer::Refused::UnknownModel(pid) => i18n::tf(&lang, "backend.importModel", &[("pid", &pid)]),
+        })?;
+        self.save()?;
+        Ok(got)
+    }
+
     pub fn profiles_view(&self) -> ProfilesView {
         profiles_view(self.data(), self.startup)
     }
@@ -1146,7 +1168,7 @@ fn bodies_to_write(s: &DeviceData, bindings: &[(u8, Action)]) -> Vec<(u16, Vec<u
 }
 
 /// Ids from `0x8000` up, away from the small ones Synapse is likely to take.
-fn next_macro_id(library: &BTreeMap<u16, Macro>) -> u16 {
+pub(crate) fn next_macro_id(library: &BTreeMap<u16, Macro>) -> u16 {
     library.keys().next_back().map_or(0x8000, |&id| id.max(0x7FFF) + 1)
 }
 
