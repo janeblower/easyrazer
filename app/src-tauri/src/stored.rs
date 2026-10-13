@@ -151,8 +151,11 @@ fn layer(raw: BTreeMap<String, Value>) -> Result<BTreeMap<u8, RawKey>, String> {
     };
     for (k, v) in raw {
         if k == "factory" {
+            // A key core no longer knows is left out, not fatal: the whole file must not be set aside for it.
             for key in parse_ranges(v.as_str().ok_or("factory is not a string")?)? {
-                put(key, factory(key).ok_or_else(|| format!("key {key} has no factory binding"))?)?;
+                if let Some(r) = factory(key) {
+                    put(key, r)?;
+                }
             }
         } else {
             let key: u8 = k.parse().map_err(|_| format!("bad key {k:?}"))?;
@@ -377,10 +380,11 @@ mod tests {
     }
 
     #[test]
-    fn refuses_factory_of_a_key_without_one() {
+    fn skips_factory_of_a_key_without_one() {
         let bare = (0..=255).find(|&k| factory(k).is_none()).unwrap();
-        let text = format!(r#"{{"data": {{"normal": {{"factory": "{bare}"}}, "hypershift": {{}}}}, "slots": {{}}}}"#);
-        assert!(serde_json::from_str::<P>(&text).is_err());
+        let text = format!(r#"{{"data": {{"normal": {{"factory": "1, {bare}"}}, "hypershift": {{}}}}, "slots": {{}}}}"#);
+        let p = serde_json::from_str::<P>(&text).unwrap();
+        assert_eq!(p.data.normal.keys().copied().collect::<Vec<_>>(), [1]);
     }
     #[test]
     fn prints_short_containers_inline() {
