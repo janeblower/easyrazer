@@ -737,8 +737,8 @@ onUnmounted(() => {
           </span>
         </nav>
         <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
-        <!-- With the map shown, the tab takes its width, not the window's. -->
-        <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'self-start': section !== 'macros' }">
+        <!-- With the map shown, the tab is as wide as the full-size map on every model, not the window. -->
+        <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'min-w-[1121px]': section !== 'macros' }">
           <div class="flex gap-3 items-center">
             <span class="inline-flex">
               <button
