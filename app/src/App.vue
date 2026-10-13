@@ -445,7 +445,7 @@ async function loadDevices() {
     showError(error);
     return;
   }
-  const next = pick(devices.value.devices, keyboard.value);
+  const next = pick(devices.value.devices, keyboard.value, dirty.value > 0);
   if (next === keyboard.value) return;
   keyboard.value = next;
   // Another keyboard: nothing read from the last one applies.

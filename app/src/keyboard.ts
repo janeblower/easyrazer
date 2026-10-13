@@ -5,10 +5,10 @@ import type { DeviceEntry } from "./types";
 
 export const keyboard = ref<string | null>(null);
 
-/** A connected keyboard first; with none connected, the one shown stays so its profiles keep showing. */
-export function pick(list: DeviceEntry[], current: string | null): string | null {
+/** A connected keyboard first; with none connected, the one shown stays so its profiles keep showing. `stay` keeps the one shown while it is known. */
+export function pick(list: DeviceEntry[], current: string | null, stay = false): string | null {
   const now = list.find((d) => d.id === current);
-  if (now?.connected) return now.id;
+  if (now?.connected || (stay && now)) return now.id;
   return list.find((d) => d.connected)?.id ?? now?.id ?? list[0]?.id ?? null;
 }
 

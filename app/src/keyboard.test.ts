@@ -28,3 +28,10 @@ test("accepts only the selected keyboard", () => {
   keyboard.value = null;
   expect(ours(null)).toBe(true);
 });
+
+test("stays on an unplugged one while it has unapplied edits", () => {
+  expect(pick([e("A", false), e("B", true)], "A", true)).toBe("A");
+});
+test("stay does not keep a keyboard that is gone", () => {
+  expect(pick([e("B", true)], "A", true)).toBe("B");
+});
