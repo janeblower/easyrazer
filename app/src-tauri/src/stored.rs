@@ -56,7 +56,9 @@ fn expand<T: Clone, E: serde::de::Error>(raw: BTreeMap<String, T>) -> Result<BTr
     let mut out = BTreeMap::new();
     for (r, v) in raw {
         for k in parse_ranges(&r).map_err(E::custom)? {
-            out.insert(k, v.clone());
+            if out.insert(k, v.clone()).is_some() {
+                return Err(E::custom(format!("key {k} is listed twice")));
+            }
         }
     }
     Ok(out)
@@ -143,14 +145,18 @@ impl Serialize for Layer<'_> {
 
 fn layer(raw: BTreeMap<String, Value>) -> Result<BTreeMap<u8, RawKey>, String> {
     let mut out = BTreeMap::new();
+    let mut put = |key: u8, r: RawKey| match out.insert(key, r) {
+        Some(_) => Err(format!("key {key} is listed twice")),
+        None => Ok(()),
+    };
     for (k, v) in raw {
         if k == "factory" {
             for key in parse_ranges(v.as_str().ok_or("factory is not a string")?)? {
-                out.insert(key, factory(key).ok_or_else(|| format!("key {key} has no factory binding"))?);
+                put(key, factory(key).ok_or_else(|| format!("key {key} has no factory binding"))?)?;
             }
         } else {
             let key: u8 = k.parse().map_err(|_| format!("bad key {k:?}"))?;
-            out.insert(key, serde_json::from_value(v).map_err(|e| e.to_string())?);
+            put(key, serde_json::from_value(v).map_err(|e| e.to_string())?)?;
         }
     }
     Ok(out)
@@ -212,7 +218,8 @@ const WIDTH: usize = 100;
 
 /// JSON with every container that fits in [`WIDTH`] on one line.
 pub fn to_text(v: &impl Serialize) -> Result<String, String> {
-    let v = serde_json::to_value(v).map_err(|e| e.to_string())?;
+    // Through text, not `to_value`: that widens f32 and prints 0.7 as 0.699999988079071.
+    let v: Value = serde_json::to_string(v).and_then(|t| serde_json::from_str(&t)).map_err(|e| e.to_string())?;
     let mut out = String::new();
     write(&v, 0, &mut out);
     Ok(out)
@@ -396,5 +403,21 @@ mod tests {
     fn escapes_strings() {
         let v = serde_json::json!({"name": "a \"b\"\n\\"});
         assert_eq!(serde_json::from_str::<Value>(&to_text(&v).unwrap()).unwrap(), v);
+    }
+    #[test]
+    fn prints_f32_as_written() {
+        let rapid: BTreeMap<u8, Rapid> = [(1, Rapid { enabled: true, press: 0.7, release: 0.4 })].into();
+        let text = to_text(&G { rapid, custom: None }).unwrap();
+        assert!(text.contains(r#""press": 0.7, "release": 0.4"#), "{text}");
+    }
+
+    #[test]
+    fn refuses_overlapping_keys() {
+        let k = factory(31).map(|_| 31).unwrap();
+        let explicit = r#"{"thr_low": 0, "thr_high": 0, "fn_id": 17, "fn_data": [33]}"#;
+        let text = format!(r#"{{"data": {{"normal": {{"{k}": {explicit}, "factory": "1-40"}}, "hypershift": {{}}}}, "slots": {{}}}}"#);
+        assert!(serde_json::from_str::<P>(&text).is_err());
+        let g = r#"{"rapid": {"1-5": {"enabled": true, "press": 1.0, "release": 1.0}, "3": {"enabled": false, "press": 1.0, "release": 1.0}}, "custom": null}"#;
+        assert!(serde_json::from_str::<G>(g).is_err());
     }
 }
