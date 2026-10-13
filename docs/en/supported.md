@@ -7,6 +7,7 @@
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Huntsman Mini Analog (`1532:0282`) | 🧪 | 🧪 | 🧪 | 🧪 | — | 🧪 | 🧪 |
 | Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
 ## Huntsman V2 Analog
@@ -25,6 +26,11 @@ Settings, never to its memory, so macros and profile slots are not available.
 In development, not tested on hardware. Read only by default; writes to the keyboard's
 RAM after allowing it in Settings, never to its memory. In HW mode the firmware runs
 Rapid Trigger and one Snap Tap pair. A tester with the keyboard is needed.
+
+## Huntsman V3 Pro TKL
+
+Same as the V3 Pro, without the numpad and PrtSc / ScrLk / Pause; the 8 kHz version
+is the same. No custom lighting effect.
 
 ## Huntsman V3 Pro Mini
 

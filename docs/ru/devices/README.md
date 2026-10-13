@@ -7,14 +7,15 @@
 | Huntsman V2 Analog | `1532:0266` | STM32L4+ | поддерживается | [протокол](huntsman-v2-analog/protocol.md), [прошивка](huntsman-v2-analog/firmware.md) |
 | Huntsman Mini Analog | `1532:0282` | STM32, как у V2 Analog | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-mini-analog/protocol.md), [прошивка](huntsman-mini-analog/firmware.md) |
 | Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, вероятно LPC55S6x | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro/protocol.md), [прошивка](huntsman-v3-pro/firmware.md) |
+| Huntsman V3 Pro TKL | `1532:02A7`, 8 kHz `1532:02D0` | как у V3 Pro | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro-tkl/protocol.md), [прошивка](huntsman-v3-pro-tkl/firmware.md) |
 | Huntsman V3 Pro Mini | `1532:02B0` | как у V3 Pro | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro-mini/protocol.md), [прошивка](huntsman-v3-pro-mini/firmware.md) |
 
 V3 Pro не проверялась на железе: всё о ней — из модуля Synapse 4 и прошивки
 1.03.00. Модули Synapse для V2 Analog, Huntsman Mini Analog (`0282`), V3 Pro,
 V3 Pro TKL (`02A7`) и V3 Pro Mini (`02B0`) собраны из одной ветки, таблица
-команд у V2 и V3 Pro одна; TKL, вероятно, отличается от V3 Pro только раскладкой.
-Для Mini это подтверждает её прошивка 2.01.00; прошивка Mini Analog 1.03.00 — сборка
-V2 Analog с таблицей клавиш 60%.
+команд у V2 и V3 Pro одна. Прошивки TKL 1.04.00 и Mini 2.01.00 — сборки V3 Pro с
+другой матрицей клавиш; прошивка Mini Analog 1.03.00 — сборка V2 Analog с таблицей
+клавиш 60%.
 
 ## Пакет управления
 
