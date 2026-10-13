@@ -208,6 +208,45 @@ pub mod slots {
     }
 }
 
+const WIDTH: usize = 100;
+
+/// JSON with every container that fits in [`WIDTH`] on one line.
+pub fn to_text(v: &impl Serialize) -> Result<String, String> {
+    let v = serde_json::to_value(v).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    write(&v, 0, &mut out);
+    Ok(out)
+}
+
+fn inline(v: &Value) -> String {
+    match v {
+        Value::Array(a) => format!("[{}]", a.iter().map(inline).collect::<Vec<_>>().join(", ")),
+        Value::Object(o) => format!("{{{}}}", o.iter().map(|(k, v)| format!("{}: {}", Value::from(k.as_str()), inline(v))).collect::<Vec<_>>().join(", ")),
+        _ => v.to_string(),
+    }
+}
+
+fn write(v: &Value, indent: usize, out: &mut String) {
+    let line = inline(v);
+    let (open, close, items): (char, char, Vec<(Option<&str>, &Value)>) = match v {
+        Value::Array(a) if indent + line.len() > WIDTH => ('[', ']', a.iter().map(|x| (None, x)).collect()),
+        Value::Object(o) if indent + line.len() > WIDTH => ('{', '}', o.iter().map(|(k, x)| (Some(k.as_str()), x)).collect()),
+        _ => return out.push_str(&line),
+    };
+    out.push(open);
+    for (i, (k, x)) in items.into_iter().enumerate() {
+        out.push_str(if i == 0 { "\n" } else { ",\n" });
+        out.push_str(&" ".repeat(indent + 2));
+        if let Some(k) = k {
+            out.push_str(&format!("{}: ", Value::from(k)));
+        }
+        write(x, indent + 2, out);
+    }
+    out.push('\n');
+    out.push_str(&" ".repeat(indent));
+    out.push(close);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +374,27 @@ mod tests {
         let bare = (0..=255).find(|&k| factory(k).is_none()).unwrap();
         let text = format!(r#"{{"data": {{"normal": {{"factory": "{bare}"}}, "hypershift": {{}}}}, "slots": {{}}}}"#);
         assert!(serde_json::from_str::<P>(&text).is_err());
+    }
+    #[test]
+    fn prints_short_containers_inline() {
+        let v = serde_json::json!({"a": [0, 4], "b": {"x": 1, "y": "z"}, "long": (0..60).collect::<Vec<u32>>()});
+        let text = to_text(&v).unwrap();
+        assert!(text.contains(r#""a": [0, 4]"#), "{text}");
+        assert!(text.contains(r#""b": {"x": 1, "y": "z"}"#), "{text}");
+        assert!(text.lines().all(|l| l.len() <= 110), "{text}");
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), v);
+    }
+
+    #[test]
+    fn keeps_numeric_order() {
+        let m: BTreeMap<u8, u8> = [(2, 0), (10, 0)].into();
+        let text = to_text(&m).unwrap();
+        assert!(text.find("\"2\"").unwrap() < text.find("\"10\"").unwrap(), "{text}");
+    }
+
+    #[test]
+    fn escapes_strings() {
+        let v = serde_json::json!({"name": "a \"b\"\n\\"});
+        assert_eq!(serde_json::from_str::<Value>(&to_text(&v).unwrap()).unwrap(), v);
     }
 }
