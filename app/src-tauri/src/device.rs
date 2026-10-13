@@ -872,7 +872,6 @@ impl Device {
         self.synapse
     }
 
-
     /// The model's name, or the id before any model was seen.
     pub fn name(&self) -> String {
         self.last_spec.map_or_else(|| self.id.clone().unwrap_or_default(), |d| d.name.clone())
@@ -1082,7 +1081,6 @@ impl Device {
     }
 }
 
-/// Press point in the UI's 0.1 mm steps.
 /// What the window lists of a keyboard's profiles; works without a connection.
 pub fn profiles_view(d: &DeviceData, startup: Option<u8>) -> ProfilesView {
     let profiles = d.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &d.slots) }).collect();
@@ -1090,6 +1088,7 @@ pub fn profiles_view(d: &DeviceData, startup: Option<u8>) -> ProfilesView {
     ProfilesView { profiles, loaded: d.loaded, startup, free_slot: used < slots::MAX_SLOTS as usize }
 }
 
+/// Press point in the UI's 0.1 mm steps.
 pub fn mm(scale: &Analog, threshold: u8) -> f32 {
     (scale.mm(threshold) * 10.0).round() / 10.0
 }
