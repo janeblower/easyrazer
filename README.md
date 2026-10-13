@@ -37,6 +37,7 @@ Details and caveats: [user guide](docs/en/usage.md).
 | Model | Support |
 |---|---|
 | Huntsman V2 Analog (`1532:0266`) | full |
+| Huntsman Mini Analog (`1532:0282`) | in development, not tested on hardware |
 | Huntsman V3 Pro (`1532:02A6`) | in development, not tested on hardware |
 | Huntsman V3 Pro Mini (`1532:02B0`) | in development, not tested on hardware |
 

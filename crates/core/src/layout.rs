@@ -259,19 +259,31 @@ mod tests {
         }
     }
 
+    /// The 5 × 14 matrix of the V3 Pro Mini firmware 2.01.00, `0x200269C0` after scatter-load.
+    const MINI_MATRIX: [u8; 70] = [
+        110, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 25, 10, 11, 12, 13, 14, 15, 0, 30, 31, 32, 33,
+        34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50, 51, 52, 58, 127, 60, 150, 61, 154, 151, 62, 59, 27, 28, 29, 39, 40,
+        41, 42, 43, 0, 53, 54, 55, 56, 57, 129, 64,
+    ];
+
     #[test]
     fn mini_keys_are_in_its_sensor_matrix() {
-        // The 5 × 14 matrix of the V3 Pro Mini firmware 2.01.00, `0x200269C0` after scatter-load.
-        const MATRIX: [u8; 70] = [
-            110, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 25, 10, 11, 12, 13, 14, 15, 0, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50, 51, 52, 58, 127, 60, 150, 61, 154, 151, 62, 59, 27, 28, 29,
-            39, 40, 41, 42, 43, 0, 53, 54, 55, 56, 57, 129, 64,
-        ];
         let keys = keys(Board::Mini);
         assert_eq!(keys.len(), 61);
-        assert!(keys.iter().all(|k| MATRIX.contains(&k.key)), "{keys:?}");
+        assert!(keys.iter().all(|k| MINI_MATRIX.contains(&k.key)), "{keys:?}");
         assert_eq!(keys[0].key, keymap::by_name("ESC").unwrap());
         assert!(keys.iter().all(|k| k.y >= 0.0 && k.y < 5.0 && k.x + k.w <= 15.0));
+    }
+
+    #[test]
+    fn mini_analog_has_the_mini_key_set() {
+        // fwIDs of the Huntsman Mini Analog firmware 1.03.00, `0x08019E34`.
+        let mut ids: Vec<u8> = [110].into_iter().chain(2..=13).chain(15..=57).collect();
+        ids.extend([58, 127, 60, 150, 61, 154, 151, 62, 59, 129, 64, 14]);
+        let mut v3: Vec<u8> = MINI_MATRIX.into_iter().filter(|&id| id != 0).collect();
+        ids.sort();
+        v3.sort();
+        assert_eq!(ids, v3);
     }
 
     fn cell(name: &str) -> Vec<(u8, u8)> {
