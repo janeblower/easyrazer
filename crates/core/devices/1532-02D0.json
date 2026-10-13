@@ -4,7 +4,7 @@
   "pid": "02D0",
   "control_interface": 3,
   "tid": "1F",
-  "layout": "tkl",
+  "layout": "pro_tkl",
   "analog": {
     "zero_mm": 0,
     "full_mm": 3.98535,

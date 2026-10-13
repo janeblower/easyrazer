@@ -12,6 +12,9 @@
   { "editable": true, "h": 1.0, "key": 121, "label": "F10", "name": "F10", "shape": "key", "w": 1.0, "x": 12.0, "y": 0.0 },
   { "editable": true, "h": 1.0, "key": 122, "label": "F11", "name": "F11", "shape": "key", "w": 1.0, "x": 13.0, "y": 0.0 },
   { "editable": true, "h": 1.0, "key": 123, "label": "F12", "name": "F12", "shape": "key", "w": 1.0, "x": 14.0, "y": 0.0 },
+  { "editable": true, "h": 1.0, "key": 124, "label": "PrtSc", "name": "PRINT_SCREEN", "shape": "key", "w": 1.0, "x": 15.25, "y": 0.0 },
+  { "editable": true, "h": 1.0, "key": 125, "label": "ScrLk", "name": "SCROLL_LOCK", "shape": "key", "w": 1.0, "x": 16.25, "y": 0.0 },
+  { "editable": true, "h": 1.0, "key": 126, "label": "Pause", "name": "PAUSE", "shape": "key", "w": 1.0, "x": 17.25, "y": 0.0 },
   { "editable": true, "h": 1.0, "key": 1, "label": "`", "name": "TILDE", "shape": "key", "w": 1.0, "x": 0.0, "y": 1.25 },
   { "editable": true, "h": 1.0, "key": 2, "label": "1", "name": "1", "shape": "key", "w": 1.0, "x": 1.0, "y": 1.25 },
   { "editable": true, "h": 1.0, "key": 3, "label": "2", "name": "2", "shape": "key", "w": 1.0, "x": 2.0, "y": 1.25 },
@@ -71,7 +74,7 @@
   { "editable": true, "h": 1.0, "key": 54, "label": ".", "name": "PERIOD", "shape": "key", "w": 1.0, "x": 10.25, "y": 4.25 },
   { "editable": true, "h": 1.0, "key": 55, "label": "/", "name": "SLASH", "shape": "key", "w": 1.0, "x": 11.25, "y": 4.25 },
   { "editable": true, "h": 1.0, "key": 57, "label": "Shift", "name": "RIGHT_SHIFT", "shape": "key", "w": 2.75, "x": 12.25, "y": 4.25 },
-  { "editable": true, "h": 1.0, "key": 83, "label": "↑", "name": "UP_ARROW", "shape": "key", "w": 1.0, "x": 16.25, "y": 4.25 },
+  { "editable": true, "h": 1.0, "key": 83, "label": "в†‘", "name": "UP_ARROW", "shape": "key", "w": 1.0, "x": 16.25, "y": 4.25 },
   { "editable": true, "h": 1.0, "key": 58, "label": "Ctrl", "name": "LEFT_CTRL", "shape": "key", "w": 1.25, "x": 0.0, "y": 5.25 },
   { "editable": true, "h": 1.0, "key": 127, "label": "Win", "name": "LEFT_GUI", "shape": "key", "w": 1.25, "x": 1.25, "y": 5.25 },
   { "editable": true, "h": 1.0, "key": 60, "label": "Alt", "name": "LEFT_ALT", "shape": "key", "w": 1.25, "x": 2.5, "y": 5.25 },
@@ -80,7 +83,7 @@
   { "editable": false, "h": 1.0, "key": 59, "label": "Fn", "name": "RIGHT_GUI", "shape": "key", "w": 1.25, "x": 11.25, "y": 5.25 },
   { "editable": true, "h": 1.0, "key": 129, "label": "Menu", "name": "APPLICATION", "shape": "key", "w": 1.25, "x": 12.5, "y": 5.25 },
   { "editable": true, "h": 1.0, "key": 64, "label": "Ctrl", "name": "RIGHT_CTRL", "shape": "key", "w": 1.25, "x": 13.75, "y": 5.25 },
-  { "editable": true, "h": 1.0, "key": 79, "label": "←", "name": "LEFT_ARROW", "shape": "key", "w": 1.0, "x": 15.25, "y": 5.25 },
-  { "editable": true, "h": 1.0, "key": 84, "label": "↓", "name": "DOWN_ARROW", "shape": "key", "w": 1.0, "x": 16.25, "y": 5.25 },
-  { "editable": true, "h": 1.0, "key": 89, "label": "→", "name": "RIGHT_ARROW", "shape": "key", "w": 1.0, "x": 17.25, "y": 5.25 }
+  { "editable": true, "h": 1.0, "key": 79, "label": "в†ђ", "name": "LEFT_ARROW", "shape": "key", "w": 1.0, "x": 15.25, "y": 5.25 },
+  { "editable": true, "h": 1.0, "key": 84, "label": "в†“", "name": "DOWN_ARROW", "shape": "key", "w": 1.0, "x": 16.25, "y": 5.25 },
+  { "editable": true, "h": 1.0, "key": 89, "label": "в†’", "name": "RIGHT_ARROW", "shape": "key", "w": 1.0, "x": 17.25, "y": 5.25 }
 ]

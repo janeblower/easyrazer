@@ -16,6 +16,7 @@ const DEVICES: &[&str] = &[
     include_str!("../devices/1532-02A7.json"),
     include_str!("../devices/1532-02B0.json"),
     include_str!("../devices/1532-02D0.json"),
+    include_str!("../devices/1532-02E5.json"),
 ];
 const PROTOCOLS: &[(&str, &str)] = &[("extended", include_str!("../protocols/extended.json"))];
 

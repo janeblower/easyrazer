@@ -22,16 +22,18 @@ function showModelPicker(models: Record<string, string>, current: string) {
 // A plain browser on the Vite dev server has no backend: fake a keyboard with every key indicator on.
 async function mockBackend() {
   if (!import.meta.env.DEV || "__TAURI_INTERNALS__" in window) return;
-  const [{ mockIPC }, { default: layout }, { default: miniLayout }, { default: tklLayout }] = await Promise.all([
+  const [{ mockIPC }, { default: layout }, { default: miniLayout }, { default: tklLayout }, { default: proTklLayout }] = await Promise.all([
     import("@tauri-apps/api/mocks"),
     import("./dev-layout.json"),
     import("./dev-layout-mini.json"),
     import("./dev-layout-tkl.json"),
+    import("./dev-layout-pro-tkl.json"),
   ]);
   const MODELS: Record<string, string> = {
     v2: "Huntsman V2 Analog",
     mini: "Razer Huntsman V3 Pro Mini",
-    tkl: "Razer Huntsman V3 Pro TKL",
+    tkl: "Razer Huntsman V3 TKL 8KHz",
+    proTkl: "Razer Huntsman V3 Pro TKL",
   };
   const pick = new URLSearchParams(location.search).get("model");
   const model = pick && pick in MODELS ? pick : "v2";
@@ -299,7 +301,8 @@ async function mockBackend() {
       if (cmd === "apply" || cmd === "save") return write(cmd, args as unknown as Write);
       if (cmd === "layout") {
         const name = (args as { model?: string }).model;
-        return name === MODELS.mini ? miniLayout : name === MODELS.tkl ? tklLayout : layout;
+        const layouts: Record<string, unknown> = { [MODELS.mini]: miniLayout, [MODELS.tkl]: tklLayout, [MODELS.proTkl]: proTklLayout };
+        return (name && layouts[name]) ?? layout;
       }
       if (cmd === "app_settings") return { ...(replies.app_settings as object), ...devSettings };
       return cmd in devReplies ? devReplies[cmd](args as Record<string, unknown>) : replies[cmd];
