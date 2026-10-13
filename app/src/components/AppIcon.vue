@@ -17,6 +17,8 @@ const props = defineProps<{
     | "macro"
     | "cog"
     | "ban"
+    | "plug"
+    | "plug_off"
     | System;
 }>();
 

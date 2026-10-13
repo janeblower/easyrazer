@@ -6,11 +6,10 @@ import type { DeviceEntry } from "./types";
 
 export const keyboard = ref<string | null>(null);
 
-/** A connected keyboard first; with none connected, the one shown stays so its profiles keep showing. `stay` keeps the one shown while it is known. */
-export function pick(list: DeviceEntry[], current: string | null, stay = false): string | null {
-  const now = list.find((d) => d.id === current);
-  if (now?.connected || (stay && now)) return now.id;
-  return list.find((d) => d.connected)?.id ?? now?.id ?? list[0]?.id ?? null;
+/** The shown keyboard stays while it is known, so a disconnected one keeps its profiles on screen. */
+export function pick(list: DeviceEntry[], current: string | null, last: string | null): string | null {
+  const known = (id: string | null) => list.find((d) => d.id === id)?.id;
+  return known(current) ?? known(last) ?? list.find((d) => d.connected)?.id ?? list[0]?.id ?? null;
 }
 
 // eslint-disable-next-line @typescript-eslint/promise-function-async -- a plain wrapper of invoke

@@ -290,7 +290,14 @@
       "serial": "Serial"
     }
   },
+  "devices": {
+    "offline": "not connected",
+    "rename": "Rename…",
+    "forget": "Forget keyboard…",
+    "forgetConfirm": "Forget {name}? Its profiles and macros are deleted from the app."
+  },
   "status": {
+    "offline": "{name} is not connected — only profiles are available",
     "searching": "Looking for the keyboard…",
     "synapse": "Synapse (RazerAppEngine) is running. Close it, including its tray icon, or it will overwrite the settings.",
     "unsupported": "This Razer keyboard model is not supported (PID {pid}).",

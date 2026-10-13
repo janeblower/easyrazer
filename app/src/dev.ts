@@ -55,7 +55,7 @@ export async function reloadLog() {
 export async function followKeyboard() {
   const take = async () => {
     const view = await invoke<DevicesView>("devices");
-    const next = pick(view.devices, keyboard.value);
+    const next = pick(view.devices, keyboard.value, view.last);
     if (next === keyboard.value) return;
     keyboard.value = next;
     if (started) await reloadLog();

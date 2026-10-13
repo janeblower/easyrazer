@@ -34,6 +34,7 @@ import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
 import SettingsTab from "./components/SettingsTab.vue";
 import ProfileMenu from "./components/ProfileMenu.vue";
+import DeviceMenu from "./components/DeviceMenu.vue";
 import ModalDialog from "./components/ModalDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
@@ -81,7 +82,7 @@ const editableCount = computed(() => layout.value.filter((k) => k.editable).leng
 const busy = ref(false);
 const profiles = ref<ProfilesView | null>(null);
 const removing = ref<number | null>(null); // asked before deleting
-const switching = ref<(() => void) | null>(null); // asked before dropping edits
+const switching = ref<(() => void | Promise<void>) | null>(null); // asked before dropping edits
 const message = ref("");
 const TABS = ["keys", "lighting", "settings"] as const;
 const tab = ref<(typeof TABS)[number]>("keys");
@@ -92,6 +93,8 @@ const offering = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 const devices = ref<DevicesView | null>(null);
 let loadedProfile: number | null = null; // profile the baseline was read from
+let loadedKey: string | null = null; // connection and profile of that read
+const forgetting = ref<string | null>(null); // asked before forgetting
 const unlisten: UnlistenFn[] = [];
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -106,7 +109,11 @@ const dirty = computed(
     ]).size + (snapEdit.value ? 1 : 0),
 );
 trackUnapplied(() => dirty.value > 0);
-const writable = computed(() => !!status.value?.device && !status.value?.synapse && !busy.value);
+const online = computed(() => !!status.value?.device);
+const writable = computed(() => online.value && !status.value?.synapse && !busy.value);
+// An offline keyboard still has its profiles, which live in the app.
+const editable = computed(() => !!status.value && !status.value.synapse && !busy.value);
+const shown = computed(() => devices.value?.devices.find((d) => d.id === keyboard.value) ?? null);
 const driver = computed(() => !!status.value?.driver_mode);
 const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
 // Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
@@ -387,6 +394,7 @@ async function load() {
     );
     bindErrors.value = {};
     loadedProfile = profile;
+    loadedKey = `${!!status.value?.device}:${profile}`;
     message.value = "";
     await loadMacros();
     await loadProfiles();
@@ -421,13 +429,15 @@ async function onStatus(s: DeviceStatus) {
     layoutModel = s.model;
     layout.value = await invoke<KeyView[]>("layout", { model: s.model });
   }
-  if (!s.device || s.synapse) {
+  if (!s.device) progress.value = null;
+  if (s.synapse) {
     loadedProfile = null;
-    progress.value = null;
+    loadedKey = null;
     return;
   }
   if (loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile) revert();
-  if (loadedProfile === null || loadedProfile !== s.profile) await load();
+  // A reconnect reads again from the keyboard even under the same profile.
+  if (`${s.device}:${s.profile}` !== loadedKey) await load();
 }
 
 async function refresh() {
@@ -438,6 +448,19 @@ async function refresh() {
   }
 }
 
+async function settle() {
+  const next = pick(devices.value?.devices ?? [], keyboard.value, devices.value?.last ?? null);
+  if (next === keyboard.value) return;
+  keyboard.value = next;
+  // Another keyboard: nothing read from the last one applies.
+  revert();
+  loadedProfile = null;
+  loadedKey = null;
+  layoutModel = null;
+  await reloadLog();
+  await refresh();
+}
+
 async function loadDevices() {
   try {
     devices.value = await invoke<DevicesView>("devices");
@@ -445,15 +468,28 @@ async function loadDevices() {
     showError(error);
     return;
   }
-  const next = pick(devices.value.devices, keyboard.value, hasUnapplied());
-  if (next === keyboard.value) return;
-  keyboard.value = next;
-  // Another keyboard: nothing read from the last one applies.
-  revert();
-  loadedProfile = null;
-  layoutModel = null;
-  await reloadLog();
-  await refresh();
+  await settle();
+}
+
+async function renameKeyboard(id: string, name: string) {
+  try {
+    devices.value = await call<DevicesView>("rename_device", { name }, id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function confirmForget() {
+  const id = forgetting.value;
+  forgetting.value = null;
+  if (id === null) return;
+  try {
+    devices.value = await call<DevicesView>("forget_device", {}, id);
+  } catch (error) {
+    showError(error);
+    return;
+  }
+  await settle();
 }
 
 async function setMode(on: boolean) {
@@ -499,16 +535,34 @@ async function profileOp(command: string, args: Record<string, unknown> = {}) {
 }
 
 // Loading another profile drops unapplied edits; ask first.
-function switchTo(op: () => void) {
+function switchTo(op: () => void | Promise<void>) {
   if (dirty.value > 0) switching.value = op;
-  else op();
+  else void op();
 }
 
 function confirmSwitch() {
   const op = switching.value;
   switching.value = null;
   revert();
-  op?.();
+  void op?.();
+}
+
+function onPickKeyboard(id: string) {
+  if (id === keyboard.value) return;
+  switchTo(async () => {
+    keyboard.value = id;
+    revert();
+    loadedProfile = null;
+    loadedKey = null;
+    layoutModel = null;
+    try {
+      await invoke("set_last_device", { id });
+    } catch (error) {
+      showError(error);
+    }
+    await reloadLog();
+    await refresh();
+  });
 }
 
 function confirmRemove() {
@@ -756,10 +810,20 @@ onUnmounted(() => {
           >
             {{ $t(`tabs.${name}`) }}
           </button>
-          <ProfileMenu
+          <DeviceMenu
+            v-if="devices && devices.devices.length > 1"
             class="ml-auto"
+            :devices="devices.devices"
+            :selected="keyboard"
+            @pick="onPickKeyboard"
+            @rename="renameKeyboard"
+            @forget="(id) => (forgetting = id)"
+          />
+          <ProfileMenu
+            :class="{ 'ml-auto': !(devices && devices.devices.length > 1) }"
             :view="profiles"
             :writable="writable"
+            :editable="editable"
             :next-combo="nextCombo"
             @load="(id) => switchTo(() => profileOp('load_profile', { profile: id }))"
             @create="switchTo(() => profileOp('create_profile'))"
@@ -799,6 +863,7 @@ onUnmounted(() => {
           :status="status"
           :progress="progress"
           :unsupported="devices?.unsupported ?? null"
+          :name="shown?.name ?? null"
           :message="tab !== 'lighting' ? message : ''"
           :error="appError"
         />
@@ -851,7 +916,7 @@ onUnmounted(() => {
               :single="section === 'bindings'"
               :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
             />
-            <div class="gap-4 grid grid-cols-2">
+            <div class="gap-4 grid grid-cols-2" :inert="!online">
               <div class="px-4 py-3 card flex flex-col gap-3">
                 <ActuationCard
                   v-if="section === 'actuation'"
@@ -908,7 +973,7 @@ onUnmounted(() => {
               </div>
             </div>
             <DevKeys v-if="dev.mode" :keys="[...selection]" :depth="section === 'actuation'" :driver="driver" />
-            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+            <ActionBar v-if="online" v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
         <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
@@ -956,6 +1021,13 @@ onUnmounted(() => {
           <template #actions>
             <button autofocus @click="removing = null">{{ $t("profiles.cancel") }}</button>
             <button class="primary" @click="confirmRemove">{{ $t("profiles.remove") }}</button>
+          </template>
+        </ModalDialog>
+        <ModalDialog v-if="forgetting != null" :title="$t('devices.forget')" @cancel="forgetting = null">
+          <p>{{ $t("devices.forgetConfirm", { name: devices?.devices.find((d) => d.id === forgetting)?.name ?? "" }) }}</p>
+          <template #actions>
+            <button autofocus @click="forgetting = null">{{ $t("profiles.cancel") }}</button>
+            <button class="primary" @click="confirmForget">{{ $t("devices.forget") }}</button>
           </template>
         </ModalDialog>
         <ModalDialog v-if="switching != null" :title="$t('profiles.dropTitle')" @cancel="switching = null">

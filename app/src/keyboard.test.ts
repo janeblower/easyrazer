@@ -3,22 +3,21 @@ import { call, keyboard, ours, pick } from "./keyboard";
 import { messages } from "./i18n";
 import type { DeviceEntry } from "./types";
 
-const e = (id: string, connected: boolean): DeviceEntry => ({ id, model: "Razer Huntsman V2 Analog", connected, driver_mode: false });
+const kb = (id: string, connected: boolean): DeviceEntry => ({ id, name: id, model: "M", connected, driver_mode: false });
 
-test("keeps a connected choice", () => {
-  expect(pick([e("A", true), e("B", true)], "B")).toBe("B");
+test("the current keyboard stays even when it disconnects", () => {
+  expect(pick([kb("A", false), kb("B", true)], "A", null)).toBe("A");
 });
-test("moves off an unplugged one to a connected one", () => {
-  expect(pick([e("A", false), e("B", true)], "A")).toBe("B");
+
+test("on start the last keyboard wins, then a connected one, then the first", () => {
+  expect(pick([kb("A", true), kb("B", false)], null, "B")).toBe("B");
+  expect(pick([kb("A", false), kb("B", true)], null, "gone")).toBe("B");
+  expect(pick([kb("A", false), kb("B", false)], null, null)).toBe("A");
+  expect(pick([], null, "B")).toBe(null);
 });
-test("stays on a known one when nothing is connected", () => {
-  expect(pick([e("A", false), e("B", false)], "B")).toBe("B");
-});
-test("takes the first known when the choice is gone", () => {
-  expect(pick([e("A", false)], "Z")).toBe("A");
-});
-test("is null with nothing known", () => {
-  expect(pick([], "A")).toBeNull();
+
+test("a forgotten current keyboard gives way", () => {
+  expect(pick([kb("B", true)], "A", "A")).toBe("B");
 });
 
 test("accepts only the selected keyboard", () => {
@@ -28,13 +27,6 @@ test("accepts only the selected keyboard", () => {
   expect(ours(null)).toBe(false);
   keyboard.value = null;
   expect(ours(null)).toBe(true);
-});
-
-test("stays on an unplugged one while it has unapplied edits", () => {
-  expect(pick([e("A", false), e("B", true)], "A", true)).toBe("A");
-});
-test("stay does not keep a keyboard that is gone", () => {
-  expect(pick([e("B", true)], "A", true)).toBe("B");
 });
 
 test("a call without a keyboard fails with a plain message", async () => {

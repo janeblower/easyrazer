@@ -75,7 +75,7 @@ function parse(name: string): Parsed {
   return { group: parts[0], type: parts[1] ?? null, variant };
 }
 
-const blocked = computed(() => !props.status || props.status.synapse);
+const blocked = computed(() => !props.status || props.status.synapse || !props.status.device);
 const connected = computed(() => !!props.status?.device && !blocked.value);
 const groups = computed(() => {
   const out: Group[] = [];
