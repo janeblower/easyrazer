@@ -2,9 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use razer_core::lighting::Rgb;
+use razer_core::binding;
+use razer_core::lighting::{Look, Rgb};
+use razer_core::profiles::{RawKey, Snapshot};
 use serde::de::Error as _;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 
 /// `keys` ascending and unique: `[1, 2, 3, 5]` → `"1-3, 5"`.
 pub fn ranges(keys: &[u8]) -> String {
@@ -115,6 +119,95 @@ pub mod colors {
     }
 }
 
+/// What the flash holds for `key` out of the box; `None` for a key without a HID usage.
+fn factory(key: u8) -> Option<RawKey> {
+    binding::encode(binding::factory(key)).map(|(fn_id, fn_data)| RawKey { thr_low: 0, thr_high: 0, fn_id, fn_data })
+}
+
+/// The factory keys are listed, not left out: an empty layer must not read back as a factory one.
+struct Layer<'a>(&'a BTreeMap<u8, RawKey>);
+
+impl Serialize for Layer<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (plain, changed): (Vec<_>, Vec<_>) = self.0.iter().partition(|(k, r)| factory(**k).as_ref() == Some(*r));
+        let mut m = s.serialize_map(None)?;
+        if !plain.is_empty() {
+            m.serialize_entry("factory", &ranges(&plain.iter().map(|(k, _)| **k).collect::<Vec<_>>()))?;
+        }
+        for (k, r) in changed {
+            m.serialize_entry(&k.to_string(), r)?;
+        }
+        m.end()
+    }
+}
+
+fn layer(raw: BTreeMap<String, Value>) -> Result<BTreeMap<u8, RawKey>, String> {
+    let mut out = BTreeMap::new();
+    for (k, v) in raw {
+        if k == "factory" {
+            for key in parse_ranges(v.as_str().ok_or("factory is not a string")?)? {
+                out.insert(key, factory(key).ok_or_else(|| format!("key {key} has no factory binding"))?);
+            }
+        } else {
+            let key: u8 = k.parse().map_err(|_| format!("bad key {k:?}"))?;
+            out.insert(key, serde_json::from_value(v).map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Serialize)]
+struct SnapshotOut<'a> {
+    normal: Layer<'a>,
+    hypershift: Layer<'a>,
+    look: &'a Option<Look>,
+}
+
+impl<'a> SnapshotOut<'a> {
+    fn of(s: &'a Snapshot) -> Self {
+        Self { normal: Layer(&s.normal), hypershift: Layer(&s.hypershift), look: &s.look }
+    }
+}
+
+#[derive(Deserialize)]
+struct SnapshotIn {
+    normal: BTreeMap<String, Value>,
+    hypershift: BTreeMap<String, Value>,
+    look: Option<Look>,
+}
+
+impl SnapshotIn {
+    fn snapshot(self) -> Result<Snapshot, String> {
+        Ok(Snapshot { normal: layer(self.normal)?, hypershift: layer(self.hypershift)?, look: self.look })
+    }
+}
+
+/// A snapshot with each layer as its changes from the factory.
+pub mod snapshot {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(v: &Snapshot, s: S) -> Result<S::Ok, S::Error> {
+        SnapshotOut::of(v).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Snapshot, D::Error> {
+        SnapshotIn::deserialize(d)?.snapshot().map_err(D::Error::custom)
+    }
+}
+
+/// The slot cache, each snapshot as in [`snapshot`].
+pub mod slots {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(v: &BTreeMap<u8, Snapshot>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_map(v.iter().map(|(k, v)| (k, SnapshotOut::of(v))))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<u8, Snapshot>, D::Error> {
+        BTreeMap::<u8, SnapshotIn>::deserialize(d)?.into_iter().map(|(k, v)| v.snapshot().map(|s| (k, s))).collect::<Result<_, _>>().map_err(D::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +271,69 @@ mod tests {
         for bad in [r##"{"rapid": {}, "custom": {"1": "#ff40"}}"##, r##"{"rapid": {}, "custom": {"1": "#gg4080"}}"##] {
             assert!(serde_json::from_str::<G>(bad).is_err(), "{bad}");
         }
+    }
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct P {
+        #[serde(with = "snapshot")]
+        data: Snapshot,
+        #[serde(with = "slots")]
+        slots: BTreeMap<u8, Snapshot>,
+    }
+
+    fn full() -> Snapshot {
+        let layer = || -> BTreeMap<u8, RawKey> { (1..=103).filter_map(|k| Some((k, factory(k)?))).collect() };
+        let mut s = Snapshot { normal: layer(), hypershift: layer(), look: None };
+        s.normal.insert(31, RawKey { thr_low: 200, thr_high: 0, fn_id: 0x11, fn_data: vec![0x21] });
+        s
+    }
+
+    #[test]
+    fn layer_keeps_only_changes() {
+        let p = P { data: full(), slots: BTreeMap::from([(1, full())]) };
+        let v = serde_json::to_value(&p).unwrap();
+        let normal = v["data"]["normal"].as_object().unwrap();
+        assert_eq!(normal.len(), 2, "{normal:?}");
+        assert!(normal["factory"].as_str().unwrap().contains("32-"));
+        assert_eq!(normal["31"]["fn_id"], 0x11);
+        assert_eq!(v["slots"]["1"]["normal"].as_object().unwrap().len(), 2);
+        assert_eq!(serde_json::from_value::<P>(v).unwrap(), p);
+    }
+
+    #[test]
+    fn layer_keeps_keys_without_factory() {
+        let bare = (0..=255).find(|&k| factory(k).is_none()).unwrap();
+        let mut s = full();
+        s.hypershift.insert(bare, RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, 0] });
+        let p = P { data: s, slots: BTreeMap::new() };
+        let v = serde_json::to_value(&p).unwrap();
+        assert!(v["data"]["hypershift"].get(bare.to_string()).is_some());
+        assert_eq!(serde_json::from_value::<P>(v).unwrap(), p);
+    }
+
+    #[test]
+    fn empty_layer_stays_empty() {
+        let p = P { data: Snapshot::default(), slots: BTreeMap::new() };
+        let v = serde_json::to_value(&p).unwrap();
+        assert!(v["data"]["normal"].as_object().unwrap().is_empty());
+        assert_eq!(serde_json::from_value::<P>(v).unwrap(), p);
+    }
+
+    #[test]
+    fn reads_full_layers() {
+        #[derive(Serialize)]
+        struct Old {
+            data: Snapshot,
+            slots: BTreeMap<u8, Snapshot>,
+        }
+        let old = serde_json::to_string(&Old { data: full(), slots: BTreeMap::from([(2, full())]) }).unwrap();
+        let p: P = serde_json::from_str(&old).unwrap();
+        assert_eq!((p.data, p.slots[&2].clone()), (full(), full()));
+    }
+
+    #[test]
+    fn refuses_factory_of_a_key_without_one() {
+        let bare = (0..=255).find(|&k| factory(k).is_none()).unwrap();
+        let text = format!(r#"{{"data": {{"normal": {{"factory": "{bare}"}}, "hypershift": {{}}}}, "slots": {{}}}}"#);
+        assert!(serde_json::from_str::<P>(&text).is_err());
     }
 }
