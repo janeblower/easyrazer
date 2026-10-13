@@ -1,6 +1,7 @@
 // The keyboard the window shows; every keyboard command and event is about one keyboard.
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { i18n } from "./i18n";
 import type { DeviceEntry } from "./types";
 
 export const keyboard = ref<string | null>(null);
@@ -12,8 +13,12 @@ export function pick(list: DeviceEntry[], current: string | null, stay = false):
   return list.find((d) => d.connected)?.id ?? now?.id ?? list[0]?.id ?? null;
 }
 
-export async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  return invoke<T>(cmd, { ...args, id: keyboard.value });
+// eslint-disable-next-line @typescript-eslint/promise-function-async -- a plain wrapper of invoke
+export function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+  const id = keyboard.value;
+  // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- like invoke, rejects with the message
+  if (id === null) return Promise.reject(i18n.global.t("backend.noKeyboard"));
+  return invoke<T>(cmd, { ...args, id });
 }
 
 export function ours(id: string | null): boolean {

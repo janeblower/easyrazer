@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { call } from "../keyboard";
+import { call, keyboard } from "../keyboard";
 import type { DeviceInfo, Dock } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
 import { dev, followKeyboard, selected, setPanel, startDev } from "../dev";
@@ -78,6 +78,11 @@ const rows = computed(() => {
 
 watch(tab, (v) => {
   if (v === "device") void loadInfo();
+});
+
+watch(keyboard, () => {
+  info.value = null;
+  if (tab.value === "device") void loadInfo();
 });
 
 async function copyDiagnostics() {

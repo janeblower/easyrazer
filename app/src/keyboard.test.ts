@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { keyboard, ours, pick } from "./keyboard";
+import { call, keyboard, ours, pick } from "./keyboard";
+import { messages } from "./i18n";
 import type { DeviceEntry } from "./types";
 
 const e = (id: string, connected: boolean): DeviceEntry => ({ id, model: "Razer Huntsman V2 Analog", connected, driver_mode: false });
@@ -34,4 +35,10 @@ test("stays on an unplugged one while it has unapplied edits", () => {
 });
 test("stay does not keep a keyboard that is gone", () => {
   expect(pick([e("B", true)], "A", true)).toBe("B");
+});
+
+test("a call without a keyboard fails with a plain message", async () => {
+  keyboard.value = null;
+  const rejected = await call("read_all").catch((error_: unknown) => error_);
+  expect(rejected).toBe(messages.en.backend.noKeyboard);
 });

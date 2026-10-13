@@ -391,7 +391,7 @@ async function load() {
     await loadMacros();
     await loadProfiles();
   } catch (error) {
-    message.value = String(error);
+    if (ours(id)) message.value = String(error);
   } finally {
     progress.value = null;
     busy.value = false;
@@ -432,7 +432,7 @@ async function onStatus(s: DeviceStatus) {
 
 async function refresh() {
   try {
-    await onStatus(await call<DeviceStatus>("status"));
+    await onStatus(await invoke<DeviceStatus>("status", { id: keyboard.value }));
   } catch (error) {
     message.value = String(error);
   }
@@ -445,7 +445,7 @@ async function loadDevices() {
     showError(error);
     return;
   }
-  const next = pick(devices.value.devices, keyboard.value, dirty.value > 0);
+  const next = pick(devices.value.devices, keyboard.value, hasUnapplied());
   if (next === keyboard.value) return;
   keyboard.value = next;
   // Another keyboard: nothing read from the last one applies.
@@ -624,8 +624,12 @@ async function onWriteMacros() {
   const ids = macrosToWrite.value;
   macrosToWrite.value = [];
   busy.value = true;
+  const kb = keyboard.value;
   try {
-    for (const id of ids) macroState.value = await call<MacroState>("write_macro", { macroId: id });
+    for (const id of ids) {
+      const r = await call<MacroState>("write_macro", { macroId: id });
+      if (ours(kb)) macroState.value = r;
+    }
   } catch (error) {
     message.value = String(error);
     return;
@@ -665,6 +669,8 @@ async function onOffer(on: boolean) {
   }
 }
 
+let firstKeyboard: Promise<void> | null = null;
+
 onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
@@ -694,6 +700,8 @@ onMounted(async () => {
   // A connect reads the keyboard on its own, before the status that starts load() arrives.
   unlisten.push(
     await listen<[string, number, number, number | null, number | null]>("read-progress", (e) => {
+      // The first keyboard attaches, and reads, before its `devices` event arrives.
+      if (keyboard.value === null) firstKeyboard ??= loadDevices().finally(() => (firstKeyboard = null));
       if (!ours(e.payload[0])) return;
       const [, done, total, key, mm] = e.payload;
       progress.value = [done, total];
@@ -718,7 +726,8 @@ onMounted(async () => {
       void loadDevices();
     }),
   );
-  await refresh();
+  // With a keyboard picked, loadDevices has refreshed already.
+  if (keyboard.value === null) await refresh();
 });
 
 onUnmounted(() => {
