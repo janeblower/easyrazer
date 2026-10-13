@@ -41,6 +41,7 @@ Details and caveats: [user guide](docs/en/usage.md).
 | Huntsman V3 Pro (`1532:02A6`) | in development, not tested on hardware |
 | Huntsman V3 Pro TKL (`1532:02A7`, 8 kHz `1532:02D0`) | in development, not tested on hardware |
 | Huntsman V3 Pro Mini (`1532:02B0`) | in development, not tested on hardware |
+| Huntsman V3 TKL 8KHz (`1532:02E5`) | in development, not tested on hardware |
 
 Features per model and caveats: [full table](docs/en/supported.md).
 

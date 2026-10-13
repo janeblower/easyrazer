@@ -9,6 +9,7 @@
 | Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
 ## Huntsman V2 Analog
 
@@ -35,5 +36,11 @@ is the same. No custom lighting effect.
 ## Huntsman V3 Pro Mini
 
 Same as the V3 Pro, with a 60% key map; no custom lighting effect.
+
+## Huntsman V3 TKL 8KHz
+
+Same as the V3 Pro, with a full 87-key TKL map; no custom lighting effect and no
+Windows Dynamic Lighting. Its firmware is a separate code base, so it is less certain
+than the V3 Pro models.
 
 Protocol and firmware notes for each model: [devices](devices/README.md).

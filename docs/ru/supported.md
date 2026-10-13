@@ -9,6 +9,7 @@
 | Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
 ## Huntsman V2 Analog
 
@@ -35,5 +36,11 @@ Rapid Trigger и одну пару Snap Tap считает прошивка. Н�
 ## Huntsman V3 Pro Mini
 
 Как V3 Pro, с картой клавиш 60%; без эффекта подсветки custom.
+
+## Huntsman V3 TKL 8KHz
+
+Как V3 Pro, с полной картой TKL на 87 клавиш; без эффекта подсветки custom и без
+Windows Dynamic Lighting. Прошивка — отдельная кодовая база, поэтому уверенности меньше,
+чем для моделей V3 Pro.
 
 Протокол и прошивка каждой модели — в [devices](devices/README.md).
