@@ -5,7 +5,7 @@
 | Model | Actuation | Rapid Trigger | Snap Tap | Remapping | Macros | Hypershift | Lighting |
 |---|---|---|---|---|---|---|---|
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Huntsman Mini Analog (`1532:0282`) | 🧪 | 🧪 | 🧪 | 🧪 | — | 🧪 | 🧪 |
+| Huntsman Mini Analog (`1532:0282`) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
@@ -21,9 +21,11 @@ Supported, tested on hardware. Rapid Trigger and Snap Tap are computed by the ap
 
 ## Huntsman Mini Analog
 
-Same as the V2 Analog, with a 60% key map; no custom lighting effect. Not tested on
-hardware: read only by default, writes to the keyboard's RAM after allowing it in
-Settings, never to its memory, so macros and profile slots are not available.
+A V2 Analog in 60% form: the same firmware code and protocol, so it gets the V2 Analog
+support, which is tested on hardware, and is more mature than the V3 line. Not tested on
+this keyboard itself, though no trouble is expected. Until it is: writes to the keyboard's
+RAM only after allowing it in Settings, never to its memory, so macros and profile slots
+are not available; no custom lighting effect.
 
 ## Huntsman V3 Pro
 

@@ -37,7 +37,7 @@ Details and caveats: [user guide](docs/en/usage.md).
 | Model | Support |
 |---|---|
 | Huntsman V2 Analog (`1532:0266`) | full |
-| Huntsman Mini Analog (`1532:0282`) | in development, not tested on hardware |
+| Huntsman Mini Analog (`1532:0282`) | as V2 Analog, without macros; not tested on hardware |
 | Huntsman V3 Pro (`1532:02A6`) | in development, not tested on hardware |
 | Huntsman V3 Pro TKL (`1532:02A7`, 8 kHz `1532:02D0`) | in development, not tested on hardware |
 | Huntsman V3 Pro Mini (`1532:02B0`) | in development, not tested on hardware |
