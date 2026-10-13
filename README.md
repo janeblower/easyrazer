@@ -4,8 +4,8 @@
 
 [Русская версия](docs/ru/README.md)
 
-A lightweight Razer Synapse replacement for the Razer Huntsman V2 Analog (`1532:0266`)
-on Windows. The actuation point of every key (1.5–3.6 mm) is written to the keyboard's
+A lightweight Razer Synapse replacement for Razer analog keyboards (the Huntsman
+Analog line) on Windows. The actuation point of every key is written to the keyboard's
 memory, after which it works with no software running at all.
 
 **Unofficial project, not affiliated with Razer Inc.**
