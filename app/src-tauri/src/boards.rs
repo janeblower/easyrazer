@@ -106,7 +106,7 @@ impl Boards {
         guard(&self.boards).get(id).map(|b| b.device.clone())
     }
 
-    /// No keyboard met this session; a board merely busy still counts.
+    /// No board at all, an offline one opened for its profiles or a busy one included: only then does the poller report an idle status.
     pub fn is_empty(&self) -> bool {
         guard(&self.boards).is_empty()
     }
@@ -127,7 +127,12 @@ impl Boards {
         let mut device = Device::new(shared.clone()).ok()?;
         device.offline(id);
         let device = Arc::new(Mutex::new(device));
-        Some(guard(&self.boards).entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false }).device.clone())
+        let mut boards = guard(&self.boards);
+        // `forget` clears the settings under this lock; checking again keeps it from leaving a ghost board.
+        if !settings::lock(shared).devices.contains_key(id) {
+            return None;
+        }
+        Some(boards.entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false }).device.clone())
     }
 
     fn board_for(&self, id: &str, container: Option<String>, device: Arc<Mutex<Device>>) -> Arc<Mutex<Device>> {
