@@ -113,7 +113,7 @@ async function mockBackend() {
       rx: reply,
     };
     devLog.push(e);
-    if (live) void emit("hid-log", e);
+    if (live) void emit("hid-log", { id: "MOCK", entry: e });
     return e;
   };
   entry("00:84", [], [3, 0], false);
@@ -173,7 +173,7 @@ async function mockBackend() {
       firmware: "1.02",
       serial: "PM0000000000000",
     }),
-    dev_exchange: ({ class: c, id, args }) => entry(`${hex2(c as number)}:${hex2(id as number)}`, args as number[], [0]),
+    dev_exchange: ({ class: c, cmd, args }) => entry(`${hex2(c as number)}:${hex2(cmd as number)}`, args as number[], [0]),
     dev_keys: ({ keys }) =>
       Object.fromEntries(
         (keys as number[]).map((k) => [
@@ -282,7 +282,9 @@ async function mockBackend() {
       startup: 1,
       free_slot: true,
     },
+    devices: { devices: [{ id: "MOCK", model: MODELS[model], connected: true, driver_mode: true }], unsupported: null },
     status: {
+      id: "MOCK",
       device: true,
       synapse: false,
       // Rapid Trigger shows on the map only in driver mode.
@@ -291,7 +293,6 @@ async function mockBackend() {
       profile_name: "Dev",
       model: MODELS[model],
       verified: true,
-      unsupported: null,
       error: null,
     },
     read_all: state,

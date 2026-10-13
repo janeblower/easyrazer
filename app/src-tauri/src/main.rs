@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod boards;
 mod commands;
 mod dev;
 mod device;
@@ -14,13 +15,14 @@ mod tray;
 mod wheel;
 
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::Duration;
 
 use razer_core::control::{LED_GAME, LED_MACRO};
 use razer_core::rapid::Output;
 use settings::CloseAction;
-use tauri::{Emitter, Manager, WindowEvent};
+use engine::Sink;
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
     let default_hook = std::panic::take_hook();
@@ -31,11 +33,16 @@ fn main() {
         }
         default_hook(info);
     }));
-    let device = device::Device::new().expect("hidapi init");
+    let shared: settings::Shared = Arc::new(Mutex::new(settings::load()));
     let (window_ready, ready) = mpsc::channel();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
-        .manage(commands::AppState { device: Mutex::new(device), window_ready: Mutex::new(Some(window_ready)) })
+        .manage(commands::AppState {
+            settings: shared,
+            boards: boards::Boards::new().expect("hidapi init"),
+            hooks: OnceLock::new(),
+            window_ready: Mutex::new(Some(window_ready)),
+        })
         .setup(move |app| {
             tray::build(app)?;
             let shown = !std::env::args().any(|a| a == autostart::TRAY_ARG);
@@ -46,45 +53,13 @@ fn main() {
             let sink_handle = handle.clone();
             let progress_handle = handle.clone();
             // A connect reads the slots before the window asks for them.
-            app.state::<commands::AppState>()
-                .device()
-                .set_progress(Arc::new(move |done, total, a| commands::emit_progress(&progress_handle, done, total, a)));
-            app.state::<commands::AppState>().device().set_sink(Arc::new(move |o| {
-                if let Output::Depth { depth, travel, down } = o {
-                    // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
-                    if let Some(w) = sink_handle.get_webview_window("main")
-                        && (depth == 0 || w.is_visible().unwrap_or(false))
-                    {
-                        let _ = w.emit("key-depth", (depth, travel, down));
-                    }
-                    return;
-                }
-                let h = sink_handle.clone();
-                // Off the reader thread: the device lock can be held for seconds by a full read.
-                std::thread::spawn(move || match o {
-                    Output::Brightness(step) => h.state::<commands::AppState>().device().step_brightness(step > 0),
-                    Output::Sleep => engine::sleep(),
-                    Output::NextProfile => {
-                        let state = h.state::<commands::AppState>();
-                        state.device().next_profile();
-                        let _ = h.emit("status", &commands::poll(&state));
-                    }
-                    Output::MacroLed => {
-                        h.state::<commands::AppState>().device().set_led(LED_MACRO, true, true);
-                        std::thread::sleep(Duration::from_secs(1));
-                        h.state::<commands::AppState>().device().set_led(LED_MACRO, false, false);
-                    }
-                    Output::GameMode(on) => h.state::<commands::AppState>().device().set_led(LED_GAME, on, false),
-                    Output::SnapTap(on) => {
-                        if let Err(e) = h.state::<commands::AppState>().device().set_snap_tap(on) {
-                            let _ = h.emit("app-error", e);
-                        }
-                        let _ = h.emit("snap-tap", on);
-                    }
-                    _ => {}
-                });
-            }));
-            dev::sync_listener(app.handle(), &app.state::<commands::AppState>().device());
+            let _ = app.state::<commands::AppState>().hooks.set(boards::Hooks {
+                sink: Arc::new(move |id: &str| sink(sink_handle.clone(), id.to_string())),
+                progress: Arc::new(move |id: &str| {
+                    let (h, id) = (progress_handle.clone(), id.to_string());
+                    Arc::new(move |done, total, a| commands::emit_progress(&h, &id, done, total, a))
+                }),
+            });
             let blocked = focus::watch();
             let focus_handle = handle.clone();
             std::thread::spawn(move || {
@@ -92,7 +67,11 @@ fn main() {
                     // A switch waits for the device lock; by then only the latest state matters.
                     let b = blocked.try_iter().last().unwrap_or(b);
                     let state = focus_handle.state::<commands::AppState>();
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| state.device().set_input_blocked(b)));
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        for (_, d) in state.boards.all() {
+                            commands::lock(&d).set_input_blocked(b);
+                        }
+                    }));
                 }
             });
             std::thread::spawn(move || {
@@ -101,12 +80,35 @@ fn main() {
                 if shown {
                     let _ = ready.recv_timeout(Duration::from_secs(10));
                 }
+                // A board busy when the list changed gets its listener on a later poll.
+                let mut unsynced = std::collections::BTreeSet::new();
                 loop {
                     // One failed step must not end the watching for the rest of the session.
-                    let step = std::panic::catch_unwind(AssertUnwindSafe(|| commands::poll(&handle.state::<commands::AppState>())));
-                    if let Ok(status) = step {
-                        let _ = handle.emit("status", &status);
-                    }
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        let state = handle.state::<commands::AppState>();
+                        let (statuses, changed, synapse) = commands::poll(&state);
+                        if changed {
+                            unsynced.extend(state.boards.all().into_iter().map(|(id, _)| id));
+                        }
+                        if !unsynced.is_empty() {
+                            let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+                            unsynced.retain(|id| {
+                                let Some(d) = state.boards.get(id) else { return false };
+                                let Some(dev) = boards::try_guard(&d) else { return true };
+                                dev::sync_listener(&handle, mode, size, id, &dev);
+                                false
+                            });
+                        }
+                        if changed {
+                            let _ = handle.emit("devices", ());
+                        }
+                        if state.boards.is_empty() {
+                            let _ = handle.emit("status", commands::idle_status(&state, None, synapse));
+                        }
+                        for status in statuses {
+                            let _ = handle.emit("status", &status);
+                        }
+                    }));
                     std::thread::sleep(Duration::from_secs(2));
                 }
             });
@@ -118,7 +120,7 @@ fn main() {
                 return;
             }
             if let WindowEvent::CloseRequested { api, .. } = e {
-                let action = w.state::<commands::AppState>().device().settings().close_action;
+                let action = w.state::<commands::AppState>().settings().close_action;
                 match action {
                     CloseAction::Ask => {
                         api.prevent_close();
@@ -135,6 +137,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::status,
+            commands::devices,
             commands::layout,
             commands::window_ready,
             commands::read_all,
@@ -187,9 +190,59 @@ fn main() {
         .run(|app, e| match e {
             // The last window closing leaves the app in the tray; only an explicit exit carries a code.
             tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
-            tauri::RunEvent::Exit => app.state::<commands::AppState>().device().shutdown(),
+            tauri::RunEvent::Exit => {
+                for (_, d) in app.state::<commands::AppState>().boards.all() {
+                    commands::lock(&d).shutdown();
+                }
+            }
             _ => {}
         });
+}
+
+fn sink(h: AppHandle, id: String) -> Sink {
+    Arc::new(move |o| {
+        if let Output::Depth { depth, travel, down } = o {
+            // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
+            if let Some(w) = h.get_webview_window("main")
+                && (depth == 0 || w.is_visible().unwrap_or(false))
+            {
+                let _ = w.emit("key-depth", (&id, depth, travel, down));
+            }
+            return;
+        }
+        let (h, id) = (h.clone(), id.clone());
+        // Off the reader thread: the device lock can be held for seconds by a full read.
+        std::thread::spawn(move || {
+            let state = h.state::<commands::AppState>();
+            let Ok(d) = state.device(&id) else { return };
+            match o {
+                Output::Brightness(step) => commands::lock(&d).step_brightness(step > 0),
+                Output::Sleep => engine::sleep(),
+                Output::NextProfile => {
+                    commands::lock(&d).next_profile();
+                    let watch = state.settings().watch_synapse;
+                    let synapse = watch && device::synapse_running();
+                    let status = commands::lock(&d).status(synapse);
+                    let _ = h.emit("status", &status);
+                }
+                Output::MacroLed => {
+                    commands::lock(&d).set_led(LED_MACRO, true, true);
+                    std::thread::sleep(Duration::from_secs(1));
+                    commands::lock(&d).set_led(LED_MACRO, false, false);
+                }
+                Output::GameMode(on) => commands::lock(&d).set_led(LED_GAME, on, false),
+                Output::SnapTap(on) => {
+                    let r = commands::lock(&d).set_snap_tap(on);
+                    if let Err(e) = r {
+                        let model = commands::lock(&d).name();
+                        let _ = h.emit("app-error", format!("{model}: {e}"));
+                    }
+                    let _ = h.emit("snap-tap", (&id, on));
+                }
+                _ => {}
+            }
+        });
+    })
 }
 
 /// A lone Alt opens the (absent) window menu, and its modal loop stalls the event loop until the

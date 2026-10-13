@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::Sender;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use razer_core::actuation::Outcome;
 use razer_core::binding::{self, Action};
@@ -13,22 +13,44 @@ use razer_core::layout::{self as kb_layout, Board};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
+use crate::boards::{Boards, DevicesView, Hooks};
 use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
-use crate::settings::{CloseAction, DevPanel, DevWindow, Rapid, SnapTap};
-use crate::{autostart, i18n, tray};
+use crate::settings::{self, CloseAction, DevPanel, DevWindow, Rapid, Settings, Shared, SnapTap};
+use crate::{autostart, dynamic_lighting, i18n, tray};
 
 pub struct AppState {
-    pub device: Mutex<Device>,
+    pub settings: Shared,
+    pub boards: Boards,
+    /// Set in `setup`, before the watcher starts.
+    pub hooks: OnceLock<Hooks>,
     /// Lets the watcher connect; taken once the window listens to the read progress.
     pub window_ready: Mutex<Option<Sender<()>>>,
 }
 
+/// A command that panicked mid-way leaves the device in a usable state, so poisoning is ignored.
+pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
+    d.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl AppState {
-    /// A command that panicked mid-way leaves the device in a usable state, so poisoning is ignored.
-    pub fn device(&self) -> MutexGuard<'_, Device> {
-        self.device.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn device(&self, id: &str) -> Result<Arc<Mutex<Device>>, String> {
+        self.boards.get(id).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
+    }
+
+    pub fn lang(&self) -> String {
+        self.settings().language.clone().unwrap_or_else(|| "en".into())
+    }
+
+    pub fn settings(&self) -> MutexGuard<'_, Settings> {
+        settings::lock(&self.settings)
+    }
+
+    pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
+        let mut s = self.settings();
+        f(&mut s);
+        settings::save(&s)
     }
 }
 
@@ -111,16 +133,36 @@ impl From<Written> for WriteResult {
     }
 }
 
-/// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
-pub fn poll(state: &AppState) -> Status {
-    let watch = state.device().settings().watch_synapse;
+/// One watcher step: the Synapse check runs outside every lock, `tasklist` takes a few hundred ms.
+pub fn poll(state: &AppState) -> (Vec<Status>, bool, bool) {
+    let watch = state.settings().watch_synapse;
     let synapse = watch && device::synapse_running();
-    state.device().status(synapse)
+    let mut changed = state.hooks.get().is_some_and(|h| state.boards.discover(&state.settings, h, synapse));
+    let (out, moved) = state.boards.statuses(synapse);
+    changed |= moved;
+    (out, changed, synapse)
+}
+
+/// The status of a keyboard not attached this session, or of none at all.
+pub fn idle_status(state: &AppState, id: Option<String>, synapse: bool) -> Status {
+    let driver_mode = state.settings().device(id.as_deref()).driver_mode;
+    Status { id, device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, error: None }
 }
 
 #[tauri::command]
-pub async fn status(state: State<'_, AppState>) -> Result<Status, String> {
-    Ok(poll(&state))
+pub async fn status(state: State<'_, AppState>, id: Option<String>) -> Result<Status, String> {
+    let watch = state.settings().watch_synapse;
+    let synapse = watch && device::synapse_running();
+    match id.as_deref().and_then(|id| state.boards.get(id)) {
+        Some(d) => Ok(lock(&d).status(synapse)),
+        None => Ok(idle_status(&state, id, synapse)),
+    }
+}
+
+#[tauri::command]
+pub async fn devices(state: State<'_, AppState>) -> Result<DevicesView, String> {
+    let s = state.settings().clone();
+    Ok(DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported() })
 }
 
 #[tauri::command]
@@ -142,14 +184,15 @@ pub fn lighting_layout() -> Vec<KeyView> {
 }
 
 /// The window fills the key map from these while a slot is read.
-pub fn emit_progress(app: &AppHandle, done: usize, total: usize, key: Option<(u8, f32)>) {
-    let _ = app.emit("read-progress", (done, total, key.map(|k| k.0), key.map(|k| k.1)));
+pub fn emit_progress(app: &AppHandle, id: &str, done: usize, total: usize, key: Option<(u8, f32)>) {
+    let _ = app.emit("read-progress", (id, done, total, key.map(|k| k.0), key.map(|k| k.1)));
 }
 
 #[tauri::command]
-pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actuation, String> {
-    let mut device = state.device();
-    let all = device.read_all(|done, total, a| emit_progress(&app, done, total, a))?;
+pub async fn read_all(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Actuation, String> {
+    let d = state.device(&id)?;
+    let mut device = lock(&d);
+    let all = device.read_all(|done, total, a| emit_progress(&app, &id, done, total, a))?;
     let (unsaved, unsaved_bindings) = device.unsaved();
     Ok(Actuation {
         values: all.into_iter().collect(),
@@ -166,85 +209,113 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>) -> Result<Actu
 #[tauri::command]
 pub async fn apply(
     state: State<'_, AppState>,
+    id: String,
     changes: Vec<(u8, f32)>,
     rapid: BTreeMap<u8, Rapid>,
     snap: Option<SnapTap>,
     bindings: Vec<(u8, Action)>,
     hypershift: HypershiftEdits,
 ) -> Result<WriteResult, String> {
-    state.device().apply(&changes, &rapid, snap.as_ref(), &bindings, &hypershift).map(Into::into)
+    let d = state.device(&id)?;
+    let r = lock(&d).apply(&changes, &rapid, snap.as_ref(), &bindings, &hypershift);
+    r.map(Into::into)
 }
 
 #[tauri::command]
 pub async fn save(
     state: State<'_, AppState>,
+    id: String,
     changes: Vec<(u8, f32)>,
     bindings: Vec<(u8, Action)>,
     hypershift: HypershiftEdits,
 ) -> Result<WriteResult, String> {
-    state.device().save(&changes, &bindings, &hypershift).map(Into::into)
+    let d = state.device(&id)?;
+    let r = lock(&d).apply_and_write(&changes, &bindings, &hypershift);
+    r.map(Into::into)
 }
 
 #[tauri::command]
-pub async fn macros(state: State<'_, AppState>) -> Result<MacroState, String> {
-    Ok(state.device().macros())
+pub async fn macros(state: State<'_, AppState>, id: String) -> Result<MacroState, String> {
+    let dev = state.device(&id)?;
+    Ok(lock(&dev).macros())
 }
 
 /// The macro's id, new for a new macro, and the library after the change.
 #[tauri::command]
-pub async fn set_macro(state: State<'_, AppState>, id: Option<u16>, name: String, events: Vec<Event>) -> Result<(u16, MacroState), String> {
-    let mut device = state.device();
-    let id = device.set_macro(id, name, events)?;
-    Ok((id, device.macros()))
+pub async fn set_macro(state: State<'_, AppState>, id: String, macro_id: Option<u16>, name: String, events: Vec<Event>) -> Result<(u16, MacroState), String> {
+    let dev = state.device(&id)?;
+    let mut device = lock(&dev);
+    let new_id = device.set_macro(macro_id, name, events)?;
+    Ok((new_id, device.macros()))
 }
 
 #[tauri::command]
-pub async fn write_macro(state: State<'_, AppState>, id: u16) -> Result<MacroState, String> {
-    let mut device = state.device();
-    device.write_macro(id)?;
+pub async fn write_macro(state: State<'_, AppState>, id: String, macro_id: u16) -> Result<MacroState, String> {
+    let dev = state.device(&id)?;
+    let mut device = lock(&dev);
+    device.write_macro(macro_id)?;
     Ok(device.macros())
 }
 
 #[tauri::command]
-pub async fn delete_macro(state: State<'_, AppState>, id: u16) -> Result<MacroState, String> {
-    let mut device = state.device();
-    device.delete_macro(id)?;
+pub async fn delete_macro(state: State<'_, AppState>, id: String, macro_id: u16) -> Result<MacroState, String> {
+    let dev = state.device(&id)?;
+    let mut device = lock(&dev);
+    device.delete_macro(macro_id)?;
     Ok(device.macros())
 }
 
 #[tauri::command]
-pub async fn lighting_state(state: State<'_, AppState>) -> Result<LightingState, String> {
-    state.device().lighting_state()
+pub async fn lighting_state(state: State<'_, AppState>, id: String) -> Result<LightingState, String> {
+    let dev = state.device(&id)?;
+    lock(&dev).lighting_state()
 }
 
 #[tauri::command]
-pub async fn lighting_preview(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device().lighting_preview(&look)
+pub async fn lighting_preview(state: State<'_, AppState>, id: String, look: Look) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).lighting_preview(&look)
 }
 
 #[tauri::command]
-pub async fn lighting_apply(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device().lighting_apply(look)
+pub async fn lighting_apply(state: State<'_, AppState>, id: String, look: Look) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).lighting_apply(look)
 }
 
 #[tauri::command]
-pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<(), String> {
-    state.device().lighting_write(look)
+pub async fn lighting_write(state: State<'_, AppState>, id: String, look: Look) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).lighting_write(look)
 }
 
 #[tauri::command]
 pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.confirm_write = on)
+    state.update_settings(|s| s.confirm_write = on)
 }
 
 #[tauri::command]
-pub async fn set_driver_mode(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().set_driver_mode(on)
+pub async fn set_driver_mode(state: State<'_, AppState>, id: String, on: bool) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).set_driver_mode(on)
 }
 
 #[tauri::command]
 pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().set_dynamic_lighting(on)
+    if !on {
+        let watch = state.settings().watch_synapse;
+        if watch && device::synapse_running() {
+            return Err(i18n::t(&state.lang(), "backend.synapseRunning"));
+        }
+    }
+    dynamic_lighting::set(on)?;
+    let mut first = None;
+    for (_, d) in state.boards.all() {
+        if let Err(e) = lock(&d).set_dynamic_lighting(on) {
+            first.get_or_insert(e);
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 #[derive(Serialize)]
@@ -264,7 +335,7 @@ pub struct AppSettings {
 
 #[tauri::command]
 pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    let s = state.device().settings().clone();
+    let s = state.settings().clone();
     Ok(AppSettings {
         autostart: autostart::enabled(),
         close_action: s.close_action,
@@ -293,22 +364,22 @@ pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: 
     if on {
         set_autostart(app, true).await?;
     }
-    state.device().update_settings(|s| s.autostart_offered = true)
+    state.update_settings(|s| s.autostart_offered = true)
 }
 
 #[tauri::command]
 pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -> Result<(), String> {
-    state.device().update_settings(|s| s.close_action = action)
+    state.update_settings(|s| s.close_action = action)
 }
 
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.watch_synapse = on)
+    state.update_settings(|s| s.watch_synapse = on)
 }
 
 #[tauri::command]
 pub async fn set_unverified_writes(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.unverified_writes = on)
+    state.update_settings(|s| s.unverified_writes = on)
 }
 
 #[tauri::command]
@@ -316,7 +387,7 @@ pub async fn set_language(app: AppHandle, state: State<'_, AppState>, language: 
     if !i18n::known(&language) {
         return Err(format!("unknown language {language}"));
     }
-    state.device().update_settings(|s| s.language = Some(language))?;
+    state.update_settings(|s| s.language = Some(language))?;
     tray::retitle(&app);
     Ok(())
 }
@@ -324,7 +395,13 @@ pub async fn set_language(app: AppHandle, state: State<'_, AppState>, language: 
 #[tauri::command]
 pub async fn hide_window(state: State<'_, AppState>, window: WebviewWindow) -> Result<(), String> {
     window.destroy().map_err(|e| e.to_string())?;
-    state.device().drop_preview()
+    let mut first = None;
+    for (_, d) in state.boards.all() {
+        if let Err(e) = lock(&d).drop_preview() {
+            first.get_or_insert(e);
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 #[tauri::command]
@@ -333,63 +410,75 @@ pub fn quit(app: AppHandle) {
 }
 
 #[tauri::command]
-pub async fn profiles(state: State<'_, AppState>) -> Result<ProfilesView, String> {
-    Ok(state.device().profiles_view())
+pub async fn profiles(state: State<'_, AppState>, id: String) -> Result<ProfilesView, String> {
+    if let Some(d) = state.boards.get(&id) {
+        return Ok(lock(&d).profiles_view());
+    }
+    let s = state.settings();
+    Ok(device::profiles_view(s.device(Some(&id)), None))
 }
 
 #[tauri::command]
-pub async fn load_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.load_profile(id)?;
+pub async fn load_profile(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.load_profile(profile)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn create_profile(state: State<'_, AppState>) -> Result<ProfilesView, String> {
-    let mut d = state.device();
+pub async fn create_profile(state: State<'_, AppState>, id: String) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
     d.create_profile()?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn duplicate_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.duplicate_profile(id)?;
+pub async fn duplicate_profile(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.duplicate_profile(profile)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn rename_profile(state: State<'_, AppState>, id: u32, name: String) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.rename_profile(id, &name)?;
+pub async fn rename_profile(state: State<'_, AppState>, id: String, profile: u32, name: String) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.rename_profile(profile, &name)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn delete_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.delete_profile(id)?;
+pub async fn delete_profile(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.delete_profile(profile)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn set_startup(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.set_startup(id)?;
+pub async fn set_startup(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.set_startup(profile)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn free_slot(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.free_slot(id)?;
+pub async fn free_slot(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.free_slot(profile)?;
     Ok(d.profiles_view())
 }
 
 #[tauri::command]
-pub async fn write_profile(state: State<'_, AppState>, id: u32) -> Result<ProfilesView, String> {
-    let mut d = state.device();
-    d.write_profile(id)?;
+pub async fn write_profile(state: State<'_, AppState>, id: String, profile: u32) -> Result<ProfilesView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    d.write_profile(profile)?;
     Ok(d.profiles_view())
 }
 
@@ -399,15 +488,16 @@ mod tests {
 
     #[test]
     fn a_panic_under_the_lock_does_not_lock_everyone_out() {
-        let state = AppState { device: Mutex::new(Device::new().unwrap()), window_ready: Mutex::new(None) };
+        let shared: Shared = Default::default();
+        let device = Mutex::new(Device::new(shared).unwrap());
         let _ = std::thread::scope(|s| {
             s.spawn(|| {
-                let _guard = state.device();
+                let _guard = lock(&device);
                 panic!("command failed");
             })
             .join()
         });
-        assert!(state.device.is_poisoned());
-        let _ = state.device().settings();
+        assert!(device.is_poisoned());
+        let _ = lock(&device).data();
     }
 }

@@ -3,12 +3,14 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import { call, keyboard, ours, pick } from "./keyboard";
 import type {
   Action,
   Actuation,
   AppSettings,
   CloseAction,
   Status as DeviceStatus,
+  DevicesView,
   Hypershift,
   KeyMap,
   KeyView,
@@ -39,7 +41,7 @@ import { useConfirmWrite } from "./confirmWrite";
 import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
 import DevPanel from "./components/DevPanel.vue";
-import { dev, setPanel, startDev } from "./dev";
+import { dev, reloadLog, setPanel, startDev } from "./dev";
 import DevKeys from "./components/DevKeys.vue";
 import { applyLayout } from "./devWindow";
 
@@ -88,6 +90,7 @@ const closeRemember = ref(false);
 const hiding = ref(false); // asked before dropping edits with the window
 const offering = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
+const devices = ref<DevicesView | null>(null);
 let loadedProfile: number | null = null; // profile the baseline was read from
 const unlisten: UnlistenFn[] = [];
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -322,24 +325,32 @@ function showError(e: unknown) {
 }
 
 async function loadMacros() {
+  if (!keyboard.value) return;
   try {
-    macroState.value = await invoke<MacroState>("macros");
+    const id = keyboard.value;
+    const r = await call<MacroState>("macros");
+    if (ours(id)) macroState.value = r;
   } catch (error) {
     showError(error);
   }
 }
 
 async function loadProfiles() {
+  if (!keyboard.value) return;
   try {
-    profiles.value = await invoke<ProfilesView>("profiles");
+    const id = keyboard.value;
+    const r = await call<ProfilesView>("profiles");
+    if (ours(id)) profiles.value = r;
   } catch (error) {
     showError(error);
   }
 }
 
 async function load() {
+  const id = keyboard.value;
   busy.value = true;
   progress.value = [0, 1];
+  let stale = false;
   try {
     const {
       values: base,
@@ -350,7 +361,12 @@ async function load() {
       unsaved_bindings,
       hypershift,
       profile,
-    } = await invoke<Actuation>("read_all");
+    } = await call<Actuation>("read_all");
+    // The keyboard changed while reading: nothing here is for the new one.
+    if (!ours(id)) {
+      stale = true;
+      return;
+    }
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -375,11 +391,13 @@ async function load() {
     await loadMacros();
     await loadProfiles();
   } catch (error) {
-    message.value = String(error);
+    if (ours(id)) message.value = String(error);
   } finally {
     progress.value = null;
     busy.value = false;
   }
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- refresh and load call each other
+  if (stale) await refresh();
 }
 
 function revert() {
@@ -394,6 +412,7 @@ function revert() {
 }
 
 async function onStatus(s: DeviceStatus) {
+  if (!ours(s.id)) return;
   if (s.error) showError(s.error);
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
   if (busy.value) return;
@@ -413,17 +432,35 @@ async function onStatus(s: DeviceStatus) {
 
 async function refresh() {
   try {
-    await onStatus(await invoke<DeviceStatus>("status"));
+    await onStatus(await invoke<DeviceStatus>("status", { id: keyboard.value }));
   } catch (error) {
     message.value = String(error);
   }
+}
+
+async function loadDevices() {
+  try {
+    devices.value = await invoke<DevicesView>("devices");
+  } catch (error) {
+    showError(error);
+    return;
+  }
+  const next = pick(devices.value.devices, keyboard.value, hasUnapplied());
+  if (next === keyboard.value) return;
+  keyboard.value = next;
+  // Another keyboard: nothing read from the last one applies.
+  revert();
+  loadedProfile = null;
+  layoutModel = null;
+  await reloadLog();
+  await refresh();
 }
 
 async function setMode(on: boolean) {
   if (on === driver.value) return;
   busy.value = true;
   try {
-    await invoke("set_driver_mode", { on });
+    await call("set_driver_mode", { on });
   } catch (error) {
     showError(error);
   } finally {
@@ -450,7 +487,9 @@ function selectAll() {
 async function profileOp(command: string, args: Record<string, unknown> = {}) {
   busy.value = true;
   try {
-    profiles.value = await invoke<ProfilesView>(command, args);
+    const id = keyboard.value;
+    const r = await call<ProfilesView>(command, args);
+    if (ours(id)) profiles.value = r;
   } catch (error) {
     showError(error);
   } finally {
@@ -475,7 +514,7 @@ function confirmSwitch() {
 function confirmRemove() {
   const id = removing.value;
   removing.value = null;
-  if (id != null) void profileOp("delete_profile", { id });
+  if (id != null) void profileOp("delete_profile", { profile: id });
 }
 
 type Written = { status: "ok" | "unconfirmed"; key: number };
@@ -503,6 +542,7 @@ function merge<O extends Written, V, E>(
 }
 
 async function write(command: "apply" | "save", done: string) {
+  const id = keyboard.value;
   busy.value = true;
   let failed = false;
   try {
@@ -520,10 +560,12 @@ async function write(command: "apply" | "save", done: string) {
       bindings: bound,
       unsaved_bindings,
       hypershift: layer,
-    } = await invoke<WriteResult>(
+    } = await call<WriteResult>(
       command,
       rapid ? { changes, rapid, snap: snapNext, bindings, hypershift } : { changes, bindings, hypershift },
     );
+    // The window moved to another keyboard meanwhile; its edits were dropped with the switch.
+    if (!ours(id)) return;
     // The backend takes the layer whole or refuses it, so a result means every edit is in.
     takeHypershift(layer);
     hsEdits.value = {};
@@ -582,8 +624,13 @@ async function onWriteMacros() {
   const ids = macrosToWrite.value;
   macrosToWrite.value = [];
   busy.value = true;
+  const kb = keyboard.value;
   try {
-    for (const id of ids) macroState.value = await invoke<MacroState>("write_macro", { id });
+    for (const id of ids) {
+      const r = await call<MacroState>("write_macro", { macroId: id }, kb);
+      if (!ours(kb)) return;
+      macroState.value = r;
+    }
   } catch (error) {
     message.value = String(error);
     return;
@@ -623,6 +670,8 @@ async function onOffer(on: boolean) {
   }
 }
 
+let firstKeyboard: Promise<void> | null = null;
+
 onMounted(async () => {
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
@@ -651,25 +700,35 @@ onMounted(async () => {
   }
   // A connect reads the keyboard on its own, before the status that starts load() arrives.
   unlisten.push(
-    await listen<[number, number, number | null, number | null]>("read-progress", (e) => {
-      const [done, total, key, mm] = e.payload;
+    await listen<[string, number, number, number | null, number | null]>("read-progress", (e) => {
+      // The first keyboard attaches, and reads, before its `devices` event arrives.
+      if (keyboard.value === null) firstKeyboard ??= loadDevices().finally(() => (firstKeyboard = null));
+      if (!ours(e.payload[0])) return;
+      const [, done, total, key, mm] = e.payload;
       progress.value = [done, total];
       if (key != null && mm != null) baseline.value[key] = mm;
     }),
   );
   await invoke("window_ready");
   await startDev();
+  await loadDevices();
   await loadMacros();
   unlisten.push(
-    await listen<boolean>("snap-tap", (e) => {
-      snapBase.value = { ...snapBase.value, enabled: e.payload };
-      if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: e.payload });
+    await listen<[string, boolean]>("snap-tap", (e) => {
+      const [id, on] = e.payload;
+      if (!ours(id)) return;
+      snapBase.value = { ...snapBase.value, enabled: on };
+      if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: on });
     }),
     await listen<DeviceStatus>("status", (e) => {
       void onStatus(e.payload);
     }),
+    await listen("devices", () => {
+      void loadDevices();
+    }),
   );
-  await refresh();
+  // With a keyboard picked, loadDevices has refreshed already.
+  if (keyboard.value === null) await refresh();
 });
 
 onUnmounted(() => {
@@ -702,14 +761,14 @@ onUnmounted(() => {
             :view="profiles"
             :writable="writable"
             :next-combo="nextCombo"
-            @load="(id) => switchTo(() => profileOp('load_profile', { id }))"
+            @load="(id) => switchTo(() => profileOp('load_profile', { profile: id }))"
             @create="switchTo(() => profileOp('create_profile'))"
-            @duplicate="(id) => profileOp('duplicate_profile', { id })"
-            @rename="(id, name) => profileOp('rename_profile', { id, name })"
+            @duplicate="(id) => profileOp('duplicate_profile', { profile: id })"
+            @rename="(id, name) => profileOp('rename_profile', { profile: id, name })"
             @remove="(id) => (removing = id)"
-            @startup="(id) => profileOp('set_startup', { id })"
-            @free="(id) => profileOp('free_slot', { id })"
-            @write="(id) => profileOp('write_profile', { id })"
+            @startup="(id) => profileOp('set_startup', { profile: id })"
+            @free="(id) => profileOp('free_slot', { profile: id })"
+            @write="(id) => profileOp('write_profile', { profile: id })"
           />
           <span class="inline-flex" :title="$t('mode.hint')">
             <button
@@ -736,7 +795,13 @@ onUnmounted(() => {
             </button>
           </span>
         </nav>
-        <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
+        <StatusBar
+          :status="status"
+          :progress="progress"
+          :unsupported="devices?.unsupported ?? null"
+          :message="tab !== 'lighting' ? message : ''"
+          :error="appError"
+        />
         <!-- With the map shown, the tab is as wide as the full-size map on every model, not the window. -->
         <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'min-w-[1121px]': section !== 'macros' }">
           <div class="flex gap-3 items-center">
@@ -846,7 +911,7 @@ onUnmounted(() => {
             <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
-        <LightingTab v-else-if="tab === 'lighting'" :status="status" />
+        <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
         <SettingsTab v-else />
         <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
         <ConfirmWrite

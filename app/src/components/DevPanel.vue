@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
-import type { DeviceInfo, Dock } from "../types";
+import { call, keyboard, ours } from "../keyboard";
+import type { DeviceInfo, Dock, Status } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
-import { dev, selected, setPanel, startDev } from "../dev";
+import { dev, followKeyboard, selected, setPanel, startDev } from "../dev";
 import { trackDetached } from "../devWindow";
 import DevConsole from "./DevConsole.vue";
 import DevTraffic from "./DevTraffic.vue";
@@ -52,7 +53,7 @@ watch(drawer, () => {
 async function loadInfo() {
   note.value = "";
   try {
-    info.value = await invoke<DeviceInfo | null>("dev_device");
+    info.value = await call<DeviceInfo | null>("dev_device");
   } catch (error) {
     note.value = String(error);
   }
@@ -80,9 +81,14 @@ watch(tab, (v) => {
   if (v === "device") void loadInfo();
 });
 
+watch(keyboard, () => {
+  info.value = null;
+  if (tab.value === "device") void loadInfo();
+});
+
 async function copyDiagnostics() {
   try {
-    await navigator.clipboard.writeText(await invoke<string>("dev_diagnostics", { uncensored: uncensored.value }));
+    await navigator.clipboard.writeText(await call<string>("dev_diagnostics", { uncensored: uncensored.value }));
     note.value = translate("dev.copied");
   } catch (error) {
     note.value = String(error);
@@ -98,16 +104,30 @@ function onKey(e: KeyboardEvent) {
   else drawer.open = !drawer.open;
 }
 
+let unlisten: UnlistenFn | null = null;
+// The firmware mode, the startup slot and the loaded profile change with these, so the tab follows them.
+let seen = "";
+
 onMounted(async () => {
+  unlisten = await listen<Status>("status", (e) => {
+    const s = e.payload;
+    if (!ours(s.id)) return;
+    const now = `${s.device}:${s.driver_mode}:${s.profile}`;
+    if (now === seen) return;
+    seen = now;
+    if (tab.value === "device") void loadInfo();
+  });
   if (!props.detached) return;
   window.addEventListener("keydown", onKey);
   root.value?.focus();
+  await followKeyboard();
   await startDev();
   setLanguage(dev.language ?? systemLanguage());
   await trackDetached();
 });
 
 onBeforeUnmount(() => {
+  unlisten?.();
   window.removeEventListener("keydown", onKey);
 });
 

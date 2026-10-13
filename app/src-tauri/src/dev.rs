@@ -11,7 +11,7 @@ use razer_core::{control, keymap, macros};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::AppState;
+use crate::commands::{AppState, lock};
 use crate::device::Device;
 use crate::settings::{DEV_LOG_SIZES, DevPanel, DevWindow, DeviceData, Settings};
 
@@ -42,14 +42,19 @@ pub struct DevKey {
     hypershift: Option<RawKey>,
 }
 
+#[derive(Clone, Serialize)]
+struct LogEvent<'a> {
+    id: &'a str,
+    entry: &'a Entry,
+}
+
 /// Streams the log to every window and keeps the larger log while the mode is on.
-pub fn sync_listener(app: &AppHandle, device: &Device) {
-    let s = device.settings();
-    device.log().set_capacity(if s.dev_mode { s.dev_log_size } else { logged::CAPACITY });
-    let listener = device.settings().dev_mode.then(|| {
-        let app = app.clone();
+pub fn sync_listener(app: &AppHandle, dev_mode: bool, log_size: usize, id: &str, device: &Device) {
+    device.log().set_capacity(if dev_mode { log_size } else { logged::CAPACITY });
+    let listener = dev_mode.then(|| {
+        let (app, id) = (app.clone(), id.to_string());
         Box::new(move |e: &Entry| {
-            let _ = app.emit("hid-log", e);
+            let _ = app.emit("hid-log", LogEvent { id: &id, entry: e });
         }) as Listener
     });
     device.log().listen(listener);
@@ -57,42 +62,47 @@ pub fn sync_listener(app: &AppHandle, device: &Device) {
 
 #[tauri::command]
 pub async fn set_dev_mode(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    let mut device = state.device();
-    device.update_settings(|s| {
+    state.update_settings(|s| {
         s.dev_mode = on;
         if on && s.dev_panel.is_none() {
             s.dev_panel = Some(DevPanel::default());
         }
     })?;
-    sync_listener(&app, &device);
+    let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+    for (id, d) in state.boards.all() {
+        sync_listener(&app, mode, size, &id, &lock(&d));
+    }
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_log_size(app: AppHandle, state: State<'_, AppState>, size: usize) -> Result<(), String> {
-    let mut device = state.device();
-    device.update_settings(|s| s.dev_log_size = size.clamp(*DEV_LOG_SIZES.start(), *DEV_LOG_SIZES.end()))?;
-    sync_listener(&app, &device);
+    state.update_settings(|s| s.dev_log_size = size.clamp(*DEV_LOG_SIZES.start(), *DEV_LOG_SIZES.end()))?;
+    let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+    for (id, d) in state.boards.all() {
+        sync_listener(&app, mode, size, &id, &lock(&d));
+    }
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_panel(app: AppHandle, state: State<'_, AppState>, panel: DevPanel) -> Result<(), String> {
-    state.device().update_settings(|s| s.dev_panel = Some(panel))?;
+    state.update_settings(|s| s.dev_panel = Some(panel))?;
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_window(state: State<'_, AppState>, geom: DevWindow) -> Result<(), String> {
-    state.device().update_settings(|s| s.dev_window = Some(geom))
+    state.update_settings(|s| s.dev_window = Some(geom))
 }
 
 #[tauri::command]
-pub async fn dev_log(state: State<'_, AppState>) -> Result<Vec<Entry>, String> {
-    Ok(state.device().log().entries())
+pub async fn dev_log(state: State<'_, AppState>, id: String) -> Result<Vec<Entry>, String> {
+    let d = state.device(&id)?;
+    Ok(lock(&d).log().entries())
 }
 
 #[tauri::command]
@@ -101,8 +111,9 @@ pub fn dev_commands() -> BTreeMap<String, CommandInfo> {
 }
 
 #[tauri::command]
-pub async fn dev_device(state: State<'_, AppState>) -> Result<Option<DeviceInfo>, String> {
-    Ok(device_info(&mut state.device()))
+pub async fn dev_device(state: State<'_, AppState>, id: String) -> Result<Option<DeviceInfo>, String> {
+    let d = state.device(&id)?;
+    Ok(device_info(&mut lock(&d)))
 }
 
 fn device_info(device: &mut Device) -> Option<DeviceInfo> {
@@ -126,17 +137,19 @@ fn device_info(device: &mut Device) -> Option<DeviceInfo> {
 }
 
 #[tauri::command]
-pub async fn dev_exchange(state: State<'_, AppState>, class: u8, id: u8, size: u8, args: Vec<u8>) -> Result<Entry, String> {
+pub async fn dev_exchange(state: State<'_, AppState>, id: String, class: u8, cmd: u8, size: u8, args: Vec<u8>) -> Result<Entry, String> {
     // `packet::request` asserts on this; the console is a trust boundary.
     if args.len() > ARGS_LEN {
         return Err(format!("more than {ARGS_LEN} bytes"));
     }
-    state.device().dev_exchange(Command::new(class, id), size, &args)
+    let d = state.device(&id)?;
+    lock(&d).dev_exchange(Command::new(class, cmd), size, &args)
 }
 
 #[tauri::command]
-pub async fn dev_keys(state: State<'_, AppState>, keys: Vec<u8>) -> Result<BTreeMap<u8, DevKey>, String> {
-    let device = state.device();
+pub async fn dev_keys(state: State<'_, AppState>, id: String, keys: Vec<u8>) -> Result<BTreeMap<u8, DevKey>, String> {
+    let d = state.device(&id)?;
+    let device = lock(&d);
     let Some(p) = device.data().loaded_profile() else { return Ok(BTreeMap::new()) };
     Ok(keys
         .into_iter()
@@ -148,15 +161,19 @@ pub async fn dev_keys(state: State<'_, AppState>, keys: Vec<u8>) -> Result<BTree
 }
 
 #[tauri::command]
-pub async fn dev_macro(state: State<'_, AppState>, id: u16) -> Result<Option<Vec<u8>>, String> {
-    Ok(state.device().data().macros.get(&id).and_then(|m| macros::encode(&m.events)))
+pub async fn dev_macro(state: State<'_, AppState>, id: String, macro_id: u16) -> Result<Option<Vec<u8>>, String> {
+    let d = state.device(&id)?;
+    let r = lock(&d).data().macros.get(&macro_id).and_then(|m| macros::encode(&m.events));
+    Ok(r)
 }
 
 #[tauri::command]
-pub async fn dev_diagnostics(state: State<'_, AppState>, uncensored: bool) -> Result<String, String> {
-    let mut device = state.device();
+pub async fn dev_diagnostics(state: State<'_, AppState>, id: String, uncensored: bool) -> Result<String, String> {
+    let s = state.settings().clone();
+    let d = state.device(&id)?;
+    let mut device = lock(&d);
     let info = device_info(&mut device);
-    Ok(report(info.as_ref(), device.settings(), device.data(), &device.log().entries(), uncensored))
+    Ok(report(info.as_ref(), &s, device.data(), &device.log().entries(), uncensored))
 }
 
 fn hex(b: &[u8]) -> String {

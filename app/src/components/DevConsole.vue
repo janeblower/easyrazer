@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
+import { call } from "../keyboard";
 import { fromConsole, registry } from "../dev";
 import { type Parsed, confirmation, hex, isWrite, parse, suggest } from "../devConsole";
 import { isError } from "../devTraffic";
@@ -85,9 +85,9 @@ async function send(p: Parsed, text: string) {
   }
   line.value = "";
   try {
-    const e = await invoke<LogEntry>("dev_exchange", {
+    const e = await call<LogEntry>("dev_exchange", {
       class: Number.parseInt(p.cmd.slice(0, 2), 16),
-      id: Number.parseInt(p.cmd.slice(3), 16),
+      cmd: Number.parseInt(p.cmd.slice(3), 16),
       size: p.size,
       args: p.args,
     });

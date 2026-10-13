@@ -2,7 +2,21 @@
 
 export type Rgb = [number, number, number];
 
+export interface DeviceEntry {
+  id: string;
+  model: string;
+  connected: boolean;
+  driver_mode: boolean;
+}
+
+export interface DevicesView {
+  devices: DeviceEntry[];
+  /** PID of a Razer keyboard without a description. */
+  unsupported: number | null;
+}
+
 export interface Status {
+  id: string | null;
   device: boolean;
   synapse: boolean;
   driver_mode: boolean;
@@ -12,7 +26,6 @@ export interface Status {
   /** Checked on hardware; others are written only when the settings allow, and never their flash. */
   verified: boolean;
   analog: Analog | null;
-  unsupported: number | null;
   error: string | null;
 }
 

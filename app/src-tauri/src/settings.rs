@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use razer_core::lighting::Rgb;
 use razer_core::macros::Event;
@@ -217,12 +218,21 @@ fn backup(p: &Path, s: &Settings, text: &str) {
 
 static NO_DATA: DeviceData = DeviceData { pid: 0, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
 
+/// The app's settings, shared by every keyboard and the app-wide commands.
+pub type Shared = Arc<Mutex<Settings>>;
+
+/// A writer that panicked left the settings as they were before its save, so poisoning is ignored.
+pub fn lock(s: &Shared) -> MutexGuard<'_, Settings> {
+    s.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl Settings {
     /// The data of keyboard `id`; empty when there is none.
     pub fn device(&self, id: Option<&str>) -> &DeviceData {
         id.and_then(|id| self.devices.get(id)).unwrap_or(&NO_DATA)
     }
 
+    #[allow(dead_code, reason = "used again for unconnected keyboards")]
     pub fn device_mut(&mut self, id: Option<&str>) -> Option<&mut DeviceData> {
         self.devices.get_mut(id?)
     }
@@ -235,6 +245,10 @@ impl Settings {
         let d = self.legacy.remove(&pid).unwrap_or_else(|| DeviceData { pid, ..Default::default() });
         self.devices.insert(id.to_string(), d);
         true
+    }
+
+    pub fn put(&mut self, id: &str, d: &DeviceData) {
+        self.devices.insert(id.to_string(), d.clone());
     }
 }
 
@@ -267,6 +281,10 @@ impl DeviceData {
         self.profile_mut(id)
     }
 
+    pub fn slots_used(&self) -> usize {
+        self.profiles.iter().filter(|p| p.slot.is_some()).count()
+    }
+
     pub fn new_profile_id(&mut self) -> u32 {
         self.next_profile_id += 1;
         self.next_profile_id
@@ -274,7 +292,31 @@ impl DeviceData {
 }
 
 pub fn dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    return Some(TEST_DIR.with(|d| d.0.clone()));
+    #[cfg(not(test))]
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer"))
+}
+
+/// Every test thread saves into a directory of its own, removed when the thread ends.
+#[cfg(test)]
+struct TestDir(PathBuf);
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DIR: TestDir = {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        TestDir(std::env::temp_dir().join(format!("easyrazer-test-{}-{n}", std::process::id())))
+    };
 }
 
 fn path() -> Option<PathBuf> {
@@ -445,6 +487,18 @@ mod tests {
         s.bind_snap_tap_once();
         assert_eq!(s.profiles[0].data.hypershift[&44].fn_id, 2, "removed later, it stays removed");
         assert!(serde_json::from_str::<DeviceData>(&serde_json::to_string(&s).unwrap()).unwrap().snap_tap_bound);
+    }
+
+    #[test]
+    fn put_replaces_only_its_keyboard() {
+        let mut s = Settings::default();
+        s.claim("A", 0x0266);
+        s.claim("B", 0x0266);
+        s.legacy.insert(0x02A6, DeviceData { pid: 0x02A6, profiles: vec![profile(9, None)], ..Default::default() });
+        s.put("A", &DeviceData { pid: 0x0266, profiles: vec![profile(1, None)], ..Default::default() });
+        assert_eq!(s.devices["A"].profiles[0].id, 1);
+        assert!(s.devices["B"].profiles.is_empty());
+        assert_eq!(s.legacy[&0x02A6].profiles[0].id, 9);
     }
 
     #[test]
