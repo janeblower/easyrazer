@@ -669,7 +669,7 @@ impl Device {
 
     pub fn export_profile(&self, profile: u32, path: &Path) -> Result<(), String> {
         let file = transfer::export(self.data(), profile).ok_or_else(|| self.msg("backend.noProfile"))?;
-        let text = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+        let text = crate::stored::to_text(&file)?;
         std::fs::write(path, text).map_err(|e| e.to_string())
     }
 

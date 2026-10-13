@@ -120,7 +120,7 @@ pub mod colors {
 }
 
 /// What the flash holds for `key` out of the box; `None` for a key without a HID usage.
-fn factory(key: u8) -> Option<RawKey> {
+pub(crate) fn factory(key: u8) -> Option<RawKey> {
     binding::encode(binding::factory(key)).map(|(fn_id, fn_data)| RawKey { thr_low: 0, thr_high: 0, fn_id, fn_data })
 }
 
