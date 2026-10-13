@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
+import { call } from "../keyboard";
 import type { DeviceInfo, Dock } from "../types";
 import { setLanguage, systemLanguage } from "../i18n";
 import { dev, selected, setPanel, startDev } from "../dev";
@@ -52,7 +52,7 @@ watch(drawer, () => {
 async function loadInfo() {
   note.value = "";
   try {
-    info.value = await invoke<DeviceInfo | null>("dev_device");
+    info.value = await call<DeviceInfo | null>("dev_device");
   } catch (error) {
     note.value = String(error);
   }
@@ -82,7 +82,7 @@ watch(tab, (v) => {
 
 async function copyDiagnostics() {
   try {
-    await navigator.clipboard.writeText(await invoke<string>("dev_diagnostics", { uncensored: uncensored.value }));
+    await navigator.clipboard.writeText(await call<string>("dev_diagnostics", { uncensored: uncensored.value }));
     note.value = translate("dev.copied");
   } catch (error) {
     note.value = String(error);

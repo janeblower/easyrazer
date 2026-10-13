@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
+import { call } from "../keyboard";
 import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
 import { dev } from "../dev";
@@ -34,7 +34,7 @@ const bytes = ref<number[] | null>(null);
 watch(
   () => [dev.mode, selected.value, props.state] as const,
   async ([on, id]) => {
-    bytes.value = on && id != null ? await invoke<number[] | null>("dev_macro", { id }) : null;
+    bytes.value = on && id != null ? await call<number[] | null>("dev_macro", { macroId: id }) : null;
   },
   { immediate: true },
 );
@@ -109,7 +109,7 @@ onUnmounted(stopRecording);
 async function run<T>(command: string, args: Record<string, unknown>, done: string, state: (r: T) => MacroState) {
   busy.value = true;
   try {
-    const r = await invoke<T>(command, args);
+    const r = await call<T>(command, args);
     emit("update", state(r));
     message.value = t(done);
     return r;
@@ -125,7 +125,7 @@ async function apply(): Promise<boolean> {
   const d = draft.value;
   if (!d) return false;
   stopRecording();
-  const args = { id: selected.value, name: d.name.trim() || t("macros.untitled"), events: d.events };
+  const args = { macroId: selected.value, name: d.name.trim() || t("macros.untitled"), events: d.events };
   const r = await run<[number, MacroState]>("set_macro", args, "macros.applied", ([, s]) => s);
   if (!r) return false;
   const [id, state] = r;
@@ -136,7 +136,7 @@ async function apply(): Promise<boolean> {
 
 async function doWrite() {
   if ((dirty.value && !(await apply())) || selected.value == null) return;
-  await run<MacroState>("write_macro", { id: selected.value }, "macros.written", (s) => s);
+  await run<MacroState>("write_macro", { macroId: selected.value }, "macros.written", (s) => s);
 }
 
 const { asking, write, onConfirm } = useConfirmWrite(doWrite, (error) => (message.value = String(error)));
@@ -146,7 +146,7 @@ async function remove() {
     armed.value = true;
     return;
   }
-  if (selected.value != null && (await run<MacroState>("delete_macro", { id: selected.value }, "macros.deleted", (s) => s))) {
+  if (selected.value != null && (await run<MacroState>("delete_macro", { macroId: selected.value }, "macros.deleted", (s) => s))) {
     selected.value = null;
     draft.value = null;
   }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import { call, ours } from "../keyboard";
 import { log } from "../dev";
 import { hex, isWrite } from "../devConsole";
 import type { DevKey, RawKey } from "../types";
@@ -15,7 +15,7 @@ const lead = ref<[number, number, boolean]>([0, 0, false]);
 let unlisten: UnlistenFn | undefined;
 
 async function load() {
-  raw.value = props.keys.length > 0 ? await invoke<Record<number, DevKey>>("dev_keys", { keys: props.keys.slice(0, MAX) }) : {};
+  raw.value = props.keys.length > 0 ? await call<Record<number, DevKey>>("dev_keys", { keys: props.keys.slice(0, MAX) }) : {};
 }
 const lastWrite = () => {
   for (let i = log.value.length - 1; i >= 0; i--) if (isWrite(log.value[i].cmd)) return log.value[i].seq;
@@ -29,7 +29,13 @@ const lines = computed(() =>
   Object.entries(raw.value).map(([k, v]) => `#${k} ${v.name}  normal ${fmt(v.normal)}  hs ${fmt(v.hypershift)}`),
 );
 
-onMounted(async () => (unlisten = await listen<[number, number, boolean]>("key-depth", (e) => (lead.value = e.payload))));
+onMounted(
+  async () =>
+    (unlisten = await listen<[string, number, number, boolean]>("key-depth", (e) => {
+      const [id, ...depth] = e.payload;
+      if (ours(id)) lead.value = depth;
+    })),
+);
 onUnmounted(() => unlisten?.());
 </script>
 

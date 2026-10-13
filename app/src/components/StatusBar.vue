@@ -3,7 +3,13 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { Status } from "../types";
 
-const props = defineProps<{ status: Status | null; progress: [number, number] | null; message: string; error: string }>();
+const props = defineProps<{
+  status: Status | null;
+  progress: [number, number] | null;
+  unsupported: number | null;
+  message: string;
+  error: string;
+}>();
 
 const { t } = useI18n();
 
@@ -20,8 +26,8 @@ const view = computed(() => {
       kind: "warn",
       text: t("status.synapse"),
     };
-  if (!s.device && s.unsupported != null) {
-    const pid = s.unsupported.toString(16).toUpperCase().padStart(4, "0");
+  if (!s.device && props.unsupported != null) {
+    const pid = props.unsupported.toString(16).toUpperCase().padStart(4, "0");
     return { kind: "warn", text: t("status.unsupported", { pid }) };
   }
   if (!s.device) return { kind: "warn", text: t("status.notFound") };

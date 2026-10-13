@@ -2,6 +2,7 @@
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { ours } from "../keyboard";
 import type { Analog } from "../types";
 
 interface RapidView {
@@ -62,7 +63,13 @@ const clamped = (m: number) => props.value != null && (m === hwMarks.value[0] ? 
 // its last extreme on the same scale, and whether it is down.
 const lead = ref<[number, number, boolean]>([0, 0, false]);
 let unlisten: UnlistenFn | undefined;
-onMounted(async () => (unlisten = await listen<[number, number, boolean]>("key-depth", (e) => (lead.value = e.payload))));
+onMounted(
+  async () =>
+    (unlisten = await listen<[string, number, number, boolean]>("key-depth", (e) => {
+      const [id, ...depth] = e.payload;
+      if (ours(id)) lead.value = depth;
+    })),
+);
 onUnmounted(() => unlisten?.());
 const units = (mm: number) => (mm / (scale.value.full_mm - scale.value.zero_mm)) * 255;
 const depthMm = (d: number) => scale.value.zero_mm + (d / 255) * (scale.value.full_mm - scale.value.zero_mm);

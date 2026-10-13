@@ -3,12 +3,14 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import { call, keyboard, ours, pick } from "./keyboard";
 import type {
   Action,
   Actuation,
   AppSettings,
   CloseAction,
   Status as DeviceStatus,
+  DevicesView,
   Hypershift,
   KeyMap,
   KeyView,
@@ -39,7 +41,7 @@ import { useConfirmWrite } from "./confirmWrite";
 import { hasUnapplied, trackUnapplied } from "./unapplied";
 import { setLanguage, systemLanguage } from "./i18n";
 import DevPanel from "./components/DevPanel.vue";
-import { dev, setPanel, startDev } from "./dev";
+import { dev, reloadLog, setPanel, startDev } from "./dev";
 import DevKeys from "./components/DevKeys.vue";
 import { applyLayout } from "./devWindow";
 
@@ -88,6 +90,7 @@ const closeRemember = ref(false);
 const hiding = ref(false); // asked before dropping edits with the window
 const offering = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
+const devices = ref<DevicesView | null>(null);
 let loadedProfile: number | null = null; // profile the baseline was read from
 const unlisten: UnlistenFn[] = [];
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -322,16 +325,18 @@ function showError(e: unknown) {
 }
 
 async function loadMacros() {
+  if (!keyboard.value) return;
   try {
-    macroState.value = await invoke<MacroState>("macros");
+    macroState.value = await call<MacroState>("macros");
   } catch (error) {
     showError(error);
   }
 }
 
 async function loadProfiles() {
+  if (!keyboard.value) return;
   try {
-    profiles.value = await invoke<ProfilesView>("profiles");
+    profiles.value = await call<ProfilesView>("profiles");
   } catch (error) {
     showError(error);
   }
@@ -350,7 +355,7 @@ async function load() {
       unsaved_bindings,
       hypershift,
       profile,
-    } = await invoke<Actuation>("read_all");
+    } = await call<Actuation>("read_all");
     baseline.value = base;
     rapidBase.value = rapid;
     rapidEdits.value = Object.fromEntries(
@@ -394,6 +399,7 @@ function revert() {
 }
 
 async function onStatus(s: DeviceStatus) {
+  if (!ours(s.id)) return;
   if (s.error) showError(s.error);
   // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
   if (busy.value) return;
@@ -413,17 +419,35 @@ async function onStatus(s: DeviceStatus) {
 
 async function refresh() {
   try {
-    await onStatus(await invoke<DeviceStatus>("status"));
+    await onStatus(await call<DeviceStatus>("status"));
   } catch (error) {
     message.value = String(error);
   }
+}
+
+async function loadDevices() {
+  try {
+    devices.value = await invoke<DevicesView>("devices");
+  } catch (error) {
+    showError(error);
+    return;
+  }
+  const next = pick(devices.value.devices, keyboard.value);
+  if (next === keyboard.value) return;
+  keyboard.value = next;
+  // Another keyboard: nothing read from the last one applies.
+  revert();
+  loadedProfile = null;
+  layoutModel = null;
+  await reloadLog();
+  await refresh();
 }
 
 async function setMode(on: boolean) {
   if (on === driver.value) return;
   busy.value = true;
   try {
-    await invoke("set_driver_mode", { on });
+    await call("set_driver_mode", { on });
   } catch (error) {
     showError(error);
   } finally {
@@ -450,7 +474,7 @@ function selectAll() {
 async function profileOp(command: string, args: Record<string, unknown> = {}) {
   busy.value = true;
   try {
-    profiles.value = await invoke<ProfilesView>(command, args);
+    profiles.value = await call<ProfilesView>(command, args);
   } catch (error) {
     showError(error);
   } finally {
@@ -475,7 +499,7 @@ function confirmSwitch() {
 function confirmRemove() {
   const id = removing.value;
   removing.value = null;
-  if (id != null) void profileOp("delete_profile", { id });
+  if (id != null) void profileOp("delete_profile", { profile: id });
 }
 
 type Written = { status: "ok" | "unconfirmed"; key: number };
@@ -520,7 +544,7 @@ async function write(command: "apply" | "save", done: string) {
       bindings: bound,
       unsaved_bindings,
       hypershift: layer,
-    } = await invoke<WriteResult>(
+    } = await call<WriteResult>(
       command,
       rapid ? { changes, rapid, snap: snapNext, bindings, hypershift } : { changes, bindings, hypershift },
     );
@@ -583,7 +607,7 @@ async function onWriteMacros() {
   macrosToWrite.value = [];
   busy.value = true;
   try {
-    for (const id of ids) macroState.value = await invoke<MacroState>("write_macro", { id });
+    for (const id of ids) macroState.value = await call<MacroState>("write_macro", { macroId: id });
   } catch (error) {
     message.value = String(error);
     return;
@@ -651,22 +675,29 @@ onMounted(async () => {
   }
   // A connect reads the keyboard on its own, before the status that starts load() arrives.
   unlisten.push(
-    await listen<[number, number, number | null, number | null]>("read-progress", (e) => {
-      const [done, total, key, mm] = e.payload;
+    await listen<[string, number, number, number | null, number | null]>("read-progress", (e) => {
+      if (!ours(e.payload[0])) return;
+      const [, done, total, key, mm] = e.payload;
       progress.value = [done, total];
       if (key != null && mm != null) baseline.value[key] = mm;
     }),
   );
   await invoke("window_ready");
   await startDev();
+  await loadDevices();
   await loadMacros();
   unlisten.push(
-    await listen<boolean>("snap-tap", (e) => {
-      snapBase.value = { ...snapBase.value, enabled: e.payload };
-      if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: e.payload });
+    await listen<[string, boolean]>("snap-tap", (e) => {
+      const [id, on] = e.payload;
+      if (!ours(id)) return;
+      snapBase.value = { ...snapBase.value, enabled: on };
+      if (snapEdit.value) setSnap({ ...snapEdit.value, enabled: on });
     }),
     await listen<DeviceStatus>("status", (e) => {
       void onStatus(e.payload);
+    }),
+    await listen("devices", () => {
+      void loadDevices();
     }),
   );
   await refresh();
@@ -702,14 +733,14 @@ onUnmounted(() => {
             :view="profiles"
             :writable="writable"
             :next-combo="nextCombo"
-            @load="(id) => switchTo(() => profileOp('load_profile', { id }))"
+            @load="(id) => switchTo(() => profileOp('load_profile', { profile: id }))"
             @create="switchTo(() => profileOp('create_profile'))"
-            @duplicate="(id) => profileOp('duplicate_profile', { id })"
-            @rename="(id, name) => profileOp('rename_profile', { id, name })"
+            @duplicate="(id) => profileOp('duplicate_profile', { profile: id })"
+            @rename="(id, name) => profileOp('rename_profile', { profile: id, name })"
             @remove="(id) => (removing = id)"
-            @startup="(id) => profileOp('set_startup', { id })"
-            @free="(id) => profileOp('free_slot', { id })"
-            @write="(id) => profileOp('write_profile', { id })"
+            @startup="(id) => profileOp('set_startup', { profile: id })"
+            @free="(id) => profileOp('free_slot', { profile: id })"
+            @write="(id) => profileOp('write_profile', { profile: id })"
           />
           <span class="inline-flex" :title="$t('mode.hint')">
             <button
@@ -736,7 +767,13 @@ onUnmounted(() => {
             </button>
           </span>
         </nav>
-        <StatusBar :status="status" :progress="progress" :message="tab !== 'lighting' ? message : ''" :error="appError" />
+        <StatusBar
+          :status="status"
+          :progress="progress"
+          :unsupported="devices?.unsupported ?? null"
+          :message="tab !== 'lighting' ? message : ''"
+          :error="appError"
+        />
         <!-- With the map shown, the tab is as wide as the full-size map on every model, not the window. -->
         <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'min-w-[1121px]': section !== 'macros' }">
           <div class="flex gap-3 items-center">

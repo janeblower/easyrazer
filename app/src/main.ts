@@ -282,7 +282,9 @@ async function mockBackend() {
       startup: 1,
       free_slot: true,
     },
+    devices: { devices: [{ id: "MOCK", model: MODELS[model], connected: true, driver_mode: true }], unsupported: null },
     status: {
+      id: "MOCK",
       device: true,
       synapse: false,
       // Rapid Trigger shows on the map only in driver mode.
@@ -291,7 +293,6 @@ async function mockBackend() {
       profile_name: "Dev",
       model: MODELS[model],
       verified: true,
-      unsupported: null,
       error: null,
     },
     read_all: state,

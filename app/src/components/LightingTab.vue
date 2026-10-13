@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Status } from "../types";
 import { dev, log, nameOf } from "../dev";
+import { call } from "../keyboard";
 import { hex } from "../devConsole";
 import { useConfirmWrite } from "../confirmWrite";
 import { trackUnapplied } from "../unapplied";
@@ -253,7 +254,7 @@ async function preview() {
     const look = pending;
     pending = null;
     try {
-      await invoke("lighting_preview", { look });
+      await call("lighting_preview", { look });
     } catch (error) {
       message.value = String(error);
     }
@@ -268,7 +269,7 @@ watch(draft, (now, before) => {
 async function load() {
   try {
     if (layout.value.length === 0) layout.value = await invoke<KeyView[]>("lighting_layout");
-    const s = await invoke<LightingState>("lighting_state");
+    const s = await call<LightingState>("lighting_state");
     effects.value = s.effects;
     custom.value = s.custom;
     applied.value = s.applied;
@@ -292,7 +293,7 @@ async function send(command: "lighting_apply" | "lighting_write", done: string) 
   busy.value = true;
   try {
     const look = norm(draft.value);
-    await invoke(command, { look });
+    await call(command, { look });
     applied.value = look;
     if (command === "lighting_write") saved.value = look;
     else if (look?.effect.colors) custom.value = look.effect.colors;
