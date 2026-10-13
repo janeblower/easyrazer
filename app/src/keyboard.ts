@@ -12,6 +12,23 @@ export function pick(list: DeviceEntry[], current: string | null, last: string |
   return known(current) ?? known(last) ?? list.find((d) => d.connected)?.id ?? list[0]?.id ?? null;
 }
 
+/** Which read a status was loaded under: connection and profile. */
+export function loadKey(s: { device: boolean; profile: number | null }): string {
+  return `${s.device}:${s.profile}`;
+}
+
+/** What a status asks of the view; a reconnect reads again from the keyboard even under the same profile. */
+export function statusAction(
+  s: { device: boolean; profile: number | null },
+  loadedProfile: number | null,
+  loadedKey: string | null,
+): { revert: boolean; load: boolean } {
+  return {
+    revert: loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile,
+    load: loadKey(s) !== loadedKey,
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/promise-function-async -- a plain wrapper of invoke
 export function call<T>(cmd: string, args: Record<string, unknown> = {}, id = keyboard.value): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- like invoke, rejects with the message

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import { call, keyboard, ours, pick } from "./keyboard";
+import { call, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
 import type {
   Action,
   Actuation,
@@ -396,7 +396,7 @@ async function load() {
     );
     bindErrors.value = {};
     loadedProfile = profile;
-    loadedKey = `${!!status.value?.device}:${profile}`;
+    loadedKey = loadKey({ device: !!status.value?.device, profile });
     message.value = "";
     await loadMacros();
     await loadProfiles();
@@ -437,9 +437,9 @@ async function onStatus(s: DeviceStatus) {
     loadedKey = null;
     return;
   }
-  if (loadedProfile !== null && s.profile !== null && s.profile !== loadedProfile) revert();
-  // A reconnect reads again from the keyboard even under the same profile.
-  if (`${s.device}:${s.profile}` !== loadedKey) await load();
+  const act = statusAction(s, loadedProfile, loadedKey);
+  if (act.revert) revert();
+  if (act.load) await load();
 }
 
 async function refresh() {

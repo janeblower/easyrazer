@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { call, keyboard, ours, pick } from "./keyboard";
+import { call, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
 import { messages } from "./i18n";
 import type { DeviceEntry } from "./types";
 
@@ -52,4 +52,13 @@ test("an explicit id wins over the selected keyboard", async () => {
     { macroId: 1, id: "A" },
     { macroId: 2, id: "B" },
   ]);
+});
+
+test("a status reads again on a reconnect or a disconnect, and reverts only for another profile", () => {
+  const key = loadKey({ device: true, profile: 3 });
+  expect(statusAction({ device: true, profile: 3 }, 3, key)).toEqual({ revert: false, load: false });
+  expect(statusAction({ device: false, profile: 3 }, 3, key)).toEqual({ revert: false, load: true });
+  expect(statusAction({ device: true, profile: 3 }, 3, loadKey({ device: false, profile: 3 }))).toEqual({ revert: false, load: true });
+  expect(statusAction({ device: true, profile: 4 }, 3, key)).toEqual({ revert: true, load: true });
+  expect(statusAction({ device: true, profile: null }, 3, key)).toEqual({ revert: false, load: true });
 });
