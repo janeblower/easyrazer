@@ -1,10 +1,26 @@
-# Huntsman V3 Pro firmware
+# Huntsman V3 analog line firmware
 
 Analysis of the official Firmware Updater `v1.03.00_r1` (firmware `1.03.00`, the
 same one Synapse calls `1.3.0.0`). This is a reference for the protocol: firmware
 code is not carried over into the project. Addresses are for this version.
 Conclusions without direct verification are marked "probably". Commands are in
 [protocol.md](protocol.md).
+
+## Models
+
+| Model | VID:PID | Keys | Firmware | On hardware |
+|---|---|---|---|---|
+| Huntsman V3 Pro | `1532:02A6` | full size, 104 | 1.03.00 | not checked |
+| Huntsman V3 Pro TKL | `1532:02A7` | TKL without PrtSc / ScrLk / Pause, 84 | 1.04.00 | not checked |
+| Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
+| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
+| Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
+| Huntsman V3 Pro 8KHz | `1532:02CF` | as the V3 Pro | 1.03.00 | not checked |
+| Huntsman Signature Edition | `1532:02D8` | as the V3 Pro TKL | 1.02.00 | not checked |
+| Huntsman V3 Pro Low-profile TKL 8KHz | `1532:02E6` | as the V3 Pro TKL | 1.01.01 | not checked |
+
+The sections below are about the V3 Pro firmware; the other models are in their
+sections.
 
 ## Image
 
@@ -202,3 +218,199 @@ releasing it presses the other again if it is held. Pair state is `0x200283CC`�
 - Reports `04`, `05`, `07` of interface 1 and interface 5.
 - Bytes `+1`, `+2` of threshold entries, effect `0A`, flag `02:1F`.
 - The second image (`.enc`).
+
+## Huntsman V3 Pro TKL and TKL 8KHz
+
+Firmware `1.04.00` of both, built from the same code as the V3 Pro one; here only
+what was checked and what differs.
+
+### Image
+
+`DeviceUpdater.resources`:
+
+| Key | TKL | TKL 8 kHz |
+|---|---|---|
+| `VID` / `PID` | `1532` / `02A7` | `1532` / `02D0` |
+| `BLPID` / `BLVER` | `110E` / `2.0` | `110E` / `2.0` |
+| `DevFWVer` / `FlashFWVer` | `1.04.00` / `1.04.00` | `1.04.00` / `1.04.00` |
+| `RYFWFileName` | `Talia_T1_TKL_7203_App_FW_20240428_v1.4.0_3CF72FF3.enc` | `Talia_T1_TKL_Refresh_5528_App_FW_v1.4.0_91871BFB.enc` |
+
+`DevFWLine*` is Intel HEX of the main MCU from `0x20000000`; `FlashFWSector0..36` is
+the encrypted image of the second chip, as on the V3 Pro.
+
+Scatter-load table: TKL `0x2001E474`, TKL 8 kHz `0x20022134`. The decompressor is the
+same Keil LZ at `0x20000568`.
+
+### Same as the V3 Pro
+
+- USB: 6 interfaces with the same HID descriptors (61, 237, 79, 22, 327, 30 bytes);
+  control is a 90-byte feature report, the vendor reports `04`, `05`, `07`, `0B` are
+  47 bytes each.
+- Actuation step table and RT table: `1638·{1, 4, 8, …}` and `1638·{1…10}`, the same
+  u16 scale, 1638 = 0.1 mm. TKL `0x2001B258` / `0x2001DC44`, TKL 8 kHz `0x2001EB88` /
+  `0x20021810`.
+
+### Key matrix
+
+Sensor matrix is 7 × 14, the same in both (TKL `0x2001CEB0`, TKL 8 kHz `0x20020A7C`),
+fwIDs as on the V2 and V3 Pro:
+
+```
+110 112 113 114 115 116 117 118 119 120 121 122   1   2
+  3   4   5   6   7   8   9  10  11  12 123  13  14  15
+ 75  80  85  28  29  76  81  86  16  17  18  19  20  21
+ 22  23  24  25  26   0  30  31  32  33  34  35  36  37
+ 38  39  40   0  44  45  46  47  48  49  50  51  52  53
+ 54   0  58 127  60 150  61 154 151  62  59 129  64   0
+ 27  41  42  43  55  56  57  83  79  84  89   0  87   0
+```
+
+The ANSI board uses 84 of them: the full-size layout without the numpad and without
+PrtSc / ScrLk / Pause (`124`–`126`). The Synapse module for `02A7` has no such keys
+either. The rest are ISO/JIS keys and `87`, which the Synapse module does not map.
+
+### Not analyzed
+
+- Class dispatcher and the command set: assumed the same as on the V3 Pro.
+- What the 8 kHz version adds: extra HID descriptors in its image, polling rate
+  commands.
+- Lighting matrix size.
+
+## Huntsman V3 Pro Mini
+
+Firmware `2.01.00`, built from the same code as the V3 Pro one; here only what was
+checked and what differs.
+
+### Image
+
+`DeviceUpdater.resources`:
+
+| Key | Value |
+|---|---|
+| `VID` / `PID` | `1532` / `02B0` |
+| `BLPID` / `BLVER` | `110E` / `2.0` — bootloader, as on the V3 Pro |
+| `DevFWVer` / `FlashFWVer` | `2.01.00` / `2.01.00` |
+| `FeatureReportLen` | `91` |
+| `RYFWFileName` | `Talia_T1_60%_7203_App_FW_v2.1.0_E888780F.enc` |
+
+`DevFWLine0..8195` is Intel HEX of the main MCU, `0x20000000`–`0x2001FFFF`;
+`FlashFWSector0..36` is the encrypted image of the second chip, as on the V3 Pro.
+
+Scatter-load table is at `0x2001E584`: `0x2001E600` → `0x20020800` (`0x6400`) and
+`0x2001FC00` → `0x04000000` (`0x600`) are decompressed, `0x20026C00` (`0x6108`) is
+zeroed. The decompressor is the same Keil LZ at `0x20000568`.
+
+### Same as the V3 Pro
+
+- USB: 6 interfaces; control is a 90-byte feature report, LampArray is there, the
+  vendor reports `04`, `05`, `07`, `0B` are 47 bytes each. Device descriptor is
+  `0x04000340`.
+- Actuation step table `0x2001B488` and RT table `0x2001DD7C`: `1638·{1, 4, 8, …}`
+  and `1638·{1…10}`, so the same u16 scale, 1638 = 0.1 mm.
+
+### Key matrix
+
+Sensor matrix is 5 × 14 (`0x200269C0` after scatter-load), 68 keys and two empty
+cells, fwIDs as on the V2 and V3 Pro:
+
+```
+110   2   3   4   5   6   7   8   9  16  17  18  19  20
+ 21  22  23  24  26  25  10  11  12  13  14  15   0  30
+ 31  32  33  34  35  36  37  38  44  45  46  47  48  49
+ 50  51  52  58 127  60 150  61 154 151  62  59  27  28
+ 29  39  40  41  42  43   0  53  54  55  56  57 129  64
+```
+
+The ANSI board uses 61 of them: the main block of the full-size layout with Esc
+(`110`) in place of the tilde. The rest are ISO/JIS keys.
+
+### Not analyzed
+
+- Class dispatcher and the command set: assumed the same as on the V3 Pro.
+- Lighting matrix size.
+
+## Huntsman V3 TKL 8KHz
+
+Firmware `1.02.00`. Not a V3 Pro build: the image is laid out differently.
+
+### Image
+
+| Key | Value |
+|---|---|
+| `VID` / `PID` | `1532` / `02E5` |
+| `BLPID` / `BLVER` | `110E` / `2.0` |
+| `DevFWVer` / `FlashFWVer` | `1.02.00` / `1.02.00` |
+| `RYFWFileName` | `usb_hid_app_v1.0.0_60ED16B1.enc` |
+
+`DevFWLine*` is Intel HEX of the main MCU, `0x20000000`–`0x200215FF`; `FlashFWSector0..36`
+is the encrypted image of the second chip.
+
+Scatter-load table is at `0x2001FF04`: `0x20020000` → `0x20025800` (`0x5C00`) goes
+through the same Keil LZ at `0x20000568`, two more entries go through `0x2001D69A`,
+the zeroed ones through `0x2001D6AA`.
+
+### USB
+
+5 interfaces: boot keyboard, the 237-byte descriptor with reports `04`, `05`, `07`, `0B`
+of 47 bytes, mouse, control (90-byte feature report), vendor 64 bytes. No LampArray.
+Configuration descriptor is `0x2002AFC0` after scatter-load.
+
+### Actuation
+
+Actuation step table `0x2001D6D6` and RT table `0x2001F5A6`: `1638·{1, 4, 8, …}` and
+`1638·{1…10}`, the same u16 scale as on the V3 Pro.
+
+### Key matrix
+
+Sensor matrix is 7 × 15 (`0x2001F40C`, after the same `00 DE 09 00` header as on the
+V3 Pro), fwIDs as on the V2 and V3 Pro:
+
+```
+110 112 113 114 115 116 117 118 119 120 121 122   0   1   2
+  3   4   5   6   7   8   9  10  11  12   0 123  13  14  15
+ 75  80  85  28  29  76  81  86   0  16  17  18  19  20  21
+ 22  23  24  25  26   0   0  30  31  32  33  34  35  36  37
+ 38  39  40   0   0  44  45  46  47  48  49  50  51  52  53
+ 54   0   0  58 127  60 150  61 154 151  62  59 129  64  79
+ 84  27  41  55  56  57  42  43  83  89 124 125 126   0   0
+```
+
+The ANSI board uses 87 of them: the full-size layout without the numpad. The rest are
+ISO/JIS keys.
+
+### Not analyzed
+
+- Class dispatcher and the command set: assumed the same as on the V3 Pro, per Synapse.
+- Lighting: a 6-row table of fwIDs at `0x2001D6E9` is probably the lighting matrix.
+
+## Huntsman V3 Pro 8KHz
+
+Firmware `1.03.00`, `RYFWFileName` `Talia_T1_Refresh_7203_App_FW_v1.3.0_6A95A743.enc`: a V3 Pro
+build. Image `0x20000000`–`0x200243FF`; the scatter-load entry at `0x200226B8` decompresses
+`0x20022800` → `0x20025800` (`0x6000`) with the same Keil LZ.
+
+- USB: 6 interfaces with the V3 Pro descriptors (61, 237, 79, 22, 327, 30 bytes),
+  configuration at `0x2002B440` after scatter-load.
+- Sensor matrix `0x20020E3C` matches the V3 Pro one byte for byte.
+- Actuation step table `0x2001ED50`, RT table `0x20021D8C`, scale as on the V3 Pro.
+
+## Huntsman Signature Edition
+
+Firmware `1.02.00`, `RYFWFileName` `Talia_Signature_7203_App_FW_v1.2.0_46687178.enc`: a V3 Pro
+build. Image `0x20000000`–`0x200245FF`; the scatter-load entry at `0x2002283C` decompresses
+`0x20022A00` → `0x20025800` (`0x6000`).
+
+- USB: 6 interfaces with the V3 Pro descriptors, configuration at `0x2002B480`.
+- Sensor matrix `0x20021184` matches the V3 Pro TKL one byte for byte.
+- Actuation step table `0x2001F258`, RT table `0x20021F18`, scale as on the V3 Pro.
+
+## Huntsman V3 Pro Low-profile TKL 8KHz
+
+Firmware `1.01.01`, `RYFWFileName` `usb_hid_app_v1.0.0_3699E703.enc`: the code base of the
+V3 TKL 8KHz. Image `0x20000000`–`0x20021BFF`; the scatter-load entry at `0x20020218`
+decompresses `0x20020400` → `0x20025800` (`0x5A00`).
+
+- USB: 5 interfaces as on the V3 TKL 8KHz, no LampArray; configuration at `0x20021880`.
+- Key table `0x2001F728`, after the same `00 DE 09 00` header: the keys of the V3 Pro TKL
+  matrix without `87`.
+- RT table `0x2001F8BA`, `1638·{1…10}`; no actuation step table of the V3 Pro form.

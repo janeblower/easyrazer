@@ -1,18 +1,21 @@
 # Модели клавиатур
 
-Протокол и прошивка — по моделям. Здесь то, что у них общее, и чем они отличаются.
+Протокол и прошивка — по линейкам: модели, которые отличаются только форм-фактором,
+описаны в одном документе. Здесь то, что у них общее, и чем они отличаются.
 
-| Модель | VID:PID | MCU | EasyRazer | Документы |
+| Линейка | Модели | MCU | EasyRazer | Документы |
 |---|---|---|---|---|
-| Huntsman V2 Analog | `1532:0266` | STM32L4+ | поддерживается | [протокол](huntsman-v2-analog/protocol.md), [прошивка](huntsman-v2-analog/firmware.md) |
-| Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, вероятно LPC55S6x | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro/protocol.md), [прошивка](huntsman-v3-pro/firmware.md) |
-| Huntsman V3 Pro Mini | `1532:02B0` | как у V3 Pro | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-pro-mini/protocol.md), [прошивка](huntsman-v3-pro-mini/firmware.md) |
+| Huntsman V2 Analog | V2 Analog (`0266`), Mini Analog (`0282`) | STM32L4+ | V2 Analog поддерживается; Mini Analog в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v2-analog/protocol.md), [прошивка](huntsman-v2-analog/firmware.md) |
+| Huntsman V3, аналоговые | V3 Pro (`02A6`), V3 Pro TKL (`02A7`), V3 Pro TKL 8KHz (`02D0`), V3 Pro Mini (`02B0`), V3 TKL 8KHz (`02E5`), V3 Pro 8KHz (`02CF`), Signature Edition (`02D8`), V3 Pro Low-profile TKL 8KHz (`02E6`) | NXP LPC55xx, вероятно LPC55S6x | в разработке, только запись в RAM, на железе не проверено | [протокол](huntsman-v3-analog/protocol.md), [прошивка](huntsman-v3-analog/firmware.md) |
 
 V3 Pro не проверялась на железе: всё о ней — из модуля Synapse 4 и прошивки
 1.03.00. Модули Synapse для V2 Analog, Huntsman Mini Analog (`0282`), V3 Pro,
 V3 Pro TKL (`02A7`) и V3 Pro Mini (`02B0`) собраны из одной ветки, таблица
-команд у V2 и V3 Pro одна; TKL, вероятно, отличается от V3 Pro только раскладкой.
-Для Mini это подтверждает её прошивка 2.01.00.
+команд у V2 и V3 Pro одна. Прошивки TKL 1.04.00 и Mini 2.01.00 — сборки V3 Pro с
+другой матрицей клавиш; прошивка Mini Analog 1.03.00 — сборка V2 Analog с таблицей
+клавиш 60%. Прошивки V3 Pro 8KHz и Signature Edition — тоже сборки V3 Pro. Прошивки V3 TKL
+8KHz и V3 Pro Low-profile TKL 8KHz — отдельная кодовая база, но их модули Synapse
+шлют те же команды, что модуль V3 Pro TKL.
 
 ## Пакет управления
 

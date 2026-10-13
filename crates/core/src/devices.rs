@@ -11,8 +11,15 @@ use crate::packet::Command;
 
 const DEVICES: &[&str] = &[
     include_str!("../devices/1532-0266.json"),
+    include_str!("../devices/1532-0282.json"),
     include_str!("../devices/1532-02A6.json"),
+    include_str!("../devices/1532-02A7.json"),
     include_str!("../devices/1532-02B0.json"),
+    include_str!("../devices/1532-02CF.json"),
+    include_str!("../devices/1532-02D0.json"),
+    include_str!("../devices/1532-02D8.json"),
+    include_str!("../devices/1532-02E5.json"),
+    include_str!("../devices/1532-02E6.json"),
 ];
 const PROTOCOLS: &[(&str, &str)] = &[("extended", include_str!("../protocols/extended.json"))];
 

@@ -1,8 +1,18 @@
-# Huntsman V2 Analog protocol
+# Huntsman V2 Analog line protocol
 
 Verified on a live device (`1532:0266`, firmware 1.06 — the same one that was analyzed) or read from
 the Synapse 4 and firmware 1.06 code ([firmware.md](firmware.md)). In the "Firmware commands"
 section, items are unverified by default; in the other sections, unverified items are marked.
+
+## Models
+
+| Model | VID:PID | Keys | Firmware | On hardware |
+|---|---|---|---|---|
+| Huntsman V2 Analog | `1532:0266` | full size, 104 | 1.06.00 | checked |
+| Huntsman Mini Analog | `1532:0282` | 60%, 61 | 1.03.00 | not checked |
+
+The sections below are about the V2 Analog; the Mini Analog differs only as described
+in [its section](#huntsman-mini-analog).
 
 ## HID interfaces
 
@@ -109,7 +119,7 @@ profile, cycling. The firmware has no on-the-fly macro recording: Fn+F9 only bli
 
 Not supported (`05`): `02:99`, `02:9A` (V3 multi-actuation and RT), `02:9F`,
 `02:A0`, `02:A7`–`02:AA`. How they work on the V3 Pro — in
-[its protocol](../huntsman-v3-pro/protocol.md#actuation).
+[its protocol](../huntsman-v3-analog/protocol.md#actuation).
 
 ## Depth stream (driver mode)
 
@@ -396,3 +406,13 @@ events `03`/`04` (power, sleep). Cannot be tested: layouts with 149 and 153 lamp
 HID — `/dev/hidraw*` + a udev rule (conflicts with openrazer, if installed);
 capture — `evdev` + `EVIOCGRAB`, emulation — `uinput`. Linux has no LampArray support —
 lighting only via `0F:xx`.
+
+## Huntsman Mini Analog
+
+Per the firmware 1.03.00 the protocol is that of the V2 Analog, with these differences.
+
+- PID `0282`.
+- 60% board: 68 keys in the firmware table, 61 of them in ANSI, the same set as the
+  [V3 Pro Mini](../huntsman-v3-analog/protocol.md#huntsman-v3-pro-mini). No F-row,
+  arrows, navigation block, numpad, media buttons or dial.
+- Lighting matrix size is unknown, so the custom effect is not offered.

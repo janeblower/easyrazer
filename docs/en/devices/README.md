@@ -1,20 +1,22 @@
 # Keyboard models
 
-Protocol and firmware, per model. This page covers what they share and how they
-differ.
+Protocol and firmware, per keyboard line: models that differ only in form factor share
+one document. This page covers what the lines share and how they differ.
 
-| Model | VID:PID | MCU | EasyRazer | Documents |
+| Line | Models | MCU | EasyRazer | Documents |
 |---|---|---|---|---|
-| Huntsman V2 Analog | `1532:0266` | STM32L4+ | supported | [protocol](huntsman-v2-analog/protocol.md), [firmware](huntsman-v2-analog/firmware.md) |
-| Huntsman V3 Pro | `1532:02A6` | NXP LPC55xx, probably LPC55S6x | in development, RAM writes only, not tested on hardware | [protocol](huntsman-v3-pro/protocol.md), [firmware](huntsman-v3-pro/firmware.md) |
-| Huntsman V3 Pro Mini | `1532:02B0` | as V3 Pro | in development, RAM writes only, not tested on hardware | [protocol](huntsman-v3-pro-mini/protocol.md), [firmware](huntsman-v3-pro-mini/firmware.md) |
+| Huntsman V2 Analog | V2 Analog (`0266`), Mini Analog (`0282`) | STM32L4+ | V2 Analog supported; Mini Analog in development, RAM writes only, not tested on hardware | [protocol](huntsman-v2-analog/protocol.md), [firmware](huntsman-v2-analog/firmware.md) |
+| Huntsman V3, analog | V3 Pro (`02A6`), V3 Pro TKL (`02A7`), V3 Pro TKL 8KHz (`02D0`), V3 Pro Mini (`02B0`), V3 TKL 8KHz (`02E5`), V3 Pro 8KHz (`02CF`), Signature Edition (`02D8`), V3 Pro Low-profile TKL 8KHz (`02E6`) | NXP LPC55xx, probably LPC55S6x | in development, RAM writes only, not tested on hardware | [protocol](huntsman-v3-analog/protocol.md), [firmware](huntsman-v3-analog/firmware.md) |
 
 The V3 Pro has not been verified on hardware: everything about it comes from the
 Synapse 4 module and firmware 1.03.00. The Synapse modules for the V2 Analog,
 Huntsman Mini Analog (`0282`), V3 Pro, V3 Pro TKL (`02A7`) and V3 Pro Mini
 (`02B0`) are built from one branch, and the V2 and V3 Pro share one command
-table; the TKL probably differs from the V3 Pro only in layout. The Mini firmware
-2.01.00 confirms that for the Mini.
+table. The TKL firmware 1.04.00 and the Mini firmware 2.01.00 are V3 Pro builds with
+another key matrix; the Mini Analog firmware 1.03.00 is a V2 Analog build with a 60%
+key table. The V3 Pro 8KHz and Signature Edition firmware are V3 Pro builds too. The V3 TKL
+8KHz and V3 Pro Low-profile TKL 8KHz firmware are a separate code base, but their
+Synapse modules send the same commands as the V3 Pro TKL one.
 
 ## Control packet
 

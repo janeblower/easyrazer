@@ -1,0 +1,27 @@
+{
+  "name": "Razer Huntsman Mini Analog",
+  "vid": "1532",
+  "pid": "0282",
+  "control_interface": 3,
+  "tid": "1F",
+  "layout": "mini",
+  "analog": {
+    "zero_mm": 1.5,
+    "full_mm": 3.6,
+    "range": [1.5, 3.6],
+    "hw_range": [1.62, 3.56],
+    "depth": { "collection": "col06", "id": "07" }
+  },
+  "lighting": {
+    "protocol": "extended",
+    "led": "05",
+    "effects": [
+      "off", "static", "breathing_one", "breathing_two", "breathing_random", "spectrum",
+      "wave",
+      "reactive_key_one", "reactive_key_random", "reactive_ripple_one", "reactive_ripple_random",
+      "starlight_random", "starlight_one", "starlight_two",
+      "fire"
+    ]
+  },
+  "lamp_array": { "control_report": "06" }
+}

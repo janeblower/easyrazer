@@ -34,6 +34,11 @@ pub enum Board {
     Full,
     /// 60%: the main block of `Full`, Esc in place of the tilde.
     Mini,
+    /// `Full` without the numpad.
+    Tkl,
+    /// `Tkl` without PrtSc / ScrLk / Pause, which the V3 Pro TKL does not have.
+    #[serde(rename = "pro_tkl")]
+    ProTkl,
 }
 
 /// Lit areas that are not keys; ids above every `fwID`.
@@ -176,6 +181,12 @@ pub fn keys(board: Board) -> Vec<LayoutKey> {
                 (name, label, x, y - 1.25, w, h)
             })
             .collect(),
+        Board::Tkl => KEYS.iter().filter(|k| k.2 < 18.0).copied().collect(),
+        Board::ProTkl => KEYS
+            .iter()
+            .filter(|k| k.2 < 18.0 && !matches!(k.0, "PRINT_SCREEN" | "SCROLL_LOCK" | "PAUSE"))
+            .copied()
+            .collect(),
     };
     keys.into_iter()
         .map(|(name, label, x, y, w, h)| LayoutKey {
@@ -240,7 +251,7 @@ mod tests {
 
     #[test]
     fn keys_do_not_overlap() {
-        for board in [Board::Full, Board::Mini] {
+        for board in [Board::Full, Board::Mini, Board::Tkl, Board::ProTkl] {
             let keys = keys(board);
             for (i, a) in keys.iter().enumerate() {
                 for b in &keys[i + 1..] {
@@ -253,25 +264,79 @@ mod tests {
 
     #[test]
     fn only_fn_is_not_editable() {
-        for board in [Board::Full, Board::Mini] {
+        for board in [Board::Full, Board::Mini, Board::Tkl, Board::ProTkl] {
             let fixed: Vec<u8> = keys(board).iter().filter(|k| !k.editable).map(|k| k.key).collect();
             assert_eq!(fixed, [keymap::by_name("RIGHT_GUI").unwrap()], "{board:?}");
         }
     }
 
+    /// The 5 × 14 matrix of the V3 Pro Mini firmware 2.01.00, `0x200269C0` after scatter-load.
+    const MINI_MATRIX: [u8; 70] = [
+        110, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 25, 10, 11, 12, 13, 14, 15, 0, 30, 31, 32, 33,
+        34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50, 51, 52, 58, 127, 60, 150, 61, 154, 151, 62, 59, 27, 28, 29, 39, 40,
+        41, 42, 43, 0, 53, 54, 55, 56, 57, 129, 64,
+    ];
+
     #[test]
     fn mini_keys_are_in_its_sensor_matrix() {
-        // The 5 × 14 matrix of the V3 Pro Mini firmware 2.01.00, `0x200269C0` after scatter-load.
-        const MATRIX: [u8; 70] = [
-            110, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 25, 10, 11, 12, 13, 14, 15, 0, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 44, 45, 46, 47, 48, 49, 50, 51, 52, 58, 127, 60, 150, 61, 154, 151, 62, 59, 27, 28, 29,
-            39, 40, 41, 42, 43, 0, 53, 54, 55, 56, 57, 129, 64,
-        ];
         let keys = keys(Board::Mini);
         assert_eq!(keys.len(), 61);
-        assert!(keys.iter().all(|k| MATRIX.contains(&k.key)), "{keys:?}");
+        assert!(keys.iter().all(|k| MINI_MATRIX.contains(&k.key)), "{keys:?}");
         assert_eq!(keys[0].key, keymap::by_name("ESC").unwrap());
         assert!(keys.iter().all(|k| k.y >= 0.0 && k.y < 5.0 && k.x + k.w <= 15.0));
+    }
+
+    #[test]
+    fn mini_analog_has_the_mini_key_set() {
+        // fwIDs of the Huntsman Mini Analog firmware 1.03.00, `0x08019E34`.
+        let mut ids: Vec<u8> = [110].into_iter().chain(2..=13).chain(15..=57).collect();
+        ids.extend([58, 127, 60, 150, 61, 154, 151, 62, 59, 129, 64, 14]);
+        let mut v3: Vec<u8> = MINI_MATRIX.into_iter().filter(|&id| id != 0).collect();
+        ids.sort();
+        v3.sort();
+        assert_eq!(ids, v3);
+    }
+
+    #[test]
+    fn tkl_keys_are_its_sensor_matrix() {
+        // The 7 × 15 matrix of the V3 TKL 8 kHz firmware 1.02.00, `0x2001F40C`.
+        const MATRIX: [u8; 105] = [
+            110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 123, 13,
+            14, 15, 75, 80, 85, 28, 29, 76, 81, 86, 0, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0, 0, 30, 31, 32, 33, 34,
+            35, 36, 37, 38, 39, 40, 0, 0, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 0, 0, 58, 127, 60, 150, 61, 154, 151,
+            62, 59, 129, 64, 79, 84, 27, 41, 55, 56, 57, 42, 43, 83, 89, 124, 125, 126, 0, 0,
+        ];
+        let mut keys: Vec<u8> = keys(Board::Tkl).iter().map(|k| k.key).collect();
+        let mut expected: Vec<u8> = MATRIX.into_iter().filter(|id| *id != 0 && !iso_jis().contains(id)).collect();
+        keys.sort();
+        expected.sort();
+        assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn pro_tkl_keys_are_its_sensor_matrix() {
+        // The 7 × 14 matrix of the V3 Pro TKL firmware 1.04.00, `0x2001CEB0`; the TKL 8 kHz and the Signature
+        // Edition have the same, the Low-profile TKL 8 kHz the same keys without 87.
+        const MATRIX: [u8; 98] = [
+            110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 123, 13, 14,
+            15, 75, 80, 85, 28, 29, 76, 81, 86, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0, 30, 31, 32, 33, 34, 35, 36,
+            37, 38, 39, 40, 0, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 0, 58, 127, 60, 150, 61, 154, 151, 62, 59, 129,
+            64, 0, 27, 41, 42, 43, 55, 56, 57, 83, 79, 84, 89, 0, 87, 0,
+        ];
+        // 87 is not mapped by the Synapse module for 02A7.
+        let other: Vec<u8> = iso_jis().into_iter().chain([0, 87]).collect();
+        let mut keys: Vec<u8> = keys(Board::ProTkl).iter().map(|k| k.key).collect();
+        let mut expected: Vec<u8> = MATRIX.iter().copied().filter(|id| !other.contains(id)).collect();
+        keys.sort();
+        expected.sort();
+        assert_eq!(keys, expected);
+    }
+
+    fn iso_jis() -> Vec<u8> {
+        ["YEN", "NON_US_POUND", "NON_US_BACKSLASH", "RO", "MUHENKAN", "KATAKANA_HIRAGANA", "HENKAN"]
+            .iter()
+            .map(|n| keymap::by_name(n).unwrap())
+            .collect()
     }
 
     fn cell(name: &str) -> Vec<(u8, u8)> {

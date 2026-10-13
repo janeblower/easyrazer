@@ -5,13 +5,25 @@
 | Модель | Точка нажатия | Rapid Trigger | Snap Tap | Назначения | Макросы | Hypershift | Подсветка |
 |---|---|---|---|---|---|---|---|
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Huntsman Mini Analog (`1532:0282`) | 🧪 | 🧪 | 🧪 | 🧪 | — | 🧪 | 🧪 |
 | Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro 8KHz (`1532:02CF`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman Signature Edition (`1532:02D8`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro Low-profile TKL 8KHz (`1532:02E6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
 ## Huntsman V2 Analog
 
 Поддерживается, проверено на железе. Rapid Trigger и Snap Tap считает программа
 (режим «Драйвер»); часть режимов макросов не проверена.
+
+## Huntsman Mini Analog
+
+Как V2 Analog, с картой клавиш 60%; без эффекта подсветки custom. На железе не
+проверено: по умолчанию только чтение, с разрешением в настройках пишет в оперативную
+память клавиатуры, в её память — нет, поэтому макросов и слотов профилей нет.
 
 ## Huntsman V3 Pro
 
@@ -19,8 +31,32 @@
 настройках пишет в оперативную память клавиатуры, в её память — нет. В HW режиме
 Rapid Trigger и одну пару Snap Tap считает прошивка. Нужен тестер с клавиатурой.
 
+## Huntsman V3 Pro TKL
+
+Как V3 Pro, без нампада и PrtSc / ScrLk / Pause; версия 8 kHz такая же. Без эффекта
+подсветки custom.
+
 ## Huntsman V3 Pro Mini
 
 Как V3 Pro, с картой клавиш 60%; без эффекта подсветки custom.
+
+## Huntsman V3 TKL 8KHz
+
+Как V3 Pro, с полной картой TKL на 87 клавиш; без эффекта подсветки custom и без
+Windows Dynamic Lighting. Прошивка — отдельная кодовая база, поэтому уверенности меньше,
+чем для моделей V3 Pro.
+
+## Huntsman V3 Pro 8KHz
+
+Как V3 Pro.
+
+## Huntsman Signature Edition
+
+Как V3 Pro TKL.
+
+## Huntsman V3 Pro Low-profile TKL 8KHz
+
+Как V3 Pro TKL, с точкой нажатия до 2.8 мм: низкопрофильные переключатели мельче.
+Без Windows Dynamic Lighting. Прошивка — кодовая база V3 TKL 8KHz.
 
 Протокол и прошивка каждой модели — в [devices](devices/README.md).
