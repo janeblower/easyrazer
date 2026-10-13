@@ -267,6 +267,13 @@ impl Device {
         self.id = Some(id.to_string());
     }
 
+    /// An empty name goes back to the model's.
+    pub fn rename_device(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        self.data_mut()?.name = (!name.is_empty()).then(|| name.chars().take(40).collect());
+        self.save()
+    }
+
     fn save(&self) -> Result<(), String> {
         let mut s = settings::lock(&self.shared);
         if let Some(id) = &self.id {

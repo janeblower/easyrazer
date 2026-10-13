@@ -302,6 +302,7 @@
   "backend": {
     "synapseRunning": "Запущен Synapse — закройте его, включая значок в трее",
     "noKeyboard": "Поддерживаемая клавиатура Razer не найдена",
+    "forgetConnected": "Сначала отключите клавиатуру",
     "macroUnwritten": "Макрос не записан в клавиатуру: запишите его в «Макросах» или запишите назначение",
     "autostart": "Автозапуск: {error}",
     "engine": "Rapid Trigger не запущен: {error}",

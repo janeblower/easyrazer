@@ -138,6 +138,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::status,
             commands::devices,
+            commands::rename_device,
+            commands::forget_device,
+            commands::set_last_device,
             commands::layout,
             commands::window_ready,
             commands::read_all,

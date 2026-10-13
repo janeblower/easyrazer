@@ -302,6 +302,7 @@
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
     "noKeyboard": "No supported Razer keyboard found",
+    "forgetConnected": "Unplug the keyboard first",
     "macroUnwritten": "The macro is not in the keyboard: write it in Macros, or write the binding",
     "autostart": "Autostart: {error}",
     "engine": "Rapid Trigger did not start: {error}",

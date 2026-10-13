@@ -159,10 +159,32 @@ pub async fn status(state: State<'_, AppState>, id: Option<String>) -> Result<St
     }
 }
 
+fn devices_view(state: &AppState) -> DevicesView {
+    let s = state.settings().clone();
+    DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported(), last: s.last_device.clone() }
+}
+
 #[tauri::command]
 pub async fn devices(state: State<'_, AppState>) -> Result<DevicesView, String> {
-    let s = state.settings().clone();
-    Ok(DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported() })
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn rename_device(state: State<'_, AppState>, id: String, name: String) -> Result<DevicesView, String> {
+    let d = state.device(&id)?;
+    lock(&d).rename_device(&name)?;
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn forget_device(state: State<'_, AppState>, id: String) -> Result<DevicesView, String> {
+    state.boards.forget(&id, &state.settings)?;
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn set_last_device(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.update_settings(|s| s.last_device = Some(id))
 }
 
 #[tauri::command]
