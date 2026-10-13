@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn every_editable_key_has_an_output() {
-        for board in [Board::Full, Board::Mini] {
+        for board in [Board::Full, Board::Mini, Board::Tkl] {
             for k in razer_core::layout::keys(board).into_iter().filter(|k| k.editable) {
                 assert!(scancode(k.key).is_some() || k.key == PAUSE, "fwID {} {}", k.key, k.label);
             }
