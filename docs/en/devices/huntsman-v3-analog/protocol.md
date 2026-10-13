@@ -13,8 +13,9 @@ there is a single source, it is noted. Packet format — [in the overview](../RE
 | Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
 | Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
 | Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
-| Huntsman V3 Pro 8KHz | | full size | not analyzed | not supported |
-| Huntsman V3 Pro Low-profile TKL 8KHz | | TKL | not analyzed | not supported |
+| Huntsman V3 Pro 8KHz | `1532:02CF` | as the V3 Pro | 1.03.00 | not checked |
+| Huntsman Signature Edition | `1532:02D8` | as the V3 Pro TKL | 1.02.00 | not checked |
+| Huntsman V3 Pro Low-profile TKL 8KHz | `1532:02E6` | as the V3 Pro TKL | 1.01.01 | not checked |
 
 The sections below are about the V3 Pro; the other models differ only as described in
 their sections.
@@ -163,8 +164,25 @@ a separate code base, so this is less certain than for the models above.
   match the V3 Pro, control on interface 3, depth stream in report `0B`.
 - Lighting matrix size is unknown, so the custom effect is not offered.
 
-## Not analyzed yet
+## Huntsman V3 Pro 8KHz
 
-The Huntsman V3 Pro 8KHz and the V3 Pro Low-profile TKL 8KHz: their firmware has not
-been analyzed and EasyRazer does not support them yet. The Low-profile switches have
-2.8 mm of travel, so the scale probably differs from the 4 mm one above.
+Per the firmware 1.03.00 and the Synapse module for `719` the protocol is that of the V3 Pro:
+the same sensor matrix, interfaces and LampArray. PID `02CF`. Synapse allows thresholds up to
+`65535` instead of `65520`.
+
+## Huntsman Signature Edition
+
+Per the firmware 1.02.00 and the Synapse module for `728` the protocol is that of the V3 Pro
+TKL: the same 7 × 14 matrix, the interfaces and LampArray of the V3 Pro. PID `02D8`.
+
+## Huntsman V3 Pro Low-profile TKL 8KHz
+
+Firmware 1.01.01 is from the same code base as the V3 TKL 8KHz one; the Synapse module for
+`742` sends the same commands as the V3 Pro TKL one.
+
+- PID `02E6`.
+- Low-profile switches with 2.8 mm of travel: the same u16 scale, 1638 = 0.1 mm, but
+  Synapse stops at `45864` = 2.8 mm.
+- Keys of the V3 Pro TKL: no numpad and no PrtSc / ScrLk / Pause.
+- No HID LampArray interface (`isWDLSupported: false`), as on the V3 TKL 8KHz.
+- Lighting matrix size is unknown, so the custom effect is not offered.

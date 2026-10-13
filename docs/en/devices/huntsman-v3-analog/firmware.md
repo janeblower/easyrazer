@@ -15,8 +15,9 @@ Conclusions without direct verification are marked "probably". Commands are in
 | Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
 | Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
 | Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
-| Huntsman V3 Pro 8KHz | | full size | not analyzed | not supported |
-| Huntsman V3 Pro Low-profile TKL 8KHz | | TKL | not analyzed | not supported |
+| Huntsman V3 Pro 8KHz | `1532:02CF` | as the V3 Pro | 1.03.00 | not checked |
+| Huntsman Signature Edition | `1532:02D8` | as the V3 Pro TKL | 1.02.00 | not checked |
+| Huntsman V3 Pro Low-profile TKL 8KHz | `1532:02E6` | as the V3 Pro TKL | 1.01.01 | not checked |
 
 The sections below are about the V3 Pro firmware; the other models are in their
 sections.
@@ -381,3 +382,35 @@ ISO/JIS keys.
 
 - Class dispatcher and the command set: assumed the same as on the V3 Pro, per Synapse.
 - Lighting: a 6-row table of fwIDs at `0x2001D6E9` is probably the lighting matrix.
+
+## Huntsman V3 Pro 8KHz
+
+Firmware `1.03.00`, `RYFWFileName` `Talia_T1_Refresh_7203_App_FW_v1.3.0_6A95A743.enc`: a V3 Pro
+build. Image `0x20000000`–`0x200243FF`; the scatter-load entry at `0x200226B8` decompresses
+`0x20022800` → `0x20025800` (`0x6000`) with the same Keil LZ.
+
+- USB: 6 interfaces with the V3 Pro descriptors (61, 237, 79, 22, 327, 30 bytes),
+  configuration at `0x2002B440` after scatter-load.
+- Sensor matrix `0x20020E3C` matches the V3 Pro one byte for byte.
+- Actuation step table `0x2001ED50`, RT table `0x20021D8C`, scale as on the V3 Pro.
+
+## Huntsman Signature Edition
+
+Firmware `1.02.00`, `RYFWFileName` `Talia_Signature_7203_App_FW_v1.2.0_46687178.enc`: a V3 Pro
+build. Image `0x20000000`–`0x200245FF`; the scatter-load entry at `0x2002283C` decompresses
+`0x20022A00` → `0x20025800` (`0x6000`).
+
+- USB: 6 interfaces with the V3 Pro descriptors, configuration at `0x2002B480`.
+- Sensor matrix `0x20021184` matches the V3 Pro TKL one byte for byte.
+- Actuation step table `0x2001F258`, RT table `0x20021F18`, scale as on the V3 Pro.
+
+## Huntsman V3 Pro Low-profile TKL 8KHz
+
+Firmware `1.01.01`, `RYFWFileName` `usb_hid_app_v1.0.0_3699E703.enc`: the code base of the
+V3 TKL 8KHz. Image `0x20000000`–`0x20021BFF`; the scatter-load entry at `0x20020218`
+decompresses `0x20020400` → `0x20025800` (`0x5A00`).
+
+- USB: 5 interfaces as on the V3 TKL 8KHz, no LampArray; configuration at `0x20021880`.
+- Key table `0x2001F728`, after the same `00 DE 09 00` header: the keys of the V3 Pro TKL
+  matrix without `87`.
+- RT table `0x2001F8BA`, `1638·{1…10}`; no actuation step table of the V3 Pro form.

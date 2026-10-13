@@ -10,6 +10,9 @@
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro 8KHz (`1532:02CF`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman Signature Edition (`1532:02D8`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro Low-profile TKL 8KHz (`1532:02E6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
 ## Huntsman V2 Analog
 
@@ -42,5 +45,19 @@ Same as the V3 Pro, with a 60% key map; no custom lighting effect.
 Same as the V3 Pro, with a full 87-key TKL map; no custom lighting effect and no
 Windows Dynamic Lighting. Its firmware is a separate code base, so it is less certain
 than the V3 Pro models.
+
+## Huntsman V3 Pro 8KHz
+
+Same as the V3 Pro.
+
+## Huntsman Signature Edition
+
+Same as the V3 Pro TKL.
+
+## Huntsman V3 Pro Low-profile TKL 8KHz
+
+Same as the V3 Pro TKL, with actuation up to 2.8 mm: its low-profile switches are
+shallower. No Windows Dynamic Lighting. Its firmware is the code base of the V3 TKL
+8KHz.
 
 Protocol and firmware notes for each model: [devices](devices/README.md).
