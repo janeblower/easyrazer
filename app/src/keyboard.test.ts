@@ -42,3 +42,22 @@ test("a call without a keyboard fails with a plain message", async () => {
   const rejected = await call("read_all").catch((error_: unknown) => error_);
   expect(rejected).toBe(messages.en.backend.noKeyboard);
 });
+
+test("an explicit id wins over the selected keyboard", async () => {
+  const sent: unknown[] = [];
+  (globalThis as { window?: unknown }).window = {
+    __TAURI_INTERNALS__: {
+      // eslint-disable-next-line @typescript-eslint/require-await -- stands in for the async IPC
+      invoke: async (_cmd: string, args: unknown) => {
+        sent.push(args);
+      },
+    },
+  };
+  keyboard.value = "B";
+  await call("write_macro", { macroId: 1 }, "A");
+  await call("write_macro", { macroId: 2 });
+  expect(sent).toEqual([
+    { macroId: 1, id: "A" },
+    { macroId: 2, id: "B" },
+  ]);
+});

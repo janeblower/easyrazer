@@ -240,21 +240,22 @@ const speedSlider = computed({
   },
 });
 
-let pending: Look | null = null;
+let pending: { look: Look | null; id: string | null } | null = null;
 let sending = false;
 
 // One preview in flight, at most one per 50 ms; the newest draft wins. Parallel calls
 // would race for the device lock and could land out of order.
 async function preview() {
-  pending = norm(draft.value);
+  pending = { look: norm(draft.value), id: keyboard.value };
   if (sending) return;
   sending = true;
   while (pending) {
     await new Promise((done) => setTimeout(done, 50));
-    const look = pending;
+    const { look, id } = pending;
     pending = null;
+    if (!ours(id)) continue;
     try {
-      await call("lighting_preview", { look });
+      await call("lighting_preview", { look }, id);
     } catch (error) {
       message.value = String(error);
     }

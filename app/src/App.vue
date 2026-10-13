@@ -627,8 +627,9 @@ async function onWriteMacros() {
   const kb = keyboard.value;
   try {
     for (const id of ids) {
-      const r = await call<MacroState>("write_macro", { macroId: id });
-      if (ours(kb)) macroState.value = r;
+      const r = await call<MacroState>("write_macro", { macroId: id }, kb);
+      if (!ours(kb)) return;
+      macroState.value = r;
     }
   } catch (error) {
     message.value = String(error);

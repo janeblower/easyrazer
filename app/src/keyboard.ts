@@ -14,8 +14,7 @@ export function pick(list: DeviceEntry[], current: string | null, stay = false):
 }
 
 // eslint-disable-next-line @typescript-eslint/promise-function-async -- a plain wrapper of invoke
-export function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  const id = keyboard.value;
+export function call<T>(cmd: string, args: Record<string, unknown> = {}, id = keyboard.value): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- like invoke, rejects with the message
   if (id === null) return Promise.reject(i18n.global.t("backend.noKeyboard"));
   return invoke<T>(cmd, { ...args, id });
