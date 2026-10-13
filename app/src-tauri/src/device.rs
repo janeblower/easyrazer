@@ -264,6 +264,12 @@ impl Device {
         settings::save(&s)
     }
 
+    fn publish(&self) {
+        if let Some(id) = &self.id {
+            settings::lock(&self.shared).put(id, &self.data);
+        }
+    }
+
     /// The watcher's liveness check; the log hides it by default.
     fn poll_mode(&self) -> Option<u8> {
         let (t, _) = self.control.as_ref()?;
@@ -538,6 +544,7 @@ impl Device {
             if let Some(p) = self.data_mut()?.profile_mut(id) {
                 p.name = old;
             }
+            self.publish();
             return Err(e);
         }
         Ok(())
@@ -587,7 +594,7 @@ impl Device {
         if self.data().profiles.len() <= 1 {
             return Err(self.msg("backend.onlyProfile"));
         }
-        if slotted && self.slots_used() <= 1 {
+        if slotted && self.data().slots_used() <= 1 {
             return Err(self.msg("backend.lastSlot"));
         }
         if !slotted {
@@ -608,7 +615,7 @@ impl Device {
     }
 
     pub fn free_slot(&mut self, id: u32) -> Result<(), String> {
-        if self.slots_used() <= 1 {
+        if self.data().slots_used() <= 1 {
             return Err(self.msg("backend.lastSlot"));
         }
         self.slot_op(false, |t, s, startup| profiles::free_slot(t, s, id, startup))
@@ -628,10 +635,6 @@ impl Device {
         }
         self.menu = None;
         self.restore();
-    }
-
-    fn slots_used(&self) -> usize {
-        self.data().profiles.iter().filter(|p| p.slot.is_some()).count()
     }
 
     pub fn profiles_view(&self) -> ProfilesView {
@@ -745,7 +748,7 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         self.flashable()?;
-        if self.data().profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
+        if self.data().profile(id).is_some_and(|p| p.slot.is_none()) && self.data().slots_used() >= slots::MAX_SLOTS as usize {
             return Err(self.msg("backend.noFreeSlot"));
         }
         let keys = editable_keys(self.keyboard()?.1.layout);
@@ -1084,8 +1087,7 @@ impl Device {
 /// What the window lists of a keyboard's profiles; works without a connection.
 pub fn profiles_view(d: &DeviceData, startup: Option<u8>) -> ProfilesView {
     let profiles = d.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &d.slots) }).collect();
-    let used = d.profiles.iter().filter(|p| p.slot.is_some()).count();
-    ProfilesView { profiles, loaded: d.loaded, startup, free_slot: used < slots::MAX_SLOTS as usize }
+    ProfilesView { profiles, loaded: d.loaded, startup, free_slot: d.slots_used() < slots::MAX_SLOTS as usize }
 }
 
 /// Press point in the UI's 0.1 mm steps.
@@ -1303,6 +1305,19 @@ mod tests {
 
     fn plain(k: u8) -> RawKey {
         RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
+    }
+
+    #[test]
+    fn a_failed_rename_leaves_the_shared_copy_as_it_was() {
+        let shared: Shared = Default::default();
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.checkout("A");
+        d.data.profiles.push(settings::Profile { id: 1, name: "old".into(), ..Default::default() });
+        // A file where the settings directory belongs makes every save fail.
+        std::fs::write(settings::dir().unwrap(), "").unwrap();
+        assert!(d.rename_profile(1, "new").is_err());
+        assert_eq!(d.data().profile(1).unwrap().name, "old");
+        assert_eq!(settings::lock(&shared).devices["A"].profile(1).unwrap().name, "old");
     }
 
     #[test]

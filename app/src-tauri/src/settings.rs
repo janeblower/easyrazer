@@ -281,6 +281,10 @@ impl DeviceData {
         self.profile_mut(id)
     }
 
+    pub fn slots_used(&self) -> usize {
+        self.profiles.iter().filter(|p| p.slot.is_some()).count()
+    }
+
     pub fn new_profile_id(&mut self) -> u32 {
         self.next_profile_id += 1;
         self.next_profile_id
@@ -288,10 +292,31 @@ impl DeviceData {
 }
 
 pub fn dir() -> Option<PathBuf> {
-    if cfg!(test) {
-        return Some(std::env::temp_dir().join(format!("easyrazer-test-{}", std::process::id())));
-    }
+    #[cfg(test)]
+    return Some(TEST_DIR.with(|d| d.0.clone()));
+    #[cfg(not(test))]
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("EasyRazer"))
+}
+
+/// Every test thread saves into a directory of its own, removed when the thread ends.
+#[cfg(test)]
+struct TestDir(PathBuf);
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DIR: TestDir = {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        TestDir(std::env::temp_dir().join(format!("easyrazer-test-{}-{n}", std::process::id())))
+    };
 }
 
 fn path() -> Option<PathBuf> {
