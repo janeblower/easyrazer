@@ -182,11 +182,12 @@ struct V1 {
 }
 
 /// Moves data of the old layout in `text` to `legacy`; a file already in the new layout is left as it is.
-fn migrate(mut s: Settings, text: &str) -> Settings {
+/// `None` when the old data is damaged.
+fn migrate(mut s: Settings, text: &str) -> Option<Settings> {
     if !s.devices.is_empty() || !s.legacy.is_empty() {
-        return s;
+        return Some(s);
     }
-    let Ok(v1) = serde_json::from_str::<V1>(text) else { return s };
+    let v1 = serde_json::from_str::<V1>(text).ok()?;
     let top = DeviceData {
         pid: 0,
         driver_mode: v1.driver_mode,
@@ -203,7 +204,7 @@ fn migrate(mut s: Settings, text: &str) -> Settings {
         }
         s.legacy.insert(pid, DeviceData { pid, driver_mode: v1.driver_mode, ..d });
     }
-    s
+    Some(s)
 }
 
 /// The old file stays next to the new one: a downgrade or a bad migration must not cost the app-only profiles.
@@ -282,15 +283,17 @@ fn path() -> Option<PathBuf> {
 
 /// A damaged file is set aside, not overwritten: the next save would destroy the only copy of the app-only profiles.
 pub fn load() -> Settings {
-    let Some(p) = path() else { return Settings::default() };
-    let Ok(text) = std::fs::read_to_string(&p) else { return Settings::default() };
-    let Ok(s) = serde_json::from_str(&text) else {
+    path().map_or_else(Settings::default, |p| load_from(&p))
+}
+
+fn load_from(p: &Path) -> Settings {
+    let Ok(text) = std::fs::read_to_string(p) else { return Settings::default() };
+    let Some(s) = serde_json::from_str(&text).ok().and_then(|s| migrate(s, &text)) else {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let _ = std::fs::rename(&p, p.with_file_name(format!("settings.json.bad-{secs}")));
+        let _ = std::fs::rename(p, p.with_file_name(format!("settings.json.bad-{secs}")));
         return Settings::default();
     };
-    let s = migrate(s, &text);
-    backup(&p, &s, &text);
+    backup(p, &s, &text);
     s
 }
 
@@ -338,7 +341,7 @@ mod tests {
 
     #[test]
     fn old_files_move_to_legacy_by_model() {
-        let s = migrate(parse(OLD), OLD);
+        let s = migrate(parse(OLD), OLD).unwrap();
         assert!(s.devices.is_empty());
         let v2 = &s.legacy[&0x0266];
         assert_eq!((v2.pid, v2.profiles[0].id, v2.loaded, v2.driver_mode), (0x0266, 1, Some(1), true));
@@ -349,19 +352,19 @@ mod tests {
     #[test]
     fn files_from_before_per_model_data_belong_to_the_v2_analog() {
         let text = r#"{"profiles": [{"id": 3, "name": "a", "slot": 2, "data": {"normal": {}, "hypershift": {}, "look": null}}]}"#;
-        let s = migrate(parse(text), text);
+        let s = migrate(parse(text), text).unwrap();
         assert_eq!((s.legacy[&LEGACY_MODEL].profiles[0].id, s.legacy[&LEGACY_MODEL].profiles[0].slot), (3, Some(2)));
     }
 
     #[test]
     fn a_model_without_data_is_not_kept() {
         let text = r#"{"model":678,"driver_mode":true}"#;
-        assert!(migrate(parse(text), text).legacy.is_empty());
+        assert!(migrate(parse(text), text).unwrap().legacy.is_empty());
     }
 
     #[test]
     fn first_keyboard_of_a_model_claims_its_legacy() {
-        let mut s = migrate(parse(OLD), OLD);
+        let mut s = migrate(parse(OLD), OLD).unwrap();
         assert!(s.claim("PM1", 0x0266));
         assert_eq!(s.devices["PM1"].profiles[0].id, 1);
         assert!(!s.legacy.contains_key(&0x0266));
@@ -370,7 +373,7 @@ mod tests {
 
     #[test]
     fn second_keyboard_of_a_model_starts_empty() {
-        let mut s = migrate(parse(OLD), OLD);
+        let mut s = migrate(parse(OLD), OLD).unwrap();
         s.claim("PM1", 0x0266);
         assert!(s.claim("PM2", 0x0266));
         assert!(s.devices["PM2"].profiles.is_empty());
@@ -379,10 +382,10 @@ mod tests {
 
     #[test]
     fn legacy_survives_a_round_trip() {
-        let mut s = migrate(parse(OLD), OLD);
+        let mut s = migrate(parse(OLD), OLD).unwrap();
         s.claim("PM1", 0x0266);
         let text = serde_json::to_string(&s).unwrap();
-        let back = migrate(parse(&text), &text);
+        let back = migrate(parse(&text), &text).unwrap();
         assert_eq!(back, s);
         assert_eq!(back.legacy[&678].profiles[0].id, 7);
     }
@@ -392,7 +395,21 @@ mod tests {
         let mut s = Settings::default();
         s.claim("PM1", 0x0266);
         let text = serde_json::to_string(&s).unwrap();
-        assert_eq!(migrate(parse(&text), &text), s);
+        assert_eq!(migrate(parse(&text), &text).unwrap(), s);
+    }
+
+    #[test]
+    fn a_damaged_old_file_is_set_aside() {
+        let dir = std::env::temp_dir().join(format!("easyrazer-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let text = r#"{"profiles":[{"id":1,"name":"p1","slot":300}],"confirm_write":false}"#;
+        std::fs::write(&p, text).unwrap();
+        assert_eq!(load_from(&p), Settings::default());
+        assert!(!p.exists(), "the next save must not overwrite the only copy");
+        let bad: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().into_string().unwrap()).collect();
+        assert!(bad.iter().any(|n| n.starts_with("settings.json.bad-")), "{bad:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -401,7 +418,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("settings.json");
         let v1 = dir.join("settings.json.v1");
-        let s = migrate(parse(OLD), OLD);
+        let s = migrate(parse(OLD), OLD).unwrap();
         backup(&p, &s, OLD);
         assert_eq!(std::fs::read_to_string(&v1).unwrap(), OLD);
         backup(&p, &s, "{}");
