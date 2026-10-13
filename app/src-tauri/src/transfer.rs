@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use razer_core::binding::{self, Action};
 use razer_core::devices;
 use razer_core::layout;
-use razer_core::lighting::{self, Rgb};
+use razer_core::lighting::Rgb;
 use razer_core::macros::Event;
 use razer_core::profiles::Snapshot;
 use serde::{Deserialize, Serialize};
@@ -96,6 +96,9 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
     let mut library = d.macros.clone();
     let mut ids = BTreeMap::new();
     for (old, m) in f.macros {
+        if library.contains_key(&u16::MAX) {
+            return Err(Refused::Broken("too many macros".into()));
+        }
         let new = next_macro_id(&library);
         library.insert(new, Macro { name: m.name, events: m.events, written: false });
         ids.insert(old, new);
@@ -116,13 +119,17 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
     let convert = |t: u8| to.analog.threshold(from.analog.mm(t).clamp(to.analog.range[0], to.analog.range[1]));
     for layer in [&mut data.normal, &mut data.hypershift] {
         layer.retain(|&k, _| keep(k));
-        for r in layer.values_mut() {
+        for (&k, r) in layer.iter_mut() {
             if rescale {
-                (r.thr_low, r.thr_high) = (convert(r.thr_low), convert(r.thr_high));
+                r.thr_low = convert(r.thr_low);
+                // Opaque to the app, which writes only thr_low; 0 means unset.
+                if r.thr_high != 0 {
+                    r.thr_high = convert(r.thr_high);
+                }
             }
             if let Some(Action::Macro { id, mode, count }) = binding::decode(r.fn_id, &r.fn_data) {
-                let action = ids.get(&id).map(|&id| Action::Macro { id, mode, count });
-                (r.fn_id, r.fn_data) = action.and_then(binding::encode).unwrap_or((0, Vec::new()));
+                let action = ids.get(&id).map(|&id| Action::Macro { id, mode, count }).unwrap_or_else(|| binding::factory(k));
+                (r.fn_id, r.fn_data) = binding::encode(action).unwrap_or((0, Vec::new()));
             }
         }
     }
@@ -134,7 +141,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
     if let Some(c) = &mut custom {
         c.retain(|&k, _| keep(k));
     }
-    if data.look.as_ref().is_some_and(|l| l.effect.name != lighting::CUSTOM && !to.lighting.effects.contains(&l.effect.name)) {
+    if data.look.as_ref().is_some_and(|l| !to.lighting.effects.contains(&l.effect.name)) {
         data.look = None;
     }
 
@@ -153,6 +160,7 @@ mod tests {
     use razer_core::layout::{self, Board};
     use razer_core::lighting::{Effect, Look};
     use razer_core::profiles::RawKey;
+    use razer_core::rapid::SnapGroup;
 
     use crate::settings::{DeviceData, Macro, Profile, Rapid};
 
@@ -213,7 +221,7 @@ mod tests {
         dst.macros.insert(0x9999, mac("unrelated"));
         let got = import(&mut dst, f).unwrap();
         let r = &dst.profile(got.id).unwrap().data.normal[&1];
-        assert_eq!(binding::decode(r.fn_id, &r.fn_data), Some(Action::Disabled), "the key keeps its press point but loses the stale macro");
+        assert_eq!(binding::decode(r.fn_id, &r.fn_data), Some(binding::factory(1)), "the key keeps its press point and falls back to its factory binding");
     }
 
     #[test]
@@ -258,7 +266,7 @@ mod tests {
     fn an_effect_the_target_lacks_is_dropped() {
         let look = |name: &str| Some(Look { effect: Effect { name: name.into(), ..Default::default() }, brightness: 100 });
         let kept = devices::by_pid(0x02E6).unwrap().lighting.effects[0].clone();
-        for (name, survives) in [(kept.as_str(), true), ("no-such-effect", false)] {
+        for (name, survives) in [(kept.as_str(), true), ("no-such-effect", false), ("custom", false)] {
             let mut src = board(0x0266);
             let p = with_profile(&mut src, "Game", &[], &[]);
             src.profiles[0].data.look = look(name);
@@ -266,6 +274,43 @@ mod tests {
             let got = import(&mut dst, export(&src, p).unwrap()).unwrap();
             assert_eq!(dst.profile(got.id).unwrap().data.look.is_some(), survives, "{name}");
         }
+    }
+
+    #[test]
+    fn a_press_point_below_the_targets_range_is_raised() {
+        let fw = layout::keys(Board::Full).into_iter().find(|k| k.label == "Esc").unwrap().key;
+        let (from, to) = (devices::by_pid(0x02A6).unwrap(), devices::by_pid(0x0266).unwrap());
+        let mut src = board(0x02A6);
+        let p = with_profile(&mut src, "Game", &[(fw, key(from.analog.threshold(from.analog.range[0]), None))], &[]);
+        let mut dst = board(0x0266);
+        let got = import(&mut dst, export(&src, p).unwrap()).unwrap();
+        let mm = to.analog.mm(dst.profile(got.id).unwrap().data.normal[&fw].thr_low);
+        assert!(mm >= to.analog.range[0] - 0.05, "{mm}");
+    }
+
+    #[test]
+    fn snap_groups_lose_missing_keys() {
+        let fw = |label: &str| layout::keys(Board::Full).into_iter().find(|k| k.label == label).unwrap().key;
+        let (a, b, num) = (fw("Esc"), fw("Tab"), fw("Num"));
+        let mut src = board(0x0266);
+        let p = with_profile(&mut src, "Game", &[], &[]);
+        let group = |keys: &[u8]| SnapGroup { keys: keys.to_vec(), rule: Default::default() };
+        src.profiles[0].snap_tap.groups = vec![group(&[a, b, num]), group(&[a, num])];
+        let mut dst = board(0x02E6);
+        let got = import(&mut dst, export(&src, p).unwrap()).unwrap();
+        assert_eq!(dst.profile(got.id).unwrap().snap_tap.groups, vec![group(&[a, b])]);
+    }
+
+    #[test]
+    fn too_many_macros_are_refused() {
+        let mut dst = board(0x0266);
+        dst.macros.insert(u16::MAX, mac("last"));
+        let mut src = board(0x0266);
+        src.macros.insert(0x8000, mac("m"));
+        let p = with_profile(&mut src, "Game", &[(1, key(100, play(0x8000)))], &[]);
+        let before = dst.clone();
+        assert!(matches!(import(&mut dst, export(&src, p).unwrap()), Err(Refused::Broken(_))));
+        assert_eq!(dst, before);
     }
 
     #[test]

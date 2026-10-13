@@ -675,9 +675,10 @@ impl Device {
 
     /// Adds the profile to the list; it is neither loaded nor written until the user does that.
     pub fn import_profile(&mut self, path: &Path) -> Result<transfer::Imported, String> {
+        self.data_mut()?;
         let lang = self.lang();
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let got = transfer::parse(&text).and_then(|f| transfer::import(self.data_mut().map_err(transfer::Refused::Broken)?, f));
+        let got = transfer::parse(&text).and_then(|f| transfer::import(&mut self.data, f));
         let got = got.map_err(|r| match r {
             transfer::Refused::Format => i18n::t(&lang, "backend.importFormat"),
             transfer::Refused::Broken(e) => i18n::tf(&lang, "backend.importBroken", &[("error", &e)]),
