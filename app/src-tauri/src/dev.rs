@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
 use crate::device::Device;
-use crate::settings::{DEV_LOG_SIZES, DevPanel, DevWindow, Settings};
+use crate::settings::{DEV_LOG_SIZES, DevPanel, DevWindow, DeviceData, Settings};
 
 /// Log lines a bug report carries.
 const REPORT_ENTRIES: usize = 200;
@@ -137,7 +137,7 @@ pub async fn dev_exchange(state: State<'_, AppState>, class: u8, id: u8, size: u
 #[tauri::command]
 pub async fn dev_keys(state: State<'_, AppState>, keys: Vec<u8>) -> Result<BTreeMap<u8, DevKey>, String> {
     let device = state.device();
-    let Some(p) = device.settings().loaded_profile() else { return Ok(BTreeMap::new()) };
+    let Some(p) = device.data().loaded_profile() else { return Ok(BTreeMap::new()) };
     Ok(keys
         .into_iter()
         .map(|k| {
@@ -149,14 +149,14 @@ pub async fn dev_keys(state: State<'_, AppState>, keys: Vec<u8>) -> Result<BTree
 
 #[tauri::command]
 pub async fn dev_macro(state: State<'_, AppState>, id: u16) -> Result<Option<Vec<u8>>, String> {
-    Ok(state.device().settings().macros.get(&id).and_then(|m| macros::encode(&m.events)))
+    Ok(state.device().data().macros.get(&id).and_then(|m| macros::encode(&m.events)))
 }
 
 #[tauri::command]
 pub async fn dev_diagnostics(state: State<'_, AppState>, uncensored: bool) -> Result<String, String> {
     let mut device = state.device();
     let info = device_info(&mut device);
-    Ok(report(info.as_ref(), device.settings(), &device.log().entries(), uncensored))
+    Ok(report(info.as_ref(), device.settings(), device.data(), &device.log().entries(), uncensored))
 }
 
 fn hex(b: &[u8]) -> String {
@@ -172,7 +172,7 @@ fn hex_cut(b: &[u8], keep: usize) -> String {
 }
 
 /// Plain text for a bug report; profile and macro names never go in, and censored hides what may be private.
-pub fn report(info: Option<&DeviceInfo>, s: &Settings, entries: &[Entry], uncensored: bool) -> String {
+pub fn report(info: Option<&DeviceInfo>, s: &Settings, d: &DeviceData, entries: &[Entry], uncensored: bool) -> String {
     let mut out = format!("EasyRazer {} on {} {}\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
     match info {
         Some(i) => {
@@ -198,11 +198,11 @@ pub fn report(info: Option<&DeviceInfo>, s: &Settings, entries: &[Entry], uncens
     let _ = writeln!(
         out,
         "settings: {} profiles, loaded {:?}, slots {:?}, {} macros, driver mode {}, confirm write {}, watch Synapse {}, on close {:?}, language {:?}",
-        s.profiles.len(),
-        s.loaded,
-        s.slots.keys().collect::<Vec<_>>(),
-        s.macros.len(),
-        s.driver_mode,
+        d.profiles.len(),
+        d.loaded,
+        d.slots.keys().collect::<Vec<_>>(),
+        d.macros.len(),
+        d.driver_mode,
         s.confirm_write,
         s.watch_synapse,
         s.close_action,
@@ -261,17 +261,17 @@ mod tests {
             entry(3, "00:82", vec![], b"PM2149H00012345".to_vec()),
         ];
         let s = Settings::default();
-        let censored = report(Some(&info()), &s, &entries, false);
+        let censored = report(Some(&info()), &s, &DeviceData::default(), &entries, false);
         assert!(!censored.contains("AA BB CC") && !censored.contains("00 41 00 42") && !censored.contains("PM2149") && !censored.contains("50 4D 32 31"));
         assert!(censored.contains("<3 bytes hidden>") && censored.contains("<4 bytes hidden>"));
-        let raw = report(Some(&info()), &s, &entries, true);
+        let raw = report(Some(&info()), &s, &DeviceData::default(), &entries, true);
         assert!(raw.contains("AA BB CC") && raw.contains("00 41 00 42") && raw.contains("PM2149") && raw.contains("50 4D 32 31"));
     }
 
     #[test]
     fn a_report_carries_the_last_entries() {
         let entries: Vec<Entry> = (0..250).map(|i| entry(i, "00:84", vec![], vec![3, 0])).collect();
-        let r = report(None, &Settings::default(), &entries, false);
+        let r = report(None, &Settings::default(), &DeviceData::default(), &entries, false);
         assert!(r.contains("\n#50 ") && !r.contains("\n#49 ") && r.contains("\n#249 "));
         assert!(r.contains("device: not connected"));
     }

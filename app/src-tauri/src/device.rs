@@ -27,7 +27,7 @@ use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
-use crate::settings::{self, Macro, Rapid, Settings, SnapTap};
+use crate::settings::{self, DeviceData, Macro, Rapid, Settings, SnapTap};
 
 pub type Control = Logged<HidTransport>;
 
@@ -126,6 +126,8 @@ pub struct Device {
     control: Option<(Control, &'static DeviceSpec)>,
     /// The keyboard `control` belongs to; its other interfaces are opened from it.
     unit: Option<Unit>,
+    /// Key of the last keyboard connected in `settings.devices`; kept while it is unplugged, like `last_spec`.
+    id: Option<String>,
     /// Outlives reconnects, so the developer log keeps what led up to one.
     log: Arc<Log>,
     /// Last known Synapse state; assumed running until checked.
@@ -164,6 +166,7 @@ impl Device {
             api,
             control: None,
             unit: None,
+            id: None,
             log: Arc::new(Log::default()),
             synapse: true,
             backed_up: BTreeSet::new(),
@@ -194,18 +197,24 @@ impl Device {
             self.control = None;
             self.unit = None;
             let _ = self.api.refresh_devices();
+            // A failed serial read would file the keyboard's data under another key; the next poll retries.
             if let Some(unit) = hid::units(&self.api).into_iter().next()
                 && let Ok(t) = hid::open_control(&self.api, &unit)
+                && let Ok(serial) = control::serial(&t)
             {
+                let id = settings::device_id(unit.spec.pid, &serial);
+                if self.id.as_deref() != Some(&id) {
+                    self.backed_up.clear();
+                }
+                if self.settings.claim(&id, unit.spec.pid) {
+                    let _ = settings::save(&self.settings);
+                }
+                self.id = Some(id);
                 self.control = Some((Logged::new(t, self.log.clone()), unit.spec));
                 self.unit = Some(unit);
             }
             if let (Some((_, d)), Some(unit)) = (&self.control, &self.unit) {
                 self.last_spec = Some(*d);
-                if self.settings.switch_model(d.pid) {
-                    self.backed_up.clear();
-                    let _ = settings::save(&self.settings);
-                }
                 if let Some(sink) = &self.sink {
                     // Fn+Menu is rebound only once someone listens, or it would do nothing.
                     self.menu = MenuListener::start(&self.api, unit, sink.clone()).ok();
@@ -216,6 +225,16 @@ impl Device {
             }
         }
         self.control.is_some()
+    }
+
+    /// The data of the last keyboard connected; empty before any.
+    pub fn data(&self) -> &DeviceData {
+        self.settings.device(self.id.as_deref())
+    }
+
+    fn data_mut(&mut self) -> Result<&mut DeviceData, String> {
+        let missing = self.msg("backend.noKeyboard");
+        self.settings.device_mut(self.id.as_deref()).ok_or(missing)
     }
 
     /// The watcher's liveness check; the log hides it by default.
@@ -250,15 +269,16 @@ impl Device {
         let fallback = move |k: u8| i18n::tf(&lang, "backend.profileSlot", &[("n", &k.to_string())]);
         let missing = self.msg("backend.noKeyboard");
         let Some((t, d)) = &self.control else { return Err(missing) };
+        let Some(data) = self.settings.device_mut(self.id.as_deref()) else { return Err(missing) };
         let keys = editable_keys(d.layout);
         let startup = control::active_profile(t).map_err(|e| e.to_string())?;
         // Synapse or another tool may have rewritten the startup slot since it was cached.
         if !self.synced {
-            self.settings.slots.remove(&startup);
+            data.slots.remove(&startup);
         }
         let progress = |n, total, a: Option<&KeyAssignment>| progress(n, total, a.map(|a| (a.key, mm(&d.analog, a.threshold_low))));
-        profiles::sync_slots(t, d, &mut self.settings, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
-        self.settings.bind_snap_tap_once();
+        profiles::sync_slots(t, d, data, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
+        data.bind_snap_tap_once();
         self.startup = Some(startup);
         self.synced = true;
         settings::save(&self.settings)
@@ -276,13 +296,13 @@ impl Device {
         }
         let menu = self.hw_menu();
         let Some((t, d)) = &self.control else { return };
-        let Some(id) = self.settings.loaded else { return };
-        let base = match (&self.ram, self.startup.and_then(|k| self.settings.slots.get(&k))) {
+        let Some(id) = self.data().loaded else { return };
+        let base = match (&self.ram, self.startup.and_then(|k| self.data().slots.get(&k))) {
             (Some(r), _) => r.clone(),
             (None, Some(s)) => s.clone(),
             (None, None) => Snapshot::default(),
         };
-        match profiles::load(t, d, &self.settings, id, &base, menu).and_then(|after| self.sync_firmware_rapid().map(|()| after)) {
+        match profiles::load(t, d, self.data(), id, &base, menu).and_then(|after| self.sync_firmware_rapid().map(|()| after)) {
             Ok(after) => self.ram = Some(after),
             Err(e) => {
                 // Profile 0 holds a partial write, so the next load must write every key.
@@ -316,7 +336,7 @@ impl Device {
     /// Hardware mode on a model whose firmware runs Rapid Trigger and Snap Tap: profile 0 gets the
     /// loaded profile's, again after every load of profile 0.
     fn sync_firmware_rapid(&self) -> Result<(), Error> {
-        let (Some((t, d)), Some(p)) = (&self.control, self.settings.loaded_profile()) else { return Ok(()) };
+        let (Some((t, d)), Some(p)) = (&self.control, self.data().loaded_profile()) else { return Ok(()) };
         if !d.analog.firmware_rapid || self.engine.is_some() {
             return Ok(());
         }
@@ -354,14 +374,14 @@ impl Device {
             self.synced = false;
             self.reload();
         }
-        let (profile, profile_name) = match self.settings.loaded_profile() {
+        let (profile, profile_name) = match self.data().loaded_profile() {
             Some(p) if self.synced => (Some(p.id), Some(p.name.clone())),
             _ => (None, None),
         };
         if self.control.is_none() {
             let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
-            let driver_mode = self.settings.driver_mode;
+            let driver_mode = self.data().driver_mode;
             return Status { device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, unsupported, error };
         }
         self.sync_engine();
@@ -376,7 +396,7 @@ impl Device {
             self.ram = None;
             self.restore();
         }
-        Status { device: true, synapse, driver_mode: self.settings.driver_mode, profile, profile_name, model, verified, analog, unsupported: None, error }
+        Status { device: true, synapse, driver_mode: self.data().driver_mode, profile, profile_name, model, verified, analog, unsupported: None, error }
     }
 
     /// Reads the slots once per connect and loads the profile; returns its Normal press points.
@@ -388,56 +408,56 @@ impl Device {
         self.restore();
         self.sync_engine();
         let missing = self.msg("backend.noKeyboard");
-        let p = self.settings.loaded_profile().ok_or(missing)?;
+        let p = self.data().loaded_profile().ok_or(missing)?;
         Ok(p.data.normal.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect())
     }
 
     /// What each key does now; `None` when the app cannot show it.
     pub fn bindings(&self) -> BTreeMap<u8, Option<Action>> {
-        let Some(p) = self.settings.loaded_profile() else { return BTreeMap::new() };
+        let Some(p) = self.data().loaded_profile() else { return BTreeMap::new() };
         p.data.normal.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect()
     }
 
     pub fn hypershift(&self) -> Hypershift {
-        let Some(p) = self.settings.loaded_profile() else { return Hypershift::default() };
+        let Some(p) = self.data().loaded_profile() else { return Hypershift::default() };
         let layer = &p.data.hypershift;
         Hypershift {
             values: layer.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect(),
             bindings: layer.iter().map(|(&k, r)| (k, binding::decode(r.fn_id, &r.fn_data))).collect(),
-            unsaved: profiles::unsaved_hypershift(p, &self.settings.slots),
+            unsaved: profiles::unsaved_hypershift(p, &self.data().slots),
         }
     }
 
     /// Keys whose press point and binding differ from the profile's slot.
     pub fn unsaved(&self) -> (Vec<u8>, Vec<u8>) {
-        self.settings.loaded_profile().map_or_else(Default::default, |p| profiles::unsaved(p, &self.settings.slots))
+        self.data().loaded_profile().map_or_else(Default::default, |p| profiles::unsaved(p, &self.data().slots))
     }
 
     pub fn rapid(&self) -> BTreeMap<u8, Rapid> {
-        self.settings.loaded_profile().map(|p| p.rapid.clone()).unwrap_or_default()
+        self.data().loaded_profile().map(|p| p.rapid.clone()).unwrap_or_default()
     }
 
     pub fn snap_tap(&self) -> SnapTap {
-        self.settings.loaded_profile().map(|p| p.snap_tap.clone()).unwrap_or_default()
+        self.data().loaded_profile().map(|p| p.snap_tap.clone()).unwrap_or_default()
     }
 
     /// Fn+LShift: the engine has switched already; the profile follows so the window and the next start agree.
     pub fn set_snap_tap(&mut self, on: bool) -> Result<(), String> {
-        let Some(p) = self.settings.loaded_mut() else { return Ok(()) };
+        let Some(p) = self.data_mut().ok().and_then(DeviceData::loaded_mut) else { return Ok(()) };
         p.snap_tap.enabled = on;
         settings::save(&self.settings)
     }
 
     /// Id of the loaded profile.
     pub fn loaded(&self) -> Option<u32> {
-        self.settings.loaded
+        self.data().loaded
     }
 
     pub fn load_profile(&mut self, id: u32) -> Result<(), String> {
-        if self.settings.profile(id).is_none() {
+        if self.data().profile(id).is_none() {
             return Err(format!("no profile {id}"));
         }
-        self.settings.loaded = Some(id);
+        self.data_mut()?.loaded = Some(id);
         settings::save(&self.settings)?;
         self.restore();
         self.sync_engine();
@@ -446,49 +466,50 @@ impl Device {
 
     /// Fn+Menu.
     pub fn next_profile(&mut self) {
-        if let Some(id) = profiles::next(&self.settings) {
+        if let Some(id) = profiles::next(self.data()) {
             let _ = self.load_profile(id);
         }
     }
 
     /// The new profile is loaded at once, so the window can rename it in place.
     pub fn create_profile(&mut self) -> Result<(), String> {
-        let name = profiles::free_name(&self.settings, &self.msg("profiles.new"), profiles::numbered);
-        let id = self.settings.loaded.and_then(|from| profiles::copy(&mut self.settings, from, name)).ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let name = profiles::free_name(self.data(), &self.msg("profiles.new"), profiles::numbered);
+        let from = self.data().loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let id = profiles::copy(self.data_mut()?, from, name).ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.load_profile(id)
     }
 
     pub fn duplicate_profile(&mut self, id: u32) -> Result<(), String> {
-        let base = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
+        let base = self.data().profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
         let lang = self.lang().to_string();
         let copy = |n: usize| match n {
             1 => i18n::tf(&lang, "profiles.copy", &[("name", "")]),
             n => i18n::tf(&lang, "profiles.copyN", &[("name", ""), ("n", &n.to_string())]),
         };
-        let name = profiles::free_name(&self.settings, &base, copy);
-        profiles::copy(&mut self.settings, id, name);
+        let name = profiles::free_name(self.data(), &base, copy);
+        profiles::copy(self.data_mut()?, id, name);
         settings::save(&self.settings)
     }
 
     pub fn rename_profile(&mut self, id: u32, name: &str) -> Result<(), String> {
-        let old = self.settings.profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
+        let old = self.data().profile(id).map(|p| p.name.clone()).ok_or_else(|| format!("no profile {id}"))?;
         if slots::fit_name(name).is_empty() {
             return Err(self.msg("backend.emptyName"));
         }
         if slots::fit_name(name) == old {
             return Ok(());
         }
-        if profiles::name_taken(&self.settings, &slots::fit_name(name), Some(id)) {
+        if profiles::name_taken(self.data(), &slots::fit_name(name), Some(id)) {
             return Err(self.msg("backend.nameTaken"));
         }
-        let slot = profiles::rename(&mut self.settings, id, name).map_err(|e| e.to_string())?;
+        let slot = profiles::rename(self.data_mut()?, id, name).map_err(|e| e.to_string())?;
         let written = match slot {
             Some(k) => self.write_slot_name(id, k),
             None => Ok(()),
         };
         // The name must not outlive a failed slot write, or the next save would split the two.
         if let Err(e) = written.and_then(|()| settings::save(&self.settings)) {
-            if let Some(p) = self.settings.profile_mut(id) {
+            if let Some(p) = self.data_mut()?.profile_mut(id) {
                 p.name = old;
             }
             return Err(e);
@@ -501,13 +522,13 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         self.flashable()?;
-        let new = self.settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
+        let new = self.data().profile(id).map(|p| p.name.clone()).unwrap_or_default();
         let (t, _) = self.keyboard()?;
         slots::write_name(t, slot, &new).map_err(|e| e.to_string())
     }
 
     /// Ops that change the flash list; every one of them may reload profile 0, `reloads` says it always does.
-    fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&Control, &mut Settings, u8) -> Result<u8, Error>) -> Result<(), String> {
+    fn slot_op(&mut self, reloads: bool, op: impl FnOnce(&Control, &mut DeviceData, u8) -> Result<u8, Error>) -> Result<(), String> {
         if self.check_synapse() {
             return Err(self.msg("backend.synapseRunning"));
         }
@@ -515,7 +536,8 @@ impl Device {
         let startup = self.startup.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         let missing = self.msg("backend.noKeyboard");
         let Some((t, _)) = &self.control else { return Err(missing) };
-        let after = match op(t, &mut self.settings, startup) {
+        let Some(data) = self.settings.device_mut(self.id.as_deref()) else { return Err(missing) };
+        let after = match op(t, data, startup) {
             Ok(a) => a,
             Err(e) => {
                 // A half-done `05:04`/`05:03` leaves the keyboard in an unknown state.
@@ -535,16 +557,16 @@ impl Device {
     }
 
     pub fn delete_profile(&mut self, id: u32) -> Result<(), String> {
-        let slotted = self.settings.profile(id).ok_or_else(|| format!("no profile {id}"))?.slot.is_some();
-        if self.settings.profiles.len() <= 1 {
+        let slotted = self.data().profile(id).ok_or_else(|| format!("no profile {id}"))?.slot.is_some();
+        if self.data().profiles.len() <= 1 {
             return Err(self.msg("backend.onlyProfile"));
         }
         if slotted && self.slots_used() <= 1 {
             return Err(self.msg("backend.lastSlot"));
         }
         if !slotted {
-            let was_loaded = self.settings.loaded == Some(id);
-            profiles::remove(&mut self.settings, id).map_err(|e| e.to_string())?;
+            let was_loaded = self.data().loaded == Some(id);
+            profiles::remove(self.data_mut()?, id).map_err(|e| e.to_string())?;
             settings::save(&self.settings)?;
             if was_loaded {
                 self.restore();
@@ -583,11 +605,11 @@ impl Device {
     }
 
     fn slots_used(&self) -> usize {
-        self.settings.profiles.iter().filter(|p| p.slot.is_some()).count()
+        self.data().profiles.iter().filter(|p| p.slot.is_some()).count()
     }
 
     pub fn profiles_view(&self) -> ProfilesView {
-        let s = &self.settings;
+        let s = self.data();
         let profiles = s.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &s.slots) }).collect();
         ProfilesView { profiles, loaded: s.loaded, startup: self.startup, free_slot: self.slots_used() < slots::MAX_SLOTS as usize }
     }
@@ -609,15 +631,15 @@ impl Device {
         let host = self.engine.is_some();
         let unwritten = self.msg("backend.macroUnwritten");
         let missing = self.msg("backend.noKeyboard");
-        if self.settings.loaded_profile().is_none() {
+        if self.data().loaded_profile().is_none() {
             return Err(missing);
         }
-        let written = written_macros(&self.settings);
+        let written = written_macros(self.data());
         // The firmware plays only bodies in its flash.
         if !host && hs.bindings.iter().any(|&(_, a)| matches!(a, Action::Macro { id, .. } if !written.contains(&id))) {
             return Err(unwritten.clone());
         }
-        let mut layer = self.settings.loaded_profile().map(|p| p.data.hypershift.clone()).unwrap_or_default();
+        let mut layer = self.data().loaded_profile().map(|p| p.data.hypershift.clone()).unwrap_or_default();
         let (t, d) = self.keyboard()?;
         edit_layer(&d.analog, d.layout, &mut layer, hs)?;
         let bound: Vec<(u8, Outcome)> = if host {
@@ -633,7 +655,7 @@ impl Device {
                 .collect()
         };
         let results = actuation::apply(t, &d.analog, actuation::LIVE, changes);
-        let Some(p) = self.settings.loaded_mut() else { return Err(missing) };
+        let Some(p) = self.settings.device_mut(self.id.as_deref()).and_then(DeviceData::loaded_mut) else { return Err(missing) };
         p.data.hypershift = layer;
         for (k, o) in &results {
             if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, p.data.normal.get_mut(k)) {
@@ -688,7 +710,7 @@ impl Device {
         } else {
             self.apply(edits, &BTreeMap::new(), None, bind_edits, hs)?
         };
-        let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let id = self.data().loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.write_profile(id)?;
         Ok(Written { results: applied.results, bindings: applied.bindings, ..self.written(Vec::new(), Vec::new()) })
     }
@@ -699,21 +721,22 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         self.flashable()?;
-        if self.settings.profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
+        if self.data().profile(id).is_some_and(|p| p.slot.is_none()) && self.slots_used() >= slots::MAX_SLOTS as usize {
             return Err(self.msg("backend.noFreeSlot"));
         }
         let keys = editable_keys(self.keyboard()?.1.layout);
         let bound: Vec<(u8, Action)> = self
-            .settings
+            .data()
             .profile(id)
             .map(|p| p.data.normal.iter().chain(&p.data.hypershift).filter_map(|(&k, r)| Some((k, binding::decode(r.fn_id, &r.fn_data)?))).collect())
             .unwrap_or_default();
-        let bodies = bodies_to_write(&self.settings, &bound);
-        let slot = self.settings.profile(id).and_then(|p| p.slot);
+        let bodies = bodies_to_write(self.data(), &bound);
+        let slot = self.data().profile(id).and_then(|p| p.slot);
         let missing = self.msg("backend.noKeyboard");
         self.ensure_connected();
         // Field borrows, not `keyboard()`: the slot write needs `self.settings` mutably at the same time.
         let Some((t, d)) = &self.control else { return Err(missing) };
+        let Some(data) = self.settings.device_mut(self.id.as_deref()) else { return Err(missing) };
         if let Some(k) = slot.filter(|k| !self.backed_up.contains(k)) {
             let all = actuation::read_all(t, k, &keys, |_, _| {}).map_err(|e| e.to_string())?;
             write_backup(&actuation::format_backup(k, &all))?;
@@ -722,9 +745,9 @@ impl Device {
         for (mid, body) in &bodies {
             macros::write(t, *mid, body).map_err(|e| e.to_string())?;
         }
-        let k = profiles::write_slot(t, d, &mut self.settings, id, &keys).map_err(|e| e.to_string())?;
+        let k = profiles::write_slot(t, d, data, id, &keys).map_err(|e| e.to_string())?;
         for (mid, _) in bodies {
-            if let Some(m) = self.settings.macros.get_mut(&mid) {
+            if let Some(m) = data.macros.get_mut(&mid) {
                 m.written = true;
             }
         }
@@ -744,8 +767,8 @@ impl Device {
     pub fn lighting_state(&mut self) -> Result<LightingState, String> {
         let dynamic_lighting = dynamic_lighting::enabled();
         self.ensure_connected();
-        let p = self.settings.loaded_profile();
-        let saved = p.and_then(|p| p.slot).and_then(|k| self.settings.slots.get(&k)).and_then(|s| s.look.clone());
+        let p = self.data().loaded_profile();
+        let saved = p.and_then(|p| p.slot).and_then(|k| self.data().slots.get(&k)).and_then(|s| s.look.clone());
         let applied = p.and_then(|p| p.data.look.clone());
         Ok(LightingState {
             effects: self.last_spec.map(lighting::effect_infos).unwrap_or_default(),
@@ -787,7 +810,7 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         let missing = self.msg("backend.noKeyboard");
-        if self.settings.loaded_profile().is_none() {
+        if self.data().loaded_profile().is_none() {
             return Err(missing);
         }
         self.previewed = false;
@@ -800,7 +823,7 @@ impl Device {
         if let Some(r) = &mut self.ram {
             r.look = Some(look.clone());
         }
-        let p = self.settings.loaded_mut().ok_or(missing)?;
+        let p = self.settings.device_mut(self.id.as_deref()).and_then(DeviceData::loaded_mut).ok_or(missing)?;
         if look.effect.name == lighting::CUSTOM {
             p.custom = look.effect.colors.clone();
         }
@@ -814,7 +837,7 @@ impl Device {
             return Err(self.msg("backend.customNotSaved"));
         }
         self.lighting_apply(look)?;
-        let id = self.settings.loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        let id = self.data().loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.write_profile(id)
     }
 
@@ -842,7 +865,9 @@ impl Device {
         };
         // A refused or timed-out write may still have landed, so the cache is dropped either way.
         if cmd.id & 0x80 == 0 {
-            let f = forget(&cmd.to_string(), args, self.startup, &mut self.ram, &mut self.settings);
+            let mut none = DeviceData::default();
+            let data = self.settings.device_mut(self.id.as_deref()).unwrap_or(&mut none);
+            let f = forget(&cmd.to_string(), args, self.startup, &mut self.ram, data);
             if f.resync {
                 self.synced = false;
                 if !self.synapse {
@@ -876,7 +901,7 @@ impl Device {
         let r = hid::set_autonomous(&self.api, unit, true);
         self.log.note("LampArray autonomous", &[1], r.as_ref().err().map(ToString::to_string));
         r.map_err(|e| e.to_string())?;
-        if let (Some((t, _)), Some(look)) = (&self.control, self.settings.loaded_profile().and_then(|p| p.data.look.as_ref())) {
+        if let (Some((t, _)), Some(look)) = (&self.control, self.data().loaded_profile().and_then(|p| p.data.look.as_ref())) {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -898,10 +923,10 @@ impl Device {
         if on {
             self.writable()?;
         }
-        self.settings.driver_mode = on;
+        self.data_mut()?.driver_mode = on;
         self.sync_engine();
         if on && self.engine.is_none() {
-            self.settings.driver_mode = false;
+            self.data_mut()?.driver_mode = false;
             return Err(self.restore_error.take().unwrap_or_else(|| self.msg("backend.noKeyboard")));
         }
         settings::save(&self.settings)
@@ -921,14 +946,14 @@ impl Device {
         if self.engine.as_ref().is_some_and(|e| !e.alive()) {
             self.engine = None;
         }
-        if self.synapse || self.blocked || !self.settings.driver_mode || !self.may_write() {
+        if self.synapse || self.blocked || !self.data().driver_mode || !self.may_write() {
             self.stop_engine();
             return;
         }
-        let Some(p) = self.settings.loaded_profile() else { return };
+        let Some(p) = self.data().loaded_profile() else { return };
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
         let mut cfg = engine_config(self.scale(), &thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
-        cfg.macros = self.settings.macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
+        cfg.macros = self.data().macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         if let Some(e) = &self.engine {
             e.set_config(cfg);
             return;
@@ -975,7 +1000,7 @@ impl Device {
             (false, Some((t, _))) => macros::free(t).ok(),
             _ => None,
         };
-        MacroState { macros: self.settings.macros.clone(), free }
+        MacroState { macros: self.data().macros.clone(), free }
     }
 
     /// Stores a macro in the library, a new one under a fresh id; the engine plays it at once.
@@ -983,9 +1008,9 @@ impl Device {
         if macros::encode(&events).is_none() {
             return Err(format!("cannot encode {events:?}"));
         }
-        let id = id.unwrap_or_else(|| next_macro_id(&self.settings.macros));
-        let written = self.settings.macros.get(&id).is_some_and(|m| m.written && m.events == events);
-        self.settings.macros.insert(id, Macro { name, events, written });
+        let id = id.unwrap_or_else(|| next_macro_id(&self.data().macros));
+        let written = self.data().macros.get(&id).is_some_and(|m| m.written && m.events == events);
+        self.data_mut()?.macros.insert(id, Macro { name, events, written });
         settings::save(&self.settings)?;
         self.sync_engine();
         Ok(id)
@@ -997,10 +1022,10 @@ impl Device {
             return Err(self.msg("backend.synapseRunning"));
         }
         self.flashable()?;
-        let body = self.settings.macros.get(&id).and_then(|m| macros::encode(&m.events)).ok_or_else(|| format!("no macro {id}"))?;
+        let body = self.data().macros.get(&id).and_then(|m| macros::encode(&m.events)).ok_or_else(|| format!("no macro {id}"))?;
         let (t, _) = self.keyboard()?;
         macros::write(t, id, &body).map_err(|e| e.to_string())?;
-        if let Some(m) = self.settings.macros.get_mut(&id) {
+        if let Some(m) = self.data_mut()?.macros.get_mut(&id) {
             m.written = true;
         }
         settings::save(&self.settings)
@@ -1008,7 +1033,7 @@ impl Device {
 
     /// Removes the macro from the library and its body from the flash.
     pub fn delete_macro(&mut self, id: u16) -> Result<(), String> {
-        if self.settings.macros.get(&id).is_some_and(|m| m.written) {
+        if self.data().macros.get(&id).is_some_and(|m| m.written) {
             if self.check_synapse() {
                 return Err(self.msg("backend.synapseRunning"));
             }
@@ -1016,7 +1041,7 @@ impl Device {
             let (t, _) = self.keyboard()?;
             macros::delete(t, id).map_err(|e| e.to_string())?;
         }
-        self.settings.macros.remove(&id);
+        self.data_mut()?.macros.remove(&id);
         settings::save(&self.settings)?;
         self.sync_engine();
         Ok(())
@@ -1030,7 +1055,7 @@ impl Device {
     }
 
     pub fn step_brightness(&mut self, up: bool) {
-        let applied = self.settings.loaded_profile().and_then(|p| p.data.look.as_ref()).map(|l| l.brightness);
+        let applied = self.data().loaded_profile().and_then(|p| p.data.look.as_ref()).map(|l| l.brightness);
         let Some((t, d)) = self.connect() else { return };
         let current = match applied {
             Some(b) => b,
@@ -1041,7 +1066,7 @@ impl Device {
         };
         let value = if up { current.saturating_add(26) } else { current.saturating_sub(26) };
         let shown = lighting::set_brightness(t, d, Store::Temporary, value).is_ok();
-        if shown && let Some(look) = self.settings.loaded_mut().and_then(|p| p.data.look.as_mut()) {
+        if shown && let Some(look) = self.data_mut().ok().and_then(DeviceData::loaded_mut).and_then(|p| p.data.look.as_mut()) {
             look.brightness = value;
             let _ = settings::save(&self.settings);
         }
@@ -1061,12 +1086,12 @@ fn firmware_pair(s: &SnapTap) -> Option<(u8, u8)> {
     }
 }
 
-fn written_macros(s: &Settings) -> Vec<u16> {
+fn written_macros(s: &DeviceData) -> Vec<u16> {
     s.macros.iter().filter(|(_, m)| m.written).map(|(&id, _)| id).collect()
 }
 
 /// Library macros the bindings play that the flash does not hold yet.
-fn bodies_to_write(s: &Settings, bindings: &[(u8, Action)]) -> Vec<(u16, Vec<u8>)> {
+fn bodies_to_write(s: &DeviceData, bindings: &[(u8, Action)]) -> Vec<(u16, Vec<u8>)> {
     let mut ids: Vec<u16> = bindings.iter().filter_map(|&(_, a)| if let Action::Macro { id, .. } = a { Some(id) } else { None }).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -1201,9 +1226,9 @@ struct Forgot {
 }
 
 /// Drops what a console write made stale, so the next load or save writes it again.
-fn forget(cmd: &str, args: &[u8], startup: Option<u8>, ram: &mut Option<Snapshot>, s: &mut Settings) -> Forgot {
+fn forget(cmd: &str, args: &[u8], startup: Option<u8>, ram: &mut Option<Snapshot>, s: &mut DeviceData) -> Forgot {
     let arg = |i| args.get(i).copied().unwrap_or(0);
-    fn snap<'a>(ram: &'a mut Option<Snapshot>, s: &'a mut Settings, k: u8) -> Option<&'a mut Snapshot> {
+    fn snap<'a>(ram: &'a mut Option<Snapshot>, s: &'a mut DeviceData, k: u8) -> Option<&'a mut Snapshot> {
         if k == actuation::LIVE { ram.as_mut() } else { s.slots.get_mut(&k) }
     }
     let mut f = Forgot::default();
@@ -1268,7 +1293,7 @@ mod tests {
         let look = Look { effect: Effect { name: "static".into(), ..Default::default() }, brightness: 9 };
         let full = Snapshot { normal: BTreeMap::from([(31, plain(4)), (32, plain(5))]), hypershift: BTreeMap::from([(31, plain(4))]), look: Some(look) };
         let mut ram = Some(full.clone());
-        let mut s = Settings { slots: BTreeMap::from([(2, full.clone())]), ..Default::default() };
+        let mut s = DeviceData { slots: BTreeMap::from([(2, full.clone())]), ..Default::default() };
         s.macros.insert(0x0102, Macro { name: String::new(), events: Vec::new(), written: true });
 
         assert!(!forget("02:12", &[0, 31, 0], Some(2), &mut ram, &mut s).resync);
@@ -1332,7 +1357,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, unit: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), settings, last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }
@@ -1448,11 +1473,11 @@ mod tests {
         assert!(!synapse_running(), "close Synapse first");
         let mut dev = Device::new().unwrap();
         dev.read_all(|_, _, _| {}).unwrap();
-        let before = dev.settings.profiles.len();
+        let before = dev.data().profiles.len();
         dev.create_profile().unwrap();
-        let id = dev.settings.profiles.iter().find(|p| p.slot.is_none()).map(|p| p.id).unwrap();
+        let id = dev.data().profiles.iter().find(|p| p.slot.is_none()).map(|p| p.id).unwrap();
         dev.write_profile(id).unwrap();
-        let p = dev.settings.profile(id).unwrap().clone();
+        let p = dev.data().profile(id).unwrap().clone();
         let k = p.slot.expect("written to a slot");
         let (t, d) = dev.connect().unwrap();
         let read = slots::read_snapshot(t, d, k, &editable_keys(d.layout), |_, _| {}).unwrap();
@@ -1461,13 +1486,13 @@ mod tests {
         dev.delete_profile(id).unwrap();
         let (t, _) = dev.connect().unwrap();
         assert!(!slots::list(t).unwrap().contains(&k));
-        assert_eq!(dev.settings.profiles.len(), before);
+        assert_eq!(dev.data().profiles.len(), before);
     }
 
     #[test]
     fn saving_writes_the_bodies_of_bound_unwritten_macros() {
         let m = |written| Macro { name: String::new(), events: vec![Event::Delay { ms: 5 }], written };
-        let s = Settings { macros: [(1, m(true)), (2, m(false)), (3, m(false))].into(), ..Default::default() };
+        let s = DeviceData { macros: [(1, m(true)), (2, m(false)), (3, m(false))].into(), ..Default::default() };
         let play = |id| Action::Macro { id, mode: binding::MacroMode::Times, count: 1 };
         let b = [(31, play(1)), (32, play(2)), (33, play(2)), (18, play(9)), (19, Action::Disabled)];
         assert_eq!(bodies_to_write(&s, &b), [(2, vec![0x11, 5])]);
