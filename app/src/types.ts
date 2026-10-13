@@ -203,6 +203,12 @@ export interface ProfilesView {
   free_slot: boolean;
 }
 
+export interface ImportView {
+  view: ProfilesView;
+  name: string;
+  dropped: number;
+}
+
 export type Dock = "left" | "right" | "bottom" | "window";
 
 export interface DevPanel {

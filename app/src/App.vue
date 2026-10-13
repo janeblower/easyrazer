@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
+import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { call, keyboard, ours, pick } from "./keyboard";
 import type {
@@ -12,6 +13,7 @@ import type {
   Status as DeviceStatus,
   DevicesView,
   Hypershift,
+  ImportView,
   KeyMap,
   KeyView,
   MacroState,
@@ -520,6 +522,36 @@ function selectAll() {
   selection.value = new Set(layout.value.filter((k) => k.editable).map((k) => k.key));
 }
 
+const FILTERS = [{ name: "EasyRazer", extensions: ["json"] }];
+
+async function exportProfile(profile: number) {
+  const kb = keyboard.value;
+  const name = profiles.value?.profiles.find((p) => p.id === profile)?.name ?? "profile";
+  const path = await saveDialog({ defaultPath: `${name}.easyrazer.json`, filters: FILTERS });
+  if (!path) return;
+  try {
+    await call("export_profile", { profile, path }, kb);
+    message.value = t("profiles.exported", { name });
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function importProfile() {
+  const kb = keyboard.value;
+  const path = await open({ multiple: false, directory: false, filters: FILTERS });
+  if (typeof path !== "string") return;
+  try {
+    const r = await call<ImportView>("import_profile", { path }, kb);
+    if (!ours(kb)) return;
+    profiles.value = r.view;
+    message.value =
+      r.dropped > 0 ? t("profiles.importedDropped", { name: r.name, n: r.dropped }) : t("profiles.imported", { name: r.name });
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function profileOp(command: string, args: Record<string, unknown> = {}) {
   busy.value = true;
   try {
@@ -833,6 +865,8 @@ onUnmounted(() => {
             @startup="(id) => profileOp('set_startup', { profile: id })"
             @free="(id) => profileOp('free_slot', { profile: id })"
             @write="(id) => profileOp('write_profile', { profile: id })"
+            @export="exportProfile"
+            @import="importProfile"
           />
           <span class="inline-flex" :title="$t('mode.hint')">
             <button

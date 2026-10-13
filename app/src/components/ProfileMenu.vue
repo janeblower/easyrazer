@@ -13,6 +13,8 @@ const emit = defineEmits<{
   startup: [id: number];
   free: [id: number];
   write: [id: number];
+  export: [id: number];
+  import: [];
 }>();
 
 const open = ref(false);
@@ -175,6 +177,7 @@ watch(
           <button class="item" :disabled="!editable" @click="emit('duplicate', p.id)">
             <span class="ic">⧉</span>{{ $t("profiles.duplicate") }}
           </button>
+          <button class="item" @click="emit('export', p.id)"><span class="ic">⇧</span>{{ $t("profiles.exportOne") }}</button>
           <button
             v-if="p.slot"
             class="item"
@@ -197,6 +200,12 @@ watch(
       <!-- mousedown would blur the rename field first and redraw the list under the click. -->
       <button class="item text-muted" :disabled="!editable" @mousedown.prevent @click="create">
         <span class="ic text-accent">＋</span>{{ $t("profiles.new") }}
+      </button>
+      <button class="item text-muted" :disabled="!editable" @click="emit('import')">
+        <span class="ic">⇩</span>{{ $t("profiles.import") }}
+      </button>
+      <button class="item text-muted" :disabled="!loaded()" @click="emit('export', view.loaded!)">
+        <span class="ic">⇧</span>{{ $t("profiles.export", { name: loaded()?.name }) }}
       </button>
       <div class="sep" />
       <div class="text-[11px] text-muted px-2 py-1">
