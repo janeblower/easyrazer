@@ -913,10 +913,11 @@ onUnmounted(() => {
               :hs-values="mapHs"
               :hs-edited="hsEdited"
               :hs-binds="mapHsBinds"
+              :class="{ 'opacity-60': !online }"
               :single="section === 'bindings'"
               :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
             />
-            <div class="gap-4 grid grid-cols-2" :inert="!online">
+            <div class="gap-4 grid grid-cols-2" :class="{ 'opacity-60': !online }" :inert="!online">
               <div class="px-4 py-3 card flex flex-col gap-3">
                 <ActuationCard
                   v-if="section === 'actuation'"
@@ -973,7 +974,7 @@ onUnmounted(() => {
               </div>
             </div>
             <DevKeys v-if="dev.mode" :keys="[...selection]" :depth="section === 'actuation'" :driver="driver" />
-            <ActionBar v-if="online" v-bind="actions" @revert="revert" @apply="apply" @write="save" />
+            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
         <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />

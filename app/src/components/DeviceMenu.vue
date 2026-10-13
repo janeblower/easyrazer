@@ -85,7 +85,7 @@ function forget() {
           ref="input"
           v-model="draft"
           class="py-0.5 flex-1 min-w-0"
-          maxlength="32"
+          maxlength="40"
           @click.stop
           @keydown.enter="commitRename"
           @keydown.esc.prevent="editing = null"
