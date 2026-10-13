@@ -6,11 +6,10 @@
 |---|---|---|---|---|---|---|---|
 | Huntsman V2 Analog (`1532:0266`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Huntsman Mini Analog (`1532:0282`) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Huntsman V3 Pro (`1532:02A6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro (`1532:02A6`, `1532:02CF`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
-| Huntsman V3 Pro 8KHz (`1532:02CF`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman Signature Edition (`1532:02D8`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Low-profile TKL 8KHz (`1532:02E6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 
