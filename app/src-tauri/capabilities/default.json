@@ -4,6 +4,7 @@
   "windows": ["main", "devtools"],
   "permissions": [
     "core:default",
+    "dialog:default",
     "core:window:allow-set-size",
     "core:window:allow-set-min-size",
     "core:window:allow-set-position",

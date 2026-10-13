@@ -282,7 +282,14 @@ async function mockBackend() {
       startup: 1,
       free_slot: true,
     },
-    devices: { devices: [{ id: "MOCK", model: MODELS[model], connected: true, driver_mode: true }], unsupported: null },
+    devices: {
+      devices: [
+        { id: "MOCK", name: MODELS[model], model: MODELS[model], connected: true, driver_mode: true },
+        { id: "OFFLINE", name: "Old board", model: MODELS[model], connected: false, driver_mode: false },
+      ],
+      unsupported: null,
+      last: null,
+    },
     status: {
       id: "MOCK",
       device: true,
@@ -304,6 +311,28 @@ async function mockBackend() {
         const name = (args as { model?: string }).model;
         const layouts: Record<string, unknown> = { [MODELS.mini]: miniLayout, [MODELS.tkl]: tklLayout, [MODELS.proTkl]: proTklLayout };
         return (name && layouts[name]) ?? layout;
+      }
+      if (cmd === "status" && (args as { id?: string }).id === "OFFLINE")
+        return { ...(replies.status as object), id: "OFFLINE", device: false };
+      if (cmd === "rename_device") {
+        const { id, name } = args as { id: string; name: string };
+        const view = replies.devices as { devices: { id: string; name: string; model: string }[] };
+        for (const d of view.devices) if (d.id === id) d.name = name.trim() || d.model;
+        return view;
+      }
+      if (cmd === "forget_device") {
+        const view = replies.devices as { devices: { id: string }[] };
+        view.devices = view.devices.filter((d) => d.id !== (args as { id: string }).id);
+        return view;
+      }
+      if (cmd === "plugin:dialog|save") return "/mock/profile.easyrazer.json";
+      if (cmd === "plugin:dialog|open") return "/mock/import.easyrazer.json";
+      if (cmd === "export_profile") return null;
+      if (cmd === "import_profile") {
+        const view = replies.profiles as { profiles: unknown[]; loaded: number };
+        const id = view.profiles.length + 1;
+        view.profiles.push({ id, name: "Imported", slot: null, unsaved: true });
+        return { view: structuredClone(view), name: "Imported", dropped: 2 };
       }
       if (cmd === "app_settings") return { ...(replies.app_settings as object), ...devSettings };
       return cmd in devReplies ? devReplies[cmd](args as Record<string, unknown>) : replies[cmd];

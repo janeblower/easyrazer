@@ -3,7 +3,7 @@ import { computed, nextTick, ref, useId, useTemplateRef, watch } from "vue";
 import type { ProfilesView } from "../types";
 import AppIcon from "./AppIcon.vue";
 
-const props = defineProps<{ view: ProfilesView | null; writable: boolean; nextCombo: string | null }>();
+const props = defineProps<{ view: ProfilesView | null; writable: boolean; editable: boolean; nextCombo: string | null }>();
 const emit = defineEmits<{
   load: [id: number];
   create: [];
@@ -13,6 +13,8 @@ const emit = defineEmits<{
   startup: [id: number];
   free: [id: number];
   write: [id: number];
+  export: [id: number];
+  import: [];
 }>();
 
 const open = ref(false);
@@ -59,7 +61,7 @@ function onEnter() {
 }
 
 function pick(id: number) {
-  if (!props.writable || editing.value != null || Date.now() - renamedAt < 300) return;
+  if (!props.editable || editing.value != null || Date.now() - renamedAt < 300) return;
   menu.value?.hidePopover();
   if (id !== props.view?.loaded) emit("load", id);
 }
@@ -169,8 +171,13 @@ watch(
           >
             <AppIcon name="write" class="ic" />{{ $t("profiles.write") }}
           </button>
-          <button class="item" @click="startRename(p.id, p.name)"><span class="ic">✎</span>{{ $t("profiles.rename") }}</button>
-          <button class="item" @click="emit('duplicate', p.id)"><span class="ic">⧉</span>{{ $t("profiles.duplicate") }}</button>
+          <button class="item" :disabled="!(p.slot ? writable : editable)" @click="startRename(p.id, p.name)">
+            <span class="ic">✎</span>{{ $t("profiles.rename") }}
+          </button>
+          <button class="item" :disabled="!editable" @click="emit('duplicate', p.id)">
+            <span class="ic">⧉</span>{{ $t("profiles.duplicate") }}
+          </button>
+          <button class="item" @click="emit('export', p.id)"><span class="ic">⇧</span>{{ $t("profiles.exportOne") }}</button>
           <button
             v-if="p.slot"
             class="item"
@@ -180,15 +187,22 @@ watch(
             <span class="ic">⊘</span>{{ $t("profiles.free", { slot: p.slot }) }}
           </button>
           <div class="sep" />
-          <button class="item text-error" :disabled="view.profiles.length <= 1 || (!!p.slot && !writable)" @click="emit('remove', p.id)">
+          <button
+            class="item text-error"
+            :disabled="view.profiles.length <= 1 || !(p.slot ? writable : editable)"
+            @click="emit('remove', p.id)"
+          >
             <AppIcon name="remove" class="ic" />{{ $t("profiles.remove") }}
           </button>
         </div>
       </div>
       <div class="sep" />
       <!-- mousedown would blur the rename field first and redraw the list under the click. -->
-      <button class="item text-muted" @mousedown.prevent @click="create">
+      <button class="item text-muted" :disabled="!editable" @mousedown.prevent @click="create">
         <span class="ic text-accent">＋</span>{{ $t("profiles.new") }}
+      </button>
+      <button class="item text-muted" :disabled="!editable" @click="emit('import')">
+        <span class="ic">⇩</span>{{ $t("profiles.import") }}
       </button>
       <div class="sep" />
       <div class="text-[11px] text-muted px-2 py-1">

@@ -4,6 +4,7 @@ export type Rgb = [number, number, number];
 
 export interface DeviceEntry {
   id: string;
+  name: string;
   model: string;
   connected: boolean;
   driver_mode: boolean;
@@ -13,6 +14,7 @@ export interface DevicesView {
   devices: DeviceEntry[];
   /** PID of a Razer keyboard without a description. */
   unsupported: number | null;
+  last: string | null;
 }
 
 export interface Status {
@@ -199,6 +201,12 @@ export interface ProfilesView {
   // Slot the keyboard starts with without the app.
   startup: number | null;
   free_slot: boolean;
+}
+
+export interface ImportView {
+  view: ProfilesView;
+  name: string;
+  dropped: number;
 }
 
 export type Dock = "left" | "right" | "bottom" | "window";

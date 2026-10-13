@@ -112,6 +112,8 @@ const LEGACY_MODEL: u16 = 0x0266;
 #[serde(default)]
 pub struct DeviceData {
     pub pid: u16,
+    /// Shown instead of the model's name.
+    pub name: Option<String>,
     /// The host engine types instead of the firmware.
     pub driver_mode: bool,
     /// Order of the list and of Fn+Menu.
@@ -151,11 +153,13 @@ pub struct Settings {
     pub dev_panel: Option<DevPanel>,
     #[serde(deserialize_with = "lenient")]
     pub dev_window: Option<DevWindow>,
+    /// The keyboard picked last; the window starts on it.
+    pub last_device: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None }
+        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None, last_device: None }
     }
 }
 
@@ -191,6 +195,7 @@ fn migrate(mut s: Settings, text: &str) -> Option<Settings> {
     let v1 = serde_json::from_str::<V1>(text).ok()?;
     let top = DeviceData {
         pid: 0,
+        name: None,
         driver_mode: v1.driver_mode,
         profiles: v1.profiles,
         loaded: v1.loaded,
@@ -216,7 +221,7 @@ fn backup(p: &Path, s: &Settings, text: &str) {
     }
 }
 
-static NO_DATA: DeviceData = DeviceData { pid: 0, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
+static NO_DATA: DeviceData = DeviceData { pid: 0, name: None, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
 
 /// The app's settings, shared by every keyboard and the app-wide commands.
 pub type Shared = Arc<Mutex<Settings>>;
@@ -535,6 +540,7 @@ mod tests {
                 "PM1".into(),
                 DeviceData {
                     pid: 0x0266,
+                    name: Some("Desk".into()),
                     driver_mode: true,
                     profiles: vec![profile(1, Some(1))],
                     loaded: Some(1),
@@ -556,6 +562,7 @@ mod tests {
             unverified_writes: true,
             dev_panel: Some(DevPanel { open: false, dock: Dock::Bottom, size: 300 }),
             dev_window: Some(DevWindow { x: 10.0, y: 20.0, w: 800.0, h: 600.0 }),
+            last_device: Some("PM1".into()),
         };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
     }
@@ -596,5 +603,15 @@ mod tests {
         let p: Profile = serde_json::from_str(r#"{"snap_tap": {"enabled": true, "groups": [{"keys": [31, 33], "rule": "deeper"}]}}"#).unwrap();
         assert!(p.snap_tap.enabled);
         assert_eq!(p.snap_tap.groups, [SnapGroup { keys: vec![31, 33], rule: SnapRule::Deeper }]);
+    }
+
+    #[test]
+    fn names_and_last_device_round_trip() {
+        let mut s = Settings::default();
+        s.devices.insert("K".into(), DeviceData { pid: 0x0266, name: Some("Desk".into()), ..Default::default() });
+        s.last_device = Some("K".into());
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.devices["K"].name.as_deref(), Some("Desk"));
+        assert_eq!(back.last_device.as_deref(), Some("K"));
     }
 }

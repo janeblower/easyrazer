@@ -290,7 +290,14 @@
       "serial": "Serial"
     }
   },
+  "devices": {
+    "offline": "not connected",
+    "rename": "Rename…",
+    "forget": "Forget keyboard…",
+    "forgetConfirm": "Forget {name}? Its profiles and macros are deleted from the app."
+  },
   "status": {
+    "offline": "{name} is not connected — only profiles are available",
     "searching": "Looking for the keyboard…",
     "synapse": "Synapse (RazerAppEngine) is running. Close it, including its tray icon, or it will overwrite the settings.",
     "unsupported": "This Razer keyboard model is not supported (PID {pid}).",
@@ -302,6 +309,12 @@
   "backend": {
     "synapseRunning": "Synapse is running — close it, including its tray icon",
     "noKeyboard": "No supported Razer keyboard found",
+    "importFormat": "This file is from a newer EasyRazer",
+    "importBroken": "Not a profile file: {error}",
+    "importModel": "Unknown keyboard model {pid}",
+    "noProfile": "No such profile",
+    "forgetConnected": "Unplug the keyboard first",
+    "busy": "The keyboard is busy, try again",
     "macroUnwritten": "The macro is not in the keyboard: write it in Macros, or write the binding",
     "autostart": "Autostart: {error}",
     "engine": "Rapid Trigger did not start: {error}",
@@ -328,6 +341,11 @@
     "startup": "Start without the app",
     "isStartup": "Already starts without the app",
     "rename": "Rename",
+    "import": "Import from file…",
+    "exportOne": "Export…",
+    "exported": "Exported \"{name}\"",
+    "imported": "Imported \"{name}\"",
+    "importedDropped": "Imported \"{name}\", keys not transferred: {n}",
     "duplicate": "Duplicate",
     "free": "Free slot {slot}/5",
     "write": "Write to a free slot",

@@ -36,7 +36,7 @@ pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
 
 impl AppState {
     pub fn device(&self, id: &str) -> Result<Arc<Mutex<Device>>, String> {
-        self.boards.get(id).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
+        self.boards.get_or_offline(id, &self.settings).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
     }
 
     pub fn lang(&self) -> String {
@@ -153,16 +153,41 @@ pub fn idle_status(state: &AppState, id: Option<String>, synapse: bool) -> Statu
 pub async fn status(state: State<'_, AppState>, id: Option<String>) -> Result<Status, String> {
     let watch = state.settings().watch_synapse;
     let synapse = watch && device::synapse_running();
-    match id.as_deref().and_then(|id| state.boards.get(id)) {
+    match id.as_deref().and_then(|id| state.boards.get_or_offline(id, &state.settings)) {
         Some(d) => Ok(lock(&d).status(synapse)),
         None => Ok(idle_status(&state, id, synapse)),
     }
 }
 
+fn devices_view(state: &AppState) -> DevicesView {
+    let s = state.settings().clone();
+    DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported(), last: s.last_device.clone() }
+}
+
 #[tauri::command]
 pub async fn devices(state: State<'_, AppState>) -> Result<DevicesView, String> {
-    let s = state.settings().clone();
-    Ok(DevicesView { devices: state.boards.list(&s), unsupported: state.boards.unsupported() })
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn rename_device(state: State<'_, AppState>, id: String, name: String) -> Result<DevicesView, String> {
+    let d = state.device(&id)?;
+    lock(&d).rename_device(&name)?;
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn forget_device(state: State<'_, AppState>, id: String) -> Result<DevicesView, String> {
+    state.boards.forget(&id, &state.settings)?;
+    Ok(devices_view(&state))
+}
+
+#[tauri::command]
+pub async fn set_last_device(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.update_settings(|s| s.last_device = Some(id))?;
+    // The detached dev window follows the pick through this.
+    let _ = app.emit("devices", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -480,6 +505,27 @@ pub async fn write_profile(state: State<'_, AppState>, id: String, profile: u32)
     let mut d = lock(&dev);
     d.write_profile(profile)?;
     Ok(d.profiles_view())
+}
+
+#[derive(Serialize)]
+pub struct ImportView {
+    view: ProfilesView,
+    name: String,
+    dropped: usize,
+}
+
+#[tauri::command]
+pub async fn export_profile(state: State<'_, AppState>, id: String, profile: u32, path: String) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).export_profile(profile, path.as_ref())
+}
+
+#[tauri::command]
+pub async fn import_profile(state: State<'_, AppState>, id: String, path: String) -> Result<ImportView, String> {
+    let dev = state.device(&id)?;
+    let mut d = lock(&dev);
+    let got = d.import_profile(path.as_ref())?;
+    Ok(ImportView { view: d.profiles_view(), name: got.name, dropped: got.dropped })
 }
 
 #[cfg(test)]

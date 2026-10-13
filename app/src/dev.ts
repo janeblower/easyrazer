@@ -51,11 +51,11 @@ export async function reloadLog() {
   log.value = [...fetched, ...log.value.filter((e) => e.seq > last)];
 }
 
-/** The detached window has no App to pick a keyboard, so it follows the same choice itself. */
+/** The detached window has no App to pick a keyboard, so it follows the main window's pick, the saved last one. */
 export async function followKeyboard() {
   const take = async () => {
     const view = await invoke<DevicesView>("devices");
-    const next = pick(view.devices, keyboard.value);
+    const next = pick(view.devices, view.last, keyboard.value);
     if (next === keyboard.value) return;
     keyboard.value = next;
     if (started) await reloadLog();

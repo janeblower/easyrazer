@@ -29,6 +29,7 @@ pub struct Hooks {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct DeviceEntry {
     pub id: String,
+    pub name: String,
     pub model: String,
     pub connected: bool,
     pub driver_mode: bool,
@@ -39,6 +40,31 @@ pub struct DevicesView {
     pub devices: Vec<DeviceEntry>,
     /// PID of a Razer keyboard without a description.
     pub unsupported: Option<u16>,
+    pub last: Option<String>,
+}
+
+fn model_name(pid: u16) -> String {
+    razer_core::devices::by_pid(pid).map_or_else(|| format!("{pid:04X}"), |d| d.name.clone())
+}
+
+/// The name each keyboard is shown by: its own, else the model's, told apart by the serial's tail
+/// from another of the same model.
+pub fn display_names(entries: &[(String, u16, Option<String>)]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|(id, pid, name)| {
+            if let Some(n) = name {
+                return n.clone();
+            }
+            let model = model_name(*pid);
+            let twins = entries.iter().filter(|e| e.1 == *pid).count() > 1;
+            if !twins || id.ends_with(":noserial") {
+                return model;
+            }
+            let tail: Vec<char> = id.chars().rev().take(4).collect();
+            format!("{model} ·{}", tail.into_iter().rev().collect::<String>())
+        })
+        .collect()
 }
 
 pub struct Boards {
@@ -80,13 +106,33 @@ impl Boards {
         guard(&self.boards).get(id).map(|b| b.device.clone())
     }
 
-    /// No keyboard met this session; a board merely busy still counts.
+    /// No board at all, an offline one opened for its profiles or a busy one included: only then does the poller report an idle status.
     pub fn is_empty(&self) -> bool {
         guard(&self.boards).is_empty()
     }
 
     pub fn all(&self) -> Vec<(String, Arc<Mutex<Device>>)> {
         guard(&self.boards).iter().map(|(id, b)| (id.clone(), b.device.clone())).collect()
+    }
+
+    /// The board of `id`, creating an offline one from the settings when the id is known there.
+    pub fn get_or_offline(&self, id: &str, shared: &Shared) -> Option<Arc<Mutex<Device>>> {
+        if let Some(d) = self.get(id) {
+            return Some(d);
+        }
+        let known = settings::lock(shared).devices.contains_key(id);
+        if !known {
+            return None;
+        }
+        let mut device = Device::new(shared.clone()).ok()?;
+        device.offline(id);
+        let device = Arc::new(Mutex::new(device));
+        let mut boards = guard(&self.boards);
+        // `forget` clears the settings under this lock; checking again keeps it from leaving a ghost board.
+        if !settings::lock(shared).devices.contains_key(id) {
+            return None;
+        }
+        Some(boards.entry(id.to_string()).or_insert_with(|| Board { device, container: None, connected: false }).device.clone())
     }
 
     fn board_for(&self, id: &str, container: Option<String>, device: Arc<Mutex<Device>>) -> Arc<Mutex<Device>> {
@@ -172,14 +218,39 @@ impl Boards {
         changed
     }
 
+    /// Drops a keyboard that is not plugged in, with its data; nothing re-creates it until it is plugged in again.
+    pub fn forget(&self, id: &str, shared: &Shared) -> Result<(), String> {
+        let lang = settings::lock(shared).language.clone().unwrap_or_else(|| "en".into());
+        // Held until the settings are cleared, so no ghost board appears in between.
+        let mut boards = guard(&self.boards);
+        if let Some(b) = boards.get(id) {
+            if b.connected {
+                return Err(crate::i18n::t(&lang, "backend.forgetConnected"));
+            }
+            let Some(mut dev) = try_guard(&b.device) else { return Err(crate::i18n::t(&lang, "backend.busy")) };
+            dev.release();
+        }
+        boards.remove(id);
+        let mut s = settings::lock(shared);
+        s.devices.remove(id);
+        if s.last_device.as_deref() == Some(id) {
+            s.last_device = None;
+        }
+        settings::save(&s)
+    }
+
     /// Keyboards met this session and those only in the settings; never locks a device.
     pub fn list(&self, s: &Settings) -> Vec<DeviceEntry> {
         let boards = guard(&self.boards);
+        let entries: Vec<_> = s.devices.iter().map(|(id, d)| (id.clone(), d.pid, d.name.clone())).collect();
+        let names = display_names(&entries);
         s.devices
             .iter()
-            .map(|(id, d)| DeviceEntry {
+            .zip(names)
+            .map(|((id, d), name)| DeviceEntry {
                 id: id.clone(),
-                model: razer_core::devices::by_pid(d.pid).map_or_else(|| format!("{:04X}", d.pid), |spec| spec.name.clone()),
+                name,
+                model: model_name(d.pid),
                 connected: boards.get(id).is_some_and(|b| b.connected),
                 driver_mode: d.driver_mode,
             })
@@ -190,6 +261,7 @@ impl Boards {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::DeviceData;
     use razer_core::devices;
 
     fn unit(container: Option<&str>) -> Unit {
@@ -287,5 +359,87 @@ mod tests {
         let again = boards.board_for("A", Some("C2".into()), Arc::new(Mutex::new(Device::new(Default::default()).unwrap())));
         assert!(Arc::ptr_eq(&again, &device));
         assert_eq!(boards.boards.lock().unwrap()["A"].container.as_deref(), Some("C2"));
+    }
+
+    #[test]
+    fn a_known_keyboard_gets_an_offline_board() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).expect("known id");
+        assert!(!boards.is_connected("K"));
+        assert_eq!(guard(&d).name(), "Razer Huntsman V2 Analog");
+        assert!(boards.get_or_offline("unknown", &shared).is_none());
+    }
+
+    #[test]
+    fn an_offline_board_attaches_in_place() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let offline = boards.get_or_offline("K", &shared).unwrap();
+        let attached = boards.board_for("K", Some("C".into()), offline.clone());
+        assert!(Arc::ptr_eq(&offline, &attached), "discovery reuses the offline device");
+    }
+
+    #[test]
+    fn two_of_one_model_get_the_serial_tail() {
+        let names = display_names(&[
+            ("PM2322F51200078".into(), 0x0266, None),
+            ("PM2322F51200099".into(), 0x0266, None),
+            ("X1".into(), 0x02A6, None),
+            ("PM2322F51200111".into(), 0x0266, Some("Desk".into())),
+        ]);
+        let v2 = &razer_core::devices::by_pid(0x0266).unwrap().name;
+        assert_eq!(names[0], format!("{v2} ·0078"));
+        assert_eq!(names[1], format!("{v2} ·0099"));
+        assert_eq!(names[2], razer_core::devices::by_pid(0x02A6).unwrap().name);
+        assert_eq!(names[3], "Desk");
+    }
+
+    #[test]
+    fn a_noserial_id_gets_no_tail() {
+        let names = display_names(&[("0266:noserial".into(), 0x0266, None), ("S1".into(), 0x0266, None)]);
+        assert_eq!(names[0], razer_core::devices::by_pid(0x0266).unwrap().name);
+        assert_eq!(names[1], format!("{} ·S1", razer_core::devices::by_pid(0x0266).unwrap().name));
+    }
+
+    #[test]
+    fn a_forgotten_device_cannot_write_its_data_back() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).unwrap();
+        boards.forget("K", &shared).unwrap();
+        assert!(guard(&d).rename_device("x").is_err());
+        assert!(!settings::lock(&shared).devices.contains_key("K"));
+    }
+
+    #[test]
+    fn a_busy_board_is_not_forgotten() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        let d = boards.get_or_offline("K", &shared).unwrap();
+        let _held = guard(&d);
+        assert!(boards.forget("K", &shared).is_err());
+        assert!(boards.get("K").is_some() && settings::lock(&shared).devices.contains_key("K"));
+    }
+
+    #[test]
+    fn forget_refuses_a_connected_board() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, ..Default::default() });
+        settings::lock(&shared).last_device = Some("K".into());
+        let d = boards.get_or_offline("K", &shared).unwrap();
+        boards.set_connected("K", true);
+        assert!(boards.forget("K", &shared).is_err());
+        boards.set_connected("K", false);
+        drop(d);
+        boards.forget("K", &shared).unwrap();
+        assert!(!settings::lock(&shared).devices.contains_key("K"));
+        assert_eq!(settings::lock(&shared).last_device, None);
+        assert!(boards.get("K").is_none());
     }
 }

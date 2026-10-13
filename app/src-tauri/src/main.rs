@@ -11,6 +11,7 @@ mod focus;
 mod i18n;
 mod profiles;
 mod settings;
+mod transfer;
 mod tray;
 mod wheel;
 
@@ -37,6 +38,7 @@ fn main() {
     let (window_ready, ready) = mpsc::channel();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
+        .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState {
             settings: shared,
             boards: boards::Boards::new().expect("hidapi init"),
@@ -138,6 +140,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::status,
             commands::devices,
+            commands::rename_device,
+            commands::forget_device,
+            commands::set_last_device,
             commands::layout,
             commands::window_ready,
             commands::read_all,
@@ -171,6 +176,8 @@ fn main() {
             commands::set_startup,
             commands::free_slot,
             commands::write_profile,
+            commands::export_profile,
+            commands::import_profile,
             commands::hide_window,
             commands::quit,
             dev::set_dev_mode,

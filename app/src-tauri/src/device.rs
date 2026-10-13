@@ -1,6 +1,7 @@
 //! Owns the keyboard connection: opening, reconnecting, Synapse detection, device mode.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -27,6 +28,7 @@ use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
+use crate::transfer;
 use crate::settings::{self, DeviceData, Macro, Rapid, Shared, SnapTap};
 
 pub type Control = Logged<HidTransport>;
@@ -250,10 +252,34 @@ impl Device {
         }
     }
 
+    /// Shows a keyboard known from the settings while it is unplugged.
+    pub fn offline(&mut self, id: &str) {
+        let pid = settings::lock(&self.shared).devices.get(id).map(|d| d.pid);
+        if let Some(pid) = pid {
+            self.adopt(id, pid);
+        }
+        if self.last_spec.is_none() {
+            self.last_spec = devices::by_pid(self.data.pid);
+        }
+    }
+
     /// Makes `id` the keyboard this device drives and takes its saved data; callers claim it first.
     fn checkout(&mut self, id: &str) {
         self.data = settings::lock(&self.shared).devices.get(id).cloned().unwrap_or_default();
         self.id = Some(id.to_string());
+    }
+
+    /// Forgets which keyboard this is, so a command already holding it cannot save the old data back.
+    pub fn release(&mut self) {
+        self.id = None;
+        self.data = DeviceData::default();
+    }
+
+    /// An empty name goes back to the model's.
+    pub fn rename_device(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        self.data_mut()?.name = (!name.is_empty()).then(|| name.chars().take(40).collect::<String>().trim_end().to_string());
+        self.save()
     }
 
     fn save(&self) -> Result<(), String> {
@@ -403,19 +429,21 @@ impl Device {
         self.synapse = synapse;
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
-        if was && !synapse {
+        if was && !synapse && self.control.is_some() {
             self.synced = false;
             self.reload();
+        }
+        if self.control.is_none() {
+            let error = self.restore_error.take();
+            let driver_mode = self.data().driver_mode;
+            let (profile, profile_name) = self.data().loaded_profile().map_or((None, None), |p| (Some(p.id), Some(p.name.clone())));
+            let spec = self.last_spec;
+            return Status { id: self.id.clone(), device: false, synapse, driver_mode, profile, profile_name, model: spec.map(|d| d.name.clone()), verified: spec.is_none_or(|d| d.verified), analog: spec.map(|d| &d.analog), error };
         }
         let (profile, profile_name) = match self.data().loaded_profile() {
             Some(p) if self.synced => (Some(p.id), Some(p.name.clone())),
             _ => (None, None),
         };
-        if self.control.is_none() {
-            let error = self.restore_error.take();
-            let driver_mode = self.data().driver_mode;
-            return Status { id: self.id.clone(), device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, error };
-        }
         self.sync_engine();
         let error = self.restore_error.take();
         let running = self.engine.is_some();
@@ -433,12 +461,14 @@ impl Device {
 
     /// Reads the slots once per connect and loads the profile; returns its Normal press points.
     pub fn read_all(&mut self, progress: impl FnMut(usize, usize, Option<(u8, f32)>)) -> Result<Vec<(u8, f32)>, String> {
-        if self.synapse {
-            return Err(self.msg("backend.synapseRunning"));
+        if self.control.is_some() {
+            if self.synapse {
+                return Err(self.msg("backend.synapseRunning"));
+            }
+            self.sync(progress)?;
+            self.restore();
+            self.sync_engine();
         }
-        self.sync(progress)?;
-        self.restore();
-        self.sync_engine();
         let missing = self.msg("backend.noKeyboard");
         let p = self.data().loaded_profile().ok_or(missing)?;
         Ok(p.data.normal.iter().map(|(&k, r)| (k, mm(self.scale(), r.thr_low))).collect())
@@ -635,6 +665,27 @@ impl Device {
         }
         self.menu = None;
         self.restore();
+    }
+
+    pub fn export_profile(&self, profile: u32, path: &Path) -> Result<(), String> {
+        let file = transfer::export(self.data(), profile).ok_or_else(|| self.msg("backend.noProfile"))?;
+        let text = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| e.to_string())
+    }
+
+    /// Adds the profile to the list; it is neither loaded nor written until the user does that.
+    pub fn import_profile(&mut self, path: &Path) -> Result<transfer::Imported, String> {
+        self.data_mut()?;
+        let lang = self.lang();
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let got = transfer::parse(&text).and_then(|f| transfer::import(&mut self.data, f));
+        let got = got.map_err(|r| match r {
+            transfer::Refused::Format => i18n::t(&lang, "backend.importFormat"),
+            transfer::Refused::Broken(e) => i18n::tf(&lang, "backend.importBroken", &[("error", &e)]),
+            transfer::Refused::UnknownModel(pid) => i18n::tf(&lang, "backend.importModel", &[("pid", &pid)]),
+        })?;
+        self.save()?;
+        Ok(got)
     }
 
     pub fn profiles_view(&self) -> ProfilesView {
@@ -1118,7 +1169,7 @@ fn bodies_to_write(s: &DeviceData, bindings: &[(u8, Action)]) -> Vec<(u16, Vec<u
 }
 
 /// Ids from `0x8000` up, away from the small ones Synapse is likely to take.
-fn next_macro_id(library: &BTreeMap<u16, Macro>) -> u16 {
+pub(crate) fn next_macro_id(library: &BTreeMap<u16, Macro>) -> u16 {
     library.keys().next_back().map_or(0x8000, |&id| id.max(0x7FFF) + 1)
 }
 
@@ -1297,7 +1348,7 @@ mod tests {
     use razer_core::rapid::{SnapGroup, SnapRule};
     use std::sync::Mutex;
     use super::*;
-    use crate::settings::Settings;
+    use crate::settings::{Profile, Settings};
 
     fn v2() -> &'static Analog {
         &devices::by_pid(0x0266).unwrap().analog
@@ -1570,5 +1621,36 @@ mod tests {
         assert_eq!(next_macro_id(&BTreeMap::new()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m())].into()), 0x8000);
         assert_eq!(next_macro_id(&[(3, m()), (0x8004, m())].into()), 0x8005);
+    }
+
+    #[test]
+    fn an_offline_device_reports_its_loaded_profile() {
+        let shared: Shared = Default::default();
+        let mut data = DeviceData { pid: 0x0266, ..Default::default() };
+        let id = data.new_profile_id();
+        data.profiles.push(Profile { id, name: "Office".into(), ..Default::default() });
+        data.loaded = Some(id);
+        settings::lock(&shared).devices.insert("K".into(), data);
+        let mut d = Device::new(shared).unwrap();
+        d.offline("K");
+        assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read does not depend on Synapse");
+        let s = d.status(false);
+        assert!(!s.device && s.error.is_none());
+        assert_eq!((s.profile, s.profile_name.as_deref()), (Some(id), Some("Office")));
+        assert_eq!(s.model.as_deref(), Some("Razer Huntsman V2 Analog"));
+        assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read gives the stored profile");
+    }
+
+    #[test]
+    fn a_released_device_adopts_from_the_settings_not_its_old_copy() {
+        let shared: Shared = Default::default();
+        settings::lock(&shared).devices.insert("K".into(), DeviceData { pid: 0x0266, next_profile_id: 7, ..Default::default() });
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.offline("K");
+        assert_eq!(d.data().next_profile_id, 7);
+        settings::lock(&shared).devices.remove("K");
+        d.release();
+        d.adopt("K", 0x0266);
+        assert_eq!(d.data().next_profile_id, 0);
     }
 }
