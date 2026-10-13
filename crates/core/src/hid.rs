@@ -79,3 +79,39 @@ pub fn open_lamp_array(api: &HidApi, d: &DeviceSpec) -> Result<HidDevice, Error>
         .ok_or_else(|| Error::Io("LampArray collection not found".into()))?;
     info.open_device(api).map_err(io)
 }
+
+/// The ContainerId Windows gives every interface of one USB device; `None` where it cannot be read.
+#[cfg(windows)]
+pub fn container_id(path: &std::ffi::CStr) -> Option<String> {
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_Get_DevNode_PropertyW, CM_Get_Device_Interface_PropertyW, CM_LOCATE_DEVNODE_NORMAL, CM_Locate_DevNodeW, CR_SUCCESS,
+    };
+    use windows_sys::Win32::Devices::Properties::{DEVPKEY_Device_ContainerId, DEVPKEY_Device_InstanceId};
+    use windows_sys::core::GUID;
+
+    let path: Vec<u16> = path.to_str().ok()?.encode_utf16().chain([0]).collect();
+    unsafe {
+        let mut ty = 0;
+        let mut id = [0u16; 512];
+        let mut size = size_of_val(&id) as u32;
+        if CM_Get_Device_Interface_PropertyW(path.as_ptr(), &DEVPKEY_Device_InstanceId, &mut ty, id.as_mut_ptr().cast(), &mut size, 0) != CR_SUCCESS {
+            return None;
+        }
+        let mut node = 0;
+        if CM_Locate_DevNodeW(&mut node, id.as_ptr(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS {
+            return None;
+        }
+        let mut g: GUID = std::mem::zeroed();
+        let mut size = size_of::<GUID>() as u32;
+        if CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_ContainerId, &mut ty, (&raw mut g).cast(), &mut size, 0) != CR_SUCCESS {
+            return None;
+        }
+        let tail: String = g.data4.iter().map(|b| format!("{b:02X}")).collect();
+        Some(format!("{:08X}-{:04X}-{:04X}-{}-{}", g.data1, g.data2, g.data3, &tail[..4], &tail[4..]))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn container_id(_path: &std::ffi::CStr) -> Option<String> {
+    None
+}

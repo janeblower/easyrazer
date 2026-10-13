@@ -16,7 +16,7 @@ use razer_core::transport;
 
 const USAGE: &str = "\
 usage: razer-probe <command>
-  list                          HID interfaces of 1532:0266
+  list                          HID interfaces of every known keyboard, with their container
   info                          firmware, serial, device mode
   get <cls> <id> <size> [hex..] raw getter (id must have bit 7 set)
   actuation <profile> [keys..]  per-key assignment and actuation thresholds
@@ -76,12 +76,14 @@ fn run(args: &[String]) -> Result<()> {
 }
 
 fn list(api: &HidApi) -> Result<()> {
-    for d in api.device_list().filter(|d| d.vendor_id() == VID && d.product_id() == PID) {
+    for d in api.device_list().filter(|d| d.vendor_id() == VID && devices::by_pid(d.product_id()).is_some()) {
         println!(
-            "mi={} usage_page={:04X} usage={:04X} {}",
+            "pid={:04X} mi={} usage_page={:04X} usage={:04X} container={} {}",
+            d.product_id(),
             d.interface_number(),
             d.usage_page(),
             d.usage(),
+            hid::container_id(d.path()).as_deref().unwrap_or("-"),
             d.path().to_string_lossy()
         );
     }
