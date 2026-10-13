@@ -114,6 +114,10 @@ impl Boards {
         (out, changed)
     }
 
+    fn is_connected(&self, id: &str) -> bool {
+        guard(&self.boards).get(id).is_some_and(|b| b.connected)
+    }
+
     /// Attaches every unit no board holds; `true` when a keyboard appeared or the unsupported one changed.
     pub fn discover(&self, shared: &Shared, hooks: &Hooks, synapse: bool) -> bool {
         let held: Vec<Option<String>> = guard(&self.boards).values().filter(|b| b.connected).map(|b| b.container.clone()).collect();
@@ -125,6 +129,10 @@ impl Boards {
             let Ok(t) = hid::open_control(&api, &unit) else { continue };
             let Ok(serial) = control::serial(&t) else { continue };
             let id = settings::device_id(unit.spec.pid, &serial);
+            // Keyboards without a readable serial share an id; taking the live board's device would detach it.
+            if self.is_connected(&id) {
+                continue;
+            }
             let device = self.board_for(&id, unit.container.clone(), || {
                 Arc::new(Mutex::new(Device::new(shared.clone()).expect("hidapi init")))
             });
@@ -168,6 +176,19 @@ mod tests {
     #[test]
     fn a_unit_without_container_is_held_by_any_board_of_its_model() {
         assert!(units_to_attach(vec![unit(None)], &[None]).is_empty());
+    }
+
+    #[test]
+    fn a_connected_board_is_not_taken_over_by_a_unit_with_its_id() {
+        let boards = Boards::new().unwrap();
+        let device = Arc::new(Mutex::new(Device::new(Shared::default()).unwrap()));
+        let mut map = boards.boards.lock().unwrap();
+        map.insert("66:noserial".into(), Board { device, container: Some("A".into()), connected: true });
+        drop(map);
+        assert!(boards.is_connected("66:noserial"));
+        boards.set_connected("66:noserial", false);
+        assert!(!boards.is_connected("66:noserial"), "a replugged board may attach again");
+        assert!(!boards.is_connected("other"));
     }
 
     #[test]
