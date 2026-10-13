@@ -8,7 +8,8 @@ use razer_core::control;
 use razer_core::hid::{self, Unit};
 use serde::Serialize;
 
-use crate::device::{Device, Progress};
+use crate::commands::try_lock;
+use crate::device::{Device, Progress, Status};
 use crate::engine::Sink;
 use crate::settings::{self, Settings, Shared};
 
@@ -86,6 +87,21 @@ impl Boards {
         changed
     }
 
+    /// The status of every board not busy with a command; a busy one reports for itself when it
+    /// finishes, and waiting here would stall the others. `true` when a connection changed.
+    pub fn statuses(&self, synapse: bool) -> (Vec<Status>, bool) {
+        let mut changed = false;
+        let mut out = Vec::new();
+        for (id, d) in self.all() {
+            let Some(mut dev) = try_lock(&d) else { continue };
+            let s = dev.status(synapse);
+            drop(dev);
+            changed |= self.set_connected(&id, s.device);
+            out.push(s);
+        }
+        (out, changed)
+    }
+
     /// Attaches every unit no board holds; `true` when a keyboard appeared.
     pub fn discover(&self, shared: &Shared, hooks: &Hooks, synapse: bool) -> bool {
         let held: Vec<Option<String>> = guard(&self.boards).values().filter(|b| b.connected).map(|b| b.container.clone()).collect();
@@ -154,6 +170,23 @@ mod tests {
         let _busy = device.lock().unwrap();
         let list = boards.list(&s);
         assert_eq!(list.iter().map(|e| (e.id.as_str(), e.connected)).collect::<Vec<_>>(), [("A", true), ("B", false)]);
+    }
+
+    #[test]
+    fn a_busy_device_does_not_stall_the_others() {
+        let boards = Boards::new().unwrap();
+        let shared: Shared = Default::default();
+        let busy = Arc::new(Mutex::new(Device::new(shared.clone()).unwrap()));
+        let free = Arc::new(Mutex::new(Device::new(shared).unwrap()));
+        for (id, d) in [("A", &busy), ("B", &free)] {
+            boards.boards.lock().unwrap().insert(id.into(), Board { device: d.clone(), container: None, connected: true });
+        }
+        let _held = busy.lock().unwrap();
+        let (statuses, changed) = boards.statuses(false);
+        assert!(statuses.len() == 1 && statuses[0].id.is_none());
+        assert!(changed);
+        let boards_map = boards.boards.lock().unwrap();
+        assert!(boards_map["A"].connected && !boards_map["B"].connected);
     }
 
     #[test]

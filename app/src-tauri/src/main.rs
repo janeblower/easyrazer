@@ -88,7 +88,9 @@ fn main() {
                         if changed {
                             let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
                             for (id, d) in state.boards.all() {
-                                dev::sync_listener(&handle, mode, size, &id, &commands::lock(&d));
+                                if let Some(dev) = commands::try_lock(&d) {
+                                    dev::sync_listener(&handle, mode, size, &id, &dev);
+                                }
                             }
                             let _ = handle.emit("devices", ());
                         }

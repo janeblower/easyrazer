@@ -36,6 +36,15 @@ pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
     d.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Like `lock`, but `None` while a command holds the device.
+pub fn try_lock(d: &Mutex<Device>) -> Option<MutexGuard<'_, Device>> {
+    match d.try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
 impl AppState {
     pub fn device(&self, id: &str) -> Result<Arc<Mutex<Device>>, String> {
         self.boards.get(id).ok_or_else(|| i18n::t(&self.lang(), "backend.noKeyboard"))
@@ -140,12 +149,8 @@ pub fn poll(state: &AppState) -> (Vec<Status>, bool, bool) {
     let watch = state.settings().watch_synapse;
     let synapse = watch && device::synapse_running();
     let mut changed = state.hooks.get().is_some_and(|h| state.boards.discover(&state.settings, h, synapse));
-    let mut out = Vec::new();
-    for (id, d) in state.boards.all() {
-        let s = lock(&d).status(synapse);
-        changed |= state.boards.set_connected(&id, s.device);
-        out.push(s);
-    }
+    let (out, moved) = state.boards.statuses(synapse);
+    changed |= moved;
     (out, changed, synapse)
 }
 
