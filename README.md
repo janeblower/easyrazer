@@ -1,109 +1,128 @@
 <p align="center"><img src="logo.svg" width="192" alt=""></p>
 
-# EasyRazer
+<h1 align="center">EasyRazer</h1>
 
-[Русская версия](docs/ru/README.md)
+<p align="center">
+  A lightweight Razer Synapse replacement for Razer analog keyboards on Windows.
+</p>
 
-A lightweight Razer Synapse replacement for Razer analog keyboards (the Huntsman
-Analog line) on Windows. The actuation point of every key is written to the keyboard's
-memory, after which it works with no software running at all.
+<p align="center">
+  <a href="https://github.com/janeblower/easyrazer/releases/latest"><img src="https://img.shields.io/github/v/release/janeblower/easyrazer" alt="Release"></a>
+  <a href="https://github.com/janeblower/easyrazer/actions/workflows/release.yml"><img src="https://github.com/janeblower/easyrazer/actions/workflows/release.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/janeblower/easyrazer/releases"><img src="https://img.shields.io/github/downloads/janeblower/easyrazer/total" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078D6" alt="Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/janeblower/easyrazer" alt="License"></a>
+</p>
 
-**Unofficial project, not affiliated with Razer Inc.**
+<p align="center">
+  <a href="https://github.com/janeblower/easyrazer/releases/latest/download/EasyRazer.exe"><b>Download</b></a> ·
+  <a href="docs/en/usage.md">User guide</a> ·
+  <a href="docs/ru/README.md">Русский</a>
+</p>
 
 ![Keys tab: actuation points and Rapid Trigger](docs/screenshots/actuation.png)
 
+> [!NOTE]
+> Unofficial project, not affiliated with Razer Inc.
+
+## Why EasyRazer
+
+- **Tiny.** One 8 MB `.exe` and one process, ~33 MB of RAM in the tray. Synapse 4 is
+  ~1.2 GB on disk, 13 processes and ~1.75 GB of RAM.
+- **Settings live in the keyboard.** Actuation points and profiles are written to the
+  keyboard's memory and keep working with no software running at all.
+- **The firmware types, not the host.** By default the keyboard detects presses itself;
+  the host steps in only for Rapid Trigger.
+- **Offline.** No account, no network, no telemetry.
+
+Full comparison and the reasoning behind it: [how it works](docs/en/how-it-works.md).
+
 ## Features
 
-- shows and changes the actuation point of every key: "Apply" lasts until reconnect,
-  "Write" stores it in the keyboard (a backup goes to `%APPDATA%\EasyRazer` before the
-  first write of a session);
-- profiles: any number in the app, up to five in the keyboard; Fn+Menu cycles them;
-- key remapping: another key with modifiers, mouse buttons, media, disable;
-- per-key Rapid Trigger with separate press and release sensitivity
-  (computed by the app while it runs);
-- Snap Tap: key groups of any size, a rule per group, Fn+LShift toggle (driver mode);
+**Actuation**
+- per-key actuation point: "Apply" lasts until reconnect, "Write" stores it in the keyboard;
+- per-key Rapid Trigger with separate press and release sensitivity;
+- Snap Tap: key groups of any size, a rule per group, Fn+LShift toggle.
+
+**Keys**
+- remapping: another key with modifiers, mouse buttons, media, disable;
 - macros: keys, mouse, delays, recording;
-- Hypershift layer: an action and a press point per Fn combination;
-- built-in lighting effects with live preview and a custom per-key and per-zone colour layout;
-- Windows Dynamic Lighting toggle;
-- lives in the tray: starts with Windows, restores settings after reconnect, sleep
-  and Synapse exit;
+- Hypershift layer: an action and a press point per Fn combination.
+
+**Profiles**
+- any number in the app, up to five in the keyboard; Fn+Menu cycles them.
+
+**Lighting**
+- built-in effects with live preview;
+- custom per-key and per-zone colour layout;
+- Windows Dynamic Lighting toggle.
+
+**System**
+- lives in the tray, starts with Windows;
+- restores settings after reconnect, sleep and Synapse exit;
 - English and Russian UI.
 
 Details and caveats: [user guide](docs/en/usage.md).
 
 ## Supported keyboards
 
-| Model | Support |
+| Model | Status |
 |---|---|
-| Huntsman V2 Analog (`1532:0266`) | full |
-| Huntsman Mini Analog (`1532:0282`) | as V2 Analog, without macros; not tested on hardware |
-| Huntsman V3 Pro (`1532:02A6`, 8 kHz `1532:02CF`) | in development, not tested on hardware |
-| Huntsman V3 Pro TKL (`1532:02A7`, 8 kHz `1532:02D0`) | in development, not tested on hardware |
-| Huntsman V3 Pro Mini (`1532:02B0`) | in development, not tested on hardware |
-| Huntsman V3 TKL 8KHz (`1532:02E5`) | in development, not tested on hardware |
-| Huntsman Signature Edition (`1532:02D8`) | in development, not tested on hardware |
-| Huntsman V3 Pro Low-profile TKL 8KHz (`1532:02E6`) | in development, not tested on hardware |
+| Huntsman V2 Analog (`1532:0266`) | ✅ full support |
+| Huntsman Mini Analog (`1532:0282`) | 🧪 as V2 Analog, without macros; not tested on hardware |
 
-Features per model and caveats: [full table](docs/en/supported.md).
+<details>
+<summary>In development, not tested on hardware</summary>
 
-## Compared to Synapse
+| Model | VID:PID |
+|---|---|
+| Huntsman V3 Pro | `1532:02A6`, 8 kHz `1532:02CF` |
+| Huntsman V3 Pro TKL | `1532:02A7`, 8 kHz `1532:02D0` |
+| Huntsman V3 Pro Mini | `1532:02B0` |
+| Huntsman V3 TKL 8KHz | `1532:02E5` |
+| Huntsman Signature Edition | `1532:02D8` |
+| Huntsman V3 Pro Low-profile TKL 8KHz | `1532:02E6` |
 
-Measured on the same PC: Synapse 4.0.827 right after launch, EasyRazer 0.2.3 in the
-tray in driver mode; HW mode needs less. In the tray the window is closed, so no WebView2
-runs; opening it adds 6 × WebView2 processes, ~350 MB.
+</details>
 
-| | Synapse 4 | EasyRazer |
-|---|---|---|
-| Stack | Electron (`RazerAppEngine`) plus Windows services | Rust core, Tauri 2, Vue UI on the system WebView2 |
-| Install | installer, ~1.2 GB on disk | one 8 MB `.exe`, no installer |
-| Processes | 13: 11 × `RazerAppEngine`, Elevation Service, Game Manager Service | 1: `easyrazer` |
-| RAM, working set / private | ~1.75 GB / ~1.07 GB | ~33 MB / ~8 MB in the tray (+200–300 MB for WebView2 while the window is open) |
-| Network | loads device modules from `apps.razer.com` | none, works offline |
-| Who detects key presses | the host, always: Synapse sets every key to `0/0` and runs the keyboard in driver mode | the keyboard firmware by default (HW mode); the host only in driver mode, when you want Rapid Trigger |
+Features per model and caveats: [full table](docs/en/supported.md). Own one of the
+untested models? Reports are very welcome.
 
-### HW mode
+## Installation
 
-In HW mode the keyboard types on its own, exactly as with no software installed:
-no host in the input path, no extra latency, nothing to crash. EasyRazer switches to
-driver mode only when you need Rapid Trigger — the Huntsman V2 Analog has no hardware
-RT, so Synapse computes it on the host too. EasyRazer puts the keyboard back into HW
-mode when it exits, fails, or sees Synapse start.
+1. Download [`EasyRazer.exe`](https://github.com/janeblower/easyrazer/releases/latest/download/EasyRazer.exe)
+   from the latest release. It is a single file with no installer; put it anywhere.
+2. Quit Synapse completely, including its tray icon.
+3. Run `EasyRazer.exe`.
 
-The trade-off: in HW mode the firmware clamps actuation to 1.62–3.56 mm; the full
-1.5–3.6 mm range needs driver mode.
+Nightly builds from `master` are published as the
+[`nightly`](https://github.com/janeblower/easyrazer/releases/tag/nightly) pre-release.
 
-Windows drops keys that an ordinary app injects into windows run as administrator and
-into the lock screen or UAC prompts. While one of those has focus, EasyRazer hands
-typing back to the firmware (HW mode) and returns to driver mode afterwards; Rapid
-Trigger does not work there. Each switch takes about 25 ms. Ctrl+Alt+Del accepts only
-a real keyboard, so it does nothing in driver mode.
+## FAQ
 
-### Flash wear
+**Do I have to uninstall Synapse?**
+No, but it must not run at the same time: Synapse keeps the keyboard in its own mode and
+overwrites settings. While it runs, EasyRazer writes nothing and puts the keyboard back
+into HW mode.
 
-The keyboard's MCU (STM32L4+) is rated for 10,000 erases per 4 KB flash page. The
-firmware has no wear levelling and no erase counter, and any write, even 4 bytes,
-erases a whole page. So EasyRazer:
+**Does EasyRazer have to keep running?**
+Actuation points and profiles written with "Write" live in the keyboard. Rapid Trigger,
+Snap Tap and the custom colour layout are computed by the app and need it running.
 
-- applies changes to the keyboard's RAM; flash is written only by an explicit
-  "Write" or the floppy icon, with an optional confirmation;
-- writes a profile slot as one batch, and only the keys that differ from what is
-  already stored;
-- keeps Rapid Trigger and the custom colour layout in the app, never in flash.
+**Will it wear out my keyboard?**
+Changes go to the keyboard's RAM; flash is written only on an explicit "Write", and only
+the keys that changed. Before the first write of a session a backup goes to
+`%APPDATA%\EasyRazer`. See [flash wear](docs/en/how-it-works.md#flash-wear).
 
-Firmware analysis: [firmware.md](docs/en/devices/huntsman-v2-analog/firmware.md).
+**Why doesn't Rapid Trigger work in admin windows or on the lock screen?**
+Windows drops input injected by ordinary apps there, so EasyRazer hands typing back to
+the firmware while such a window has focus. See
+[admin windows](docs/en/how-it-works.md#admin-windows-lock-screen-uac).
 
-### What Synapse still has
+**Why is the actuation range narrower without Rapid Trigger?**
+In HW mode the firmware clamps it to 1.62–3.56 mm; the full 1.5–3.6 mm needs driver mode.
 
-Game mode and gamepad emulation — see the roadmap.
-
-## Synapse
-
-Synapse keeps the keyboard in its own mode and overwrites settings. Quit it
-completely, including the tray icon, before using EasyRazer. While it runs,
-EasyRazer writes nothing.
-
-## Building
+## Building from source
 
 Requires Rust (MSVC), Bun and MSVC Build Tools.
 
@@ -114,34 +133,28 @@ bun tauri dev      # run with rebuild on changes
 bun tauri build    # ..\target\release\easyrazer.exe
 ```
 
-The resulting `easyrazer.exe` is a single file with no installer; copy it anywhere.
-
 Tests (from the repository root): `cargo test`; frontend: `bun run lint` (in `app`).
 Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`.
 
 ## Documentation
 
 - [User guide](docs/en/usage.md) — features, controls, limitations.
+- [How it works](docs/en/how-it-works.md) — comparison with Synapse, modes, flash wear.
 - [Development](docs/en/development.md) — layout, rules, adding a keyboard model.
 - [Keyboard models](docs/en/devices/README.md) — protocol and firmware of each supported or studied model.
 
 ## Roadmap
 
-- [x] Protocol: actuation read and write, modes, depth stream, lighting
-- [x] Per-key actuation: temporary and in keyboard memory
-- [x] Built-in lighting effects, Windows Dynamic Lighting
-- [x] Tray, autostart, restore after reconnect and sleep
-- [x] Custom colour layout
-- [x] English and Russian UI
-- [x] Rapid Trigger and the HW / Driver switch
-- [x] Snap Tap
-- [ ] ~~Driver mode in admin windows, on the lock screen and for Ctrl+Alt+Del, through Razer's kernel driver~~ — too troublesome and unsafe
-- [x] Volume wheel and Fn+F9/F10/Menu
-- [x] Profiles: in the app and in keyboard memory
 - [ ] Host-driven lighting animations
-- [x] Key remapping
-- [x] Hypershift layer
-- [x] Macros: keys, mouse, delays, recording
 - [ ] Game mode, gamepad
-- [ ] Other keyboard models
+- [ ] Hardware-tested support for more keyboard models
 - [ ] Linux
+
+What has shipped: [releases](https://github.com/janeblower/easyrazer/releases).
+
+## License
+
+[GPL-3.0-or-later](LICENSE).
+
+Razer and Huntsman are trademarks of Razer Inc. This project is not affiliated with,
+endorsed by, or sponsored by Razer Inc.

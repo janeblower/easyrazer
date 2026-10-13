@@ -3,7 +3,7 @@
 ## Environment
 
 Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools, Bun.
-Building and running — see the [README](../../README.md#building).
+Building and running — see the [README](../../README.md#building-from-source).
 
 Tests:
 
