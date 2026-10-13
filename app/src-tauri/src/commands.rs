@@ -183,8 +183,11 @@ pub async fn forget_device(state: State<'_, AppState>, id: String) -> Result<Dev
 }
 
 #[tauri::command]
-pub async fn set_last_device(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.update_settings(|s| s.last_device = Some(id))
+pub async fn set_last_device(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.update_settings(|s| s.last_device = Some(id))?;
+    // The detached dev window follows the pick through this.
+    let _ = app.emit("devices", ());
+    Ok(())
 }
 
 #[tauri::command]
