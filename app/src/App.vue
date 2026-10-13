@@ -357,6 +357,8 @@ async function loadProfiles() {
 
 async function load() {
   const id = keyboard.value;
+  // Before any keyboard is known there is nothing to read, and the error would hide the status text.
+  if (id === null) return;
   busy.value = true;
   progress.value = [0, 1];
   let stale = false;
