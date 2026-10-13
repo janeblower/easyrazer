@@ -16,10 +16,11 @@ use tauri::{AppHandle, Emitter, State, WebviewWindow};
 use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
-use crate::settings::{CloseAction, DevPanel, DevWindow, Rapid, SnapTap};
+use crate::settings::{self, CloseAction, DevPanel, DevWindow, Rapid, Settings, Shared, SnapTap};
 use crate::{autostart, i18n, tray};
 
 pub struct AppState {
+    pub settings: Shared,
     pub device: Mutex<Device>,
     /// Lets the watcher connect; taken once the window listens to the read progress.
     pub window_ready: Mutex<Option<Sender<()>>>,
@@ -29,6 +30,16 @@ impl AppState {
     /// A command that panicked mid-way leaves the device in a usable state, so poisoning is ignored.
     pub fn device(&self) -> MutexGuard<'_, Device> {
         self.device.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn settings(&self) -> MutexGuard<'_, Settings> {
+        settings::lock(&self.settings)
+    }
+
+    pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
+        let mut s = self.settings();
+        f(&mut s);
+        settings::save(&s)
     }
 }
 
@@ -113,7 +124,7 @@ impl From<Written> for WriteResult {
 
 /// One watcher step: the Synapse check runs outside the lock, `tasklist` takes a few hundred ms.
 pub fn poll(state: &AppState) -> Status {
-    let watch = state.device().settings().watch_synapse;
+    let watch = state.settings().watch_synapse;
     let synapse = watch && device::synapse_running();
     state.device().status(synapse)
 }
@@ -182,7 +193,7 @@ pub async fn save(
     bindings: Vec<(u8, Action)>,
     hypershift: HypershiftEdits,
 ) -> Result<WriteResult, String> {
-    state.device().save(&changes, &bindings, &hypershift).map(Into::into)
+    state.device().apply_and_write(&changes, &bindings, &hypershift).map(Into::into)
 }
 
 #[tauri::command]
@@ -234,7 +245,7 @@ pub async fn lighting_write(state: State<'_, AppState>, look: Look) -> Result<()
 
 #[tauri::command]
 pub async fn set_confirm_write(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.confirm_write = on)
+    state.update_settings(|s| s.confirm_write = on)
 }
 
 #[tauri::command]
@@ -264,7 +275,7 @@ pub struct AppSettings {
 
 #[tauri::command]
 pub async fn app_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
-    let s = state.device().settings().clone();
+    let s = state.settings().clone();
     Ok(AppSettings {
         autostart: autostart::enabled(),
         close_action: s.close_action,
@@ -293,22 +304,22 @@ pub async fn autostart_answered(app: AppHandle, state: State<'_, AppState>, on: 
     if on {
         set_autostart(app, true).await?;
     }
-    state.device().update_settings(|s| s.autostart_offered = true)
+    state.update_settings(|s| s.autostart_offered = true)
 }
 
 #[tauri::command]
 pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -> Result<(), String> {
-    state.device().update_settings(|s| s.close_action = action)
+    state.update_settings(|s| s.close_action = action)
 }
 
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.watch_synapse = on)
+    state.update_settings(|s| s.watch_synapse = on)
 }
 
 #[tauri::command]
 pub async fn set_unverified_writes(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.device().update_settings(|s| s.unverified_writes = on)
+    state.update_settings(|s| s.unverified_writes = on)
 }
 
 #[tauri::command]
@@ -316,7 +327,7 @@ pub async fn set_language(app: AppHandle, state: State<'_, AppState>, language: 
     if !i18n::known(&language) {
         return Err(format!("unknown language {language}"));
     }
-    state.device().update_settings(|s| s.language = Some(language))?;
+    state.update_settings(|s| s.language = Some(language))?;
     tray::retitle(&app);
     Ok(())
 }
@@ -399,7 +410,8 @@ mod tests {
 
     #[test]
     fn a_panic_under_the_lock_does_not_lock_everyone_out() {
-        let state = AppState { device: Mutex::new(Device::new().unwrap()), window_ready: Mutex::new(None) };
+        let shared: Shared = Default::default();
+        let state = AppState { settings: shared.clone(), device: Mutex::new(Device::new(shared).unwrap()), window_ready: Mutex::new(None) };
         let _ = std::thread::scope(|s| {
             s.spawn(|| {
                 let _guard = state.device();
@@ -408,6 +420,6 @@ mod tests {
             .join()
         });
         assert!(state.device.is_poisoned());
-        let _ = state.device().settings();
+        let _ = state.device().data();
     }
 }

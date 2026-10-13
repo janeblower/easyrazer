@@ -14,7 +14,7 @@ pub struct Items {
 }
 
 fn lang(app: &AppHandle) -> String {
-    app.state::<AppState>().device().lang().to_string()
+    app.state::<AppState>().settings().language.clone().unwrap_or_else(|| "en".into())
 }
 
 /// Brings the menu to the current interface language.

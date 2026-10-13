@@ -43,10 +43,9 @@ pub struct DevKey {
 }
 
 /// Streams the log to every window and keeps the larger log while the mode is on.
-pub fn sync_listener(app: &AppHandle, device: &Device) {
-    let s = device.settings();
-    device.log().set_capacity(if s.dev_mode { s.dev_log_size } else { logged::CAPACITY });
-    let listener = device.settings().dev_mode.then(|| {
+pub fn sync_listener(app: &AppHandle, dev_mode: bool, log_size: usize, device: &Device) {
+    device.log().set_capacity(if dev_mode { log_size } else { logged::CAPACITY });
+    let listener = dev_mode.then(|| {
         let app = app.clone();
         Box::new(move |e: &Entry| {
             let _ = app.emit("hid-log", e);
@@ -57,37 +56,37 @@ pub fn sync_listener(app: &AppHandle, device: &Device) {
 
 #[tauri::command]
 pub async fn set_dev_mode(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    let mut device = state.device();
-    device.update_settings(|s| {
+    state.update_settings(|s| {
         s.dev_mode = on;
         if on && s.dev_panel.is_none() {
             s.dev_panel = Some(DevPanel::default());
         }
     })?;
-    sync_listener(&app, &device);
+    let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+    sync_listener(&app, mode, size, &state.device());
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_log_size(app: AppHandle, state: State<'_, AppState>, size: usize) -> Result<(), String> {
-    let mut device = state.device();
-    device.update_settings(|s| s.dev_log_size = size.clamp(*DEV_LOG_SIZES.start(), *DEV_LOG_SIZES.end()))?;
-    sync_listener(&app, &device);
+    state.update_settings(|s| s.dev_log_size = size.clamp(*DEV_LOG_SIZES.start(), *DEV_LOG_SIZES.end()))?;
+    let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+    sync_listener(&app, mode, size, &state.device());
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_panel(app: AppHandle, state: State<'_, AppState>, panel: DevPanel) -> Result<(), String> {
-    state.device().update_settings(|s| s.dev_panel = Some(panel))?;
+    state.update_settings(|s| s.dev_panel = Some(panel))?;
     let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_dev_window(state: State<'_, AppState>, geom: DevWindow) -> Result<(), String> {
-    state.device().update_settings(|s| s.dev_window = Some(geom))
+    state.update_settings(|s| s.dev_window = Some(geom))
 }
 
 #[tauri::command]
@@ -154,9 +153,10 @@ pub async fn dev_macro(state: State<'_, AppState>, id: u16) -> Result<Option<Vec
 
 #[tauri::command]
 pub async fn dev_diagnostics(state: State<'_, AppState>, uncensored: bool) -> Result<String, String> {
+    let s = state.settings().clone();
     let mut device = state.device();
     let info = device_info(&mut device);
-    Ok(report(info.as_ref(), device.settings(), device.data(), &device.log().entries(), uncensored))
+    Ok(report(info.as_ref(), &s, device.data(), &device.log().entries(), uncensored))
 }
 
 fn hex(b: &[u8]) -> String {

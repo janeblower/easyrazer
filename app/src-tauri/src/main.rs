@@ -31,11 +31,12 @@ fn main() {
         }
         default_hook(info);
     }));
-    let device = device::Device::new().expect("hidapi init");
+    let shared: settings::Shared = Arc::new(Mutex::new(settings::load()));
+    let device = device::Device::new(shared.clone()).expect("hidapi init");
     let (window_ready, ready) = mpsc::channel();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
-        .manage(commands::AppState { device: Mutex::new(device), window_ready: Mutex::new(Some(window_ready)) })
+        .manage(commands::AppState { settings: shared, device: Mutex::new(device), window_ready: Mutex::new(Some(window_ready)) })
         .setup(move |app| {
             tray::build(app)?;
             let shown = !std::env::args().any(|a| a == autostart::TRAY_ARG);
@@ -84,7 +85,9 @@ fn main() {
                     _ => {}
                 });
             }));
-            dev::sync_listener(app.handle(), &app.state::<commands::AppState>().device());
+            let state = app.state::<commands::AppState>();
+            let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
+            dev::sync_listener(app.handle(), mode, size, &state.device());
             let blocked = focus::watch();
             let focus_handle = handle.clone();
             std::thread::spawn(move || {
@@ -118,7 +121,7 @@ fn main() {
                 return;
             }
             if let WindowEvent::CloseRequested { api, .. } = e {
-                let action = w.state::<commands::AppState>().device().settings().close_action;
+                let action = w.state::<commands::AppState>().settings().close_action;
                 match action {
                     CloseAction::Ask => {
                         api.prevent_close();
