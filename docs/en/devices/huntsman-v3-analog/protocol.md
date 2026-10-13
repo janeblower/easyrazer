@@ -1,8 +1,23 @@
-# Huntsman V3 Pro protocol
+# Huntsman V3 analog line protocol
 
 Not verified on hardware. Sources: the Synapse 4 module for `678` (`1532:02A6`),
 firmware 1.03.00 ([firmware.md](firmware.md)) and the OpenRazer driver. Where
 there is a single source, it is noted. Packet format — [in the overview](../README.md#control-packet).
+
+## Models
+
+| Model | VID:PID | Keys | Firmware | On hardware |
+|---|---|---|---|---|
+| Huntsman V3 Pro | `1532:02A6` | full size, 104 | 1.03.00 | not checked |
+| Huntsman V3 Pro TKL | `1532:02A7` | TKL without PrtSc / ScrLk / Pause, 84 | 1.04.00 | not checked |
+| Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
+| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
+| Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
+| Huntsman V3 Pro 8KHz | | full size | not analyzed | not supported |
+| Huntsman V3 Pro Low-profile TKL 8KHz | | TKL | not analyzed | not supported |
+
+The sections below are about the V3 Pro; the other models differ only as described in
+their sections.
 
 ## HID interfaces
 
@@ -117,3 +132,39 @@ rows, whether the buttons and the dial are lit is unknown.
 - Reports `04`, `05`, `07` on MI_01 and interface MI_05.
 - fwIDs of the dial and the three buttons, and whether they are lit.
 - Effect `0A`, flag `02:1F`, the meaning of bytes `+1`, `+2` in threshold entries.
+
+## Huntsman V3 Pro TKL and TKL 8KHz
+
+Per the firmware the protocol is that of the V3 Pro, with these differences.
+
+- PID `02A7`; `02D0` for the 8 kHz version.
+- Tenkeyless board: sensor matrix 7 × 14, 84 keys in ANSI. No numpad and no
+  PrtSc / ScrLk / Pause.
+- Lighting matrix size is unknown, so the custom effect is not offered.
+
+## Huntsman V3 Pro Mini
+
+Per the firmware the protocol is that of the V3 Pro, with these differences.
+
+- PID `02B0`.
+- 60% board: sensor matrix 5 × 14, 61 keys in ANSI. No F-row, arrows, navigation
+  block, numpad, media buttons or dial.
+- Lighting matrix size is unknown, so the custom effect is not offered.
+
+## Huntsman V3 TKL 8KHz
+
+The Synapse module for `741` (`1532:02E5`) sends the same commands as the one for the V3
+Pro TKL, with the same u16 threshold scale (`unit: 1638`, `max: 65520`). The firmware is
+a separate code base, so this is less certain than for the models above.
+
+- PID `02E5`.
+- Full TKL: sensor matrix 7 × 15, 87 keys in ANSI, with PrtSc / ScrLk / Pause.
+- No HID LampArray interface (`isWDLSupported: false` in Synapse); the other interfaces
+  match the V3 Pro, control on interface 3, depth stream in report `0B`.
+- Lighting matrix size is unknown, so the custom effect is not offered.
+
+## Not analyzed yet
+
+The Huntsman V3 Pro 8KHz and the V3 Pro Low-profile TKL 8KHz: their firmware has not
+been analyzed and EasyRazer does not support them yet. The Low-profile switches have
+2.8 mm of travel, so the scale probably differs from the 4 mm one above.
