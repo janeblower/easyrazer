@@ -342,7 +342,6 @@
     "isStartup": "Already starts without the app",
     "rename": "Rename",
     "import": "Import from file…",
-    "export": "Export \"{name}\"…",
     "exportOne": "Export…",
     "exported": "Exported \"{name}\"",
     "imported": "Imported \"{name}\"",

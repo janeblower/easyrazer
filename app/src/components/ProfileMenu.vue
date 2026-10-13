@@ -204,9 +204,6 @@ watch(
       <button class="item text-muted" :disabled="!editable" @click="emit('import')">
         <span class="ic">⇩</span>{{ $t("profiles.import") }}
       </button>
-      <button class="item text-muted" :disabled="!loaded()" @click="emit('export', view.loaded!)">
-        <span class="ic">⇧</span>{{ $t("profiles.export", { name: loaded()?.name }) }}
-      </button>
       <div class="sep" />
       <div class="text-[11px] text-muted px-2 py-1">
         {{ $t("profiles.legend", { combo: nextCombo ?? $t("profiles.noCombo") }) }}
