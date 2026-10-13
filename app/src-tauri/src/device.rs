@@ -414,7 +414,7 @@ impl Device {
         self.synapse = synapse;
         self.ensure_connected();
         // Synapse overwrites the temporary store; once it is gone, bring the applied look back.
-        if was && !synapse {
+        if was && !synapse && self.control.is_some() {
             self.synced = false;
             self.reload();
         }
@@ -446,10 +446,10 @@ impl Device {
 
     /// Reads the slots once per connect and loads the profile; returns its Normal press points.
     pub fn read_all(&mut self, progress: impl FnMut(usize, usize, Option<(u8, f32)>)) -> Result<Vec<(u8, f32)>, String> {
-        if self.synapse {
-            return Err(self.msg("backend.synapseRunning"));
-        }
         if self.control.is_some() {
+            if self.synapse {
+                return Err(self.msg("backend.synapseRunning"));
+            }
             self.sync(progress)?;
             self.restore();
             self.sync_engine();
@@ -1597,8 +1597,9 @@ mod tests {
         settings::lock(&shared).devices.insert("K".into(), data);
         let mut d = Device::new(shared).unwrap();
         d.offline("K");
+        assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read does not depend on Synapse");
         let s = d.status(false);
-        assert!(!s.device);
+        assert!(!s.device && s.error.is_none());
         assert_eq!((s.profile, s.profile_name.as_deref()), (Some(id), Some("Office")));
         assert_eq!(s.model.as_deref(), Some("Razer Huntsman V2 Analog"));
         assert!(d.read_all(|_, _, _| {}).is_ok(), "offline read gives the stored profile");
