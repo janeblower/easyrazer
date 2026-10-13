@@ -216,7 +216,6 @@ fn backup(p: &Path, s: &Settings, text: &str) {
     }
 }
 
-#[allow(dead_code, reason = "used again for unconnected keyboards")]
 static NO_DATA: DeviceData = DeviceData { pid: 0, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
 
 /// The app's settings, shared by every keyboard and the app-wide commands.
@@ -229,7 +228,6 @@ pub fn lock(s: &Shared) -> MutexGuard<'_, Settings> {
 
 impl Settings {
     /// The data of keyboard `id`; empty when there is none.
-    #[allow(dead_code, reason = "used again for unconnected keyboards")]
     pub fn device(&self, id: Option<&str>) -> &DeviceData {
         id.and_then(|id| self.devices.get(id)).unwrap_or(&NO_DATA)
     }

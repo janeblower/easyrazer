@@ -36,6 +36,8 @@ const UNKNOWN_FN: u8 = 0xFF;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Status {
+    /// The keyboard this is about; `None` before any was met.
+    pub id: Option<String>,
     pub device: bool,
     pub synapse: bool,
     /// Driver mode chosen in the app: the host engine types, Rapid Trigger works.
@@ -47,8 +49,6 @@ pub struct Status {
     pub verified: bool,
     /// The keyboard's press-point scale and what its firmware runs.
     pub analog: Option<&'static Analog>,
-    /// PID of a Razer keyboard without a description.
-    pub unsupported: Option<u16>,
     /// Restoring applied settings after a connect failed; reported once.
     pub error: Option<String>,
 }
@@ -189,38 +189,39 @@ impl Device {
         })
     }
 
-    /// Reopens the control interface if the keyboard was replugged; `true` when connected.
+    /// Binds the device to `unit`, opened by discovery, and to keyboard `id`.
+    pub fn attach(&mut self, unit: Unit, t: HidTransport, id: &str, sink: Sink, progress: Progress, synapse: bool) {
+        self.synapse = synapse;
+        self.detach();
+        self.adopt(id, unit.spec.pid);
+        self.sink = Some(sink);
+        self.progress = Some(progress);
+        self.last_spec = Some(unit.spec);
+        self.control = Some((Logged::new(t, self.log.clone()), unit.spec));
+        // Fn+Menu is rebound only once someone listens, or it would do nothing.
+        // This device's own enumeration, which the engine and lighting open from, must see the unit.
+        let _ = self.api.refresh_devices();
+        self.menu = MenuListener::start(&self.api, &unit, self.sink.clone().unwrap()).ok();
+        self.unit = Some(unit);
+        if !self.synapse {
+            self.reload();
+        }
+    }
+
+    fn detach(&mut self) {
+        self.engine = None;
+        self.menu = None;
+        self.ram = None;
+        self.synced = false;
+        self.startup = None;
+        self.control = None;
+        self.unit = None;
+    }
+
+    /// Drops the connection once the keyboard stops answering; discovery attaches it again.
     pub fn ensure_connected(&mut self) -> bool {
-        let alive = self.poll_mode().is_some();
-        if !alive {
-            self.engine = None;
-            self.menu = None;
-            self.ram = None;
-            self.synced = false;
-            self.startup = None;
-            self.control = None;
-            self.unit = None;
-            let _ = self.api.refresh_devices();
-            // A failed serial read would file the keyboard's data under another key; the next poll retries.
-            if let Some(unit) = hid::units(&self.api).into_iter().next()
-                && let Ok(t) = hid::open_control(&self.api, &unit)
-                && let Ok(serial) = control::serial(&t)
-            {
-                let id = settings::device_id(unit.spec.pid, &serial);
-                self.attach(&id, unit.spec.pid);
-                self.control = Some((Logged::new(t, self.log.clone()), unit.spec));
-                self.unit = Some(unit);
-            }
-            if let (Some((_, d)), Some(unit)) = (&self.control, &self.unit) {
-                self.last_spec = Some(*d);
-                if let Some(sink) = &self.sink {
-                    // Fn+Menu is rebound only once someone listens, or it would do nothing.
-                    self.menu = MenuListener::start(&self.api, unit, sink.clone()).ok();
-                }
-                if !self.synapse {
-                    self.reload();
-                }
-            }
+        if self.control.is_some() && self.poll_mode().is_none() {
+            self.detach();
         }
         self.control.is_some()
     }
@@ -238,7 +239,7 @@ impl Device {
     }
 
     /// Replugging the same keyboard keeps the working copy, which may hold edits not yet saved.
-    fn attach(&mut self, id: &str, pid: u16) {
+    fn adopt(&mut self, id: &str, pid: u16) {
         let claimed = settings::lock(&self.shared).claim(id, pid);
         if self.id.as_deref() != Some(id) {
             self.backed_up.clear();
@@ -405,10 +406,9 @@ impl Device {
             _ => (None, None),
         };
         if self.control.is_none() {
-            let unsupported = hid::unsupported_keyboard(&self.api);
             let error = self.restore_error.take();
             let driver_mode = self.data().driver_mode;
-            return Status { device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, unsupported, error };
+            return Status { id: self.id.clone(), device: false, synapse, driver_mode, profile: None, profile_name: None, model: None, verified: true, analog: None, error };
         }
         self.sync_engine();
         let error = self.restore_error.take();
@@ -422,7 +422,7 @@ impl Device {
             self.ram = None;
             self.restore();
         }
-        Status { device: true, synapse, driver_mode: self.data().driver_mode, profile, profile_name, model, verified, analog, unsupported: None, error }
+        Status { id: self.id.clone(), device: true, synapse, driver_mode: self.data().driver_mode, profile, profile_name, model, verified, analog, error }
     }
 
     /// Reads the slots once per connect and loads the profile; returns its Normal press points.
@@ -635,9 +635,7 @@ impl Device {
     }
 
     pub fn profiles_view(&self) -> ProfilesView {
-        let s = self.data();
-        let profiles = s.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &s.slots) }).collect();
-        ProfilesView { profiles, loaded: s.loaded, startup: self.startup, free_slot: self.slots_used() < slots::MAX_SLOTS as usize }
+        profiles_view(self.data(), self.startup)
     }
 
     /// Applies press points and bindings of both layers to the loaded profile and profile 0 until
@@ -869,10 +867,16 @@ impl Device {
 
     /// Fresh check before a write, honouring `watch_synapse`.
     fn check_synapse(&mut self) -> bool {
-        self.synapse = settings::lock(&self.shared).watch_synapse && synapse_running();
+        let watch = settings::lock(&self.shared).watch_synapse;
+        self.synapse = watch && synapse_running();
         self.synapse
     }
 
+
+    /// The model's name, or the id before any model was seen.
+    pub fn name(&self) -> String {
+        self.last_spec.map_or_else(|| self.id.clone().unwrap_or_default(), |d| d.name.clone())
+    }
 
     pub fn log(&self) -> &Arc<Log> {
         &self.log
@@ -903,12 +907,9 @@ impl Device {
         answer
     }
 
+    /// Hands the lamps back to the app once Windows stopped driving them; the registry is written by the caller.
     pub fn set_dynamic_lighting(&mut self, on: bool) -> Result<(), String> {
-        if !on && self.synapse {
-            return Err(self.msg("backend.synapseRunning"));
-        }
-        dynamic_lighting::set(on)?;
-        if on {
+        if on || self.control.is_none() {
             return Ok(());
         }
         self.writable()?;
@@ -921,14 +922,6 @@ impl Device {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
         }
         Ok(())
-    }
-
-    pub fn set_sink(&mut self, sink: Sink) {
-        self.sink = Some(sink);
-    }
-
-    pub fn set_progress(&mut self, progress: Progress) {
-        self.progress = Some(progress);
     }
 
     /// Switches between hardware and driver mode; stays in hardware mode if the engine cannot start.
@@ -1090,6 +1083,13 @@ impl Device {
 }
 
 /// Press point in the UI's 0.1 mm steps.
+/// What the window lists of a keyboard's profiles; works without a connection.
+pub fn profiles_view(d: &DeviceData, startup: Option<u8>) -> ProfilesView {
+    let profiles = d.profiles.iter().map(|p| ProfileView { id: p.id, name: p.name.clone(), slot: p.slot, unsaved: profiles::is_unsaved(p, &d.slots) }).collect();
+    let used = d.profiles.iter().filter(|p| p.slot.is_some()).count();
+    ProfilesView { profiles, loaded: d.loaded, startup, free_slot: used < slots::MAX_SLOTS as usize }
+}
+
 pub fn mm(scale: &Analog, threshold: u8) -> f32 {
     (scale.mm(threshold) * 10.0).round() / 10.0
 }
@@ -1405,11 +1405,11 @@ mod tests {
     fn replugging_the_same_keyboard_keeps_unsaved_edits() {
         let shared: settings::Shared = Default::default();
         let mut d = Device::new(shared.clone()).unwrap();
-        d.attach("A", 0x0266);
+        d.adopt("A", 0x0266);
         d.data_mut().unwrap().driver_mode = true;
-        d.attach("A", 0x0266);
+        d.adopt("A", 0x0266);
         assert!(d.data().driver_mode);
-        d.attach("B", 0x0266);
+        d.adopt("B", 0x0266);
         assert!(!d.data().driver_mode);
     }
 
