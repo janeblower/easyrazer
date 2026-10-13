@@ -94,7 +94,7 @@ fn main() {
                             }
                             let _ = handle.emit("devices", ());
                         }
-                        if statuses.is_empty() {
+                        if state.boards.is_empty() {
                             let _ = handle.emit("status", commands::idle_status(&state, None, synapse));
                         }
                         for status in statuses {

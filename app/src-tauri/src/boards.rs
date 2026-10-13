@@ -69,6 +69,11 @@ impl Boards {
         guard(&self.boards).get(id).map(|b| b.device.clone())
     }
 
+    /// No keyboard met this session; a board merely busy still counts.
+    pub fn is_empty(&self) -> bool {
+        guard(&self.boards).is_empty()
+    }
+
     pub fn all(&self) -> Vec<(String, Arc<Mutex<Device>>)> {
         guard(&self.boards).iter().map(|(id, b)| (id.clone(), b.device.clone())).collect()
     }
@@ -194,6 +199,16 @@ mod tests {
         assert!(changed);
         let boards_map = boards.boards.lock().unwrap();
         assert!(boards_map["A"].connected && !boards_map["B"].connected);
+    }
+
+    #[test]
+    fn a_registry_of_busy_boards_is_not_empty() {
+        let boards = Boards::new().unwrap();
+        assert!(boards.is_empty());
+        let device = Arc::new(Mutex::new(Device::new(Default::default()).unwrap()));
+        boards.boards.lock().unwrap().insert("A".into(), Board { device: device.clone(), container: None, connected: true });
+        let _held = device.lock().unwrap();
+        assert!(!boards.is_empty() && boards.statuses(false).0.is_empty());
     }
 
     #[test]
