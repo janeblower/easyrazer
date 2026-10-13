@@ -14,7 +14,8 @@ use crate::device::next_macro_id;
 use crate::profiles;
 use crate::settings::{DeviceData, Macro, Profile, Rapid, SnapTap};
 
-const FORMAT: u32 = 1;
+/// 2: layers as factory changes, grouped values; 1 still reads.
+const FORMAT: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileFile {
@@ -29,9 +30,12 @@ pub struct ProfileFile {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Exported {
     pub name: String,
+    #[serde(with = "crate::stored::snapshot")]
     pub data: Snapshot,
+    #[serde(with = "crate::stored::grouped")]
     pub rapid: BTreeMap<u8, Rapid>,
     pub snap_tap: SnapTap,
+    #[serde(default, with = "crate::stored::colors")]
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -84,7 +88,7 @@ pub fn parse(text: &str) -> Result<ProfileFile, Refused> {
         return Err(Refused::Format);
     }
     let f: ProfileFile = serde_json::from_value(v).map_err(|e| Refused::Broken(e.to_string()))?;
-    if f.format != FORMAT {
+    if !(1..=FORMAT).contains(&f.format) {
         return Err(Refused::Broken(format!("format {}", f.format)));
     }
     Ok(f)
@@ -193,7 +197,7 @@ mod tests {
         d.macros.insert(0x8001, mac("other"));
         let p = with_profile(&mut d, "Game", &[(1, key(100, play(0x8000)))], &[]);
         let f = export(&d, p).unwrap();
-        assert_eq!((f.format, f.pid.as_str(), f.profile.name.as_str()), (1, "0266", "Game"));
+        assert_eq!((f.format, f.pid.as_str(), f.profile.name.as_str()), (FORMAT, "0266", "Game"));
         assert_eq!(f.macros.keys().copied().collect::<Vec<_>>(), [0x8000]);
         let json = serde_json::to_string(&f).unwrap();
         assert!(!json.contains("\"slot\"") && !json.contains("\"written\""));
@@ -248,11 +252,11 @@ mod tests {
     #[test]
     fn only_a_newer_numeric_format_is_a_format_refusal() {
         let file = |format: &str| format!(r#"{{"format":{format},"pid":"0266","model":"x","profile":{{"name":"a","data":{{"normal":{{}},"hypershift":{{}},"look":null}},"rapid":{{}},"snap_tap":{{}},"custom":null}},"macros":{{}}}}"#);
-        assert!(matches!(parse(&file("2")), Err(Refused::Format)));
+        assert!(matches!(parse(&file("3")), Err(Refused::Format)));
         for bad in ["null", r#""1""#, "0", "true"] {
             assert!(matches!(parse(&file(bad)), Err(Refused::Broken(_))), "{bad}");
         }
-        assert!(parse(&file("1")).is_ok());
+        assert!(parse(&file("1")).is_ok() && parse(&file("2")).is_ok());
     }
 
     #[test]
@@ -360,7 +364,7 @@ mod tests {
     #[test]
     fn bad_files_are_refused() {
         assert!(matches!(parse("not json"), Err(Refused::Broken(_))));
-        assert!(matches!(parse(r#"{"format":2,"pid":"0266","model":"x","profile":{"name":"a","data":{"normal":{},"hypershift":{},"look":null},"rapid":{},"snap_tap":{},"custom":null},"macros":{}}"#), Err(Refused::Format)));
+        assert!(matches!(parse(r#"{"format":3,"pid":"0266","model":"x","profile":{"name":"a","data":{"normal":{},"hypershift":{},"look":null},"rapid":{},"snap_tap":{},"custom":null},"macros":{}}"#), Err(Refused::Format)));
         let mut d = board(0x0266);
         let before = d.clone();
         let f = parse(r#"{"format":1,"pid":"FFFF","model":"x","profile":{"name":"a","data":{"normal":{},"hypershift":{},"look":null},"rapid":{},"snap_tap":{},"custom":null},"macros":{}}"#).unwrap();

@@ -11,6 +11,7 @@ mod focus;
 mod i18n;
 mod profiles;
 mod settings;
+mod stored;
 mod transfer;
 mod tray;
 mod wheel;

@@ -59,12 +59,15 @@ pub struct Profile {
     pub name: String,
     /// Flash slot 1–5 the profile is written to.
     pub slot: Option<u8>,
+    #[serde(with = "crate::stored::snapshot")]
     pub data: Snapshot,
     /// Rapid Trigger per fwID; works only in driver mode.
+    #[serde(with = "crate::stored::grouped")]
     pub rapid: BTreeMap<u8, Rapid>,
     /// Works only in driver mode.
     pub snap_tap: SnapTap,
     /// Last painted custom layout, kept while another effect is applied.
+    #[serde(with = "crate::stored::colors")]
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -119,6 +122,7 @@ pub struct DeviceData {
     /// Order of the list and of Fn+Menu.
     pub profiles: Vec<Profile>,
     pub loaded: Option<u32>,
+    #[serde(with = "crate::stored::slots")]
     pub slots: BTreeMap<u8, Snapshot>,
     pub next_profile_id: u32,
     pub macros: BTreeMap<u16, Macro>,
@@ -354,7 +358,7 @@ pub fn save(s: &Settings) -> Result<(), String> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
+    let text = crate::stored::to_text(s)?;
     let tmp = p.with_file_name("settings.json.tmp");
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
@@ -613,5 +617,18 @@ mod tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.devices["K"].name.as_deref(), Some("Desk"));
         assert_eq!(back.last_device.as_deref(), Some("K"));
+    }
+    #[test]
+    fn saves_a_profile_compactly() {
+        let layer = || (1..=103u8).filter_map(|k| Some((k, crate::stored::factory(k)?))).collect::<BTreeMap<_, _>>();
+        let snap = Snapshot { normal: layer(), hypershift: layer(), look: None };
+        let rapid = (1..=103).map(|k| (k, Rapid { enabled: true, press: 1.0, release: 1.0 })).collect();
+        let custom = Some((1..=103).map(|k| (k, [255, 64, 128])).collect());
+        let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), custom };
+        let d = DeviceData { pid: 0x0266, profiles: vec![p], slots: BTreeMap::from([(1, snap)]), ..Default::default() };
+        let s = Settings { devices: BTreeMap::from([("K".into(), d)]), ..Default::default() };
+        let text = crate::stored::to_text(&s).unwrap();
+        assert!(text.lines().count() < 80, "{text}");
+        assert_eq!(parse(&text), s);
     }
 }
