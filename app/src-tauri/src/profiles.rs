@@ -9,13 +9,13 @@ use razer_core::devices::DeviceSpec;
 use razer_core::profiles::{self as slots, Snapshot};
 use razer_core::transport::{Error, Transport};
 
-use crate::settings::{Profile, Settings, SnapTap};
+use crate::settings::{DeviceData, Profile, SnapTap};
 
 /// Reads uncached listed slots, drops gone ones, imports slots no profile owns.
 pub fn sync_slots(
     t: &impl Transport,
     d: &DeviceSpec,
-    s: &mut Settings,
+    s: &mut DeviceData,
     keys: &[u8],
     startup: u8,
     fallback_name: &dyn Fn(u8) -> String,
@@ -57,7 +57,7 @@ pub fn sync_slots(
 }
 
 /// Profile `id` into profile 0, from what it holds now (`base`); returns what it holds after.
-pub fn load(t: &impl Transport, d: &DeviceSpec, s: &Settings, id: u32, base: &Snapshot, menu: bool) -> Result<Snapshot, Error> {
+pub fn load(t: &impl Transport, d: &DeviceSpec, s: &DeviceData, id: u32, base: &Snapshot, menu: bool) -> Result<Snapshot, Error> {
     let p = s.profile(id).ok_or_else(|| Error::BadArgument(format!("no profile {id}")))?;
     let want = if menu { p.data.with_menu_override() } else { p.data.clone() };
     slots::write(t, d, LIVE, base, &want)
@@ -91,7 +91,7 @@ pub fn is_unsaved(p: &Profile, slots: &BTreeMap<u8, Snapshot>) -> bool {
 }
 
 /// The profile after the loaded one, round the list.
-pub fn next(s: &Settings) -> Option<u32> {
+pub fn next(s: &DeviceData) -> Option<u32> {
     let i = s.profiles.iter().position(|p| Some(p.id) == s.loaded)?;
     s.profiles.get((i + 1) % s.profiles.len()).map(|p| p.id)
 }
@@ -101,7 +101,7 @@ fn missing(id: u32) -> Error {
 }
 
 /// Names differing only in case or surrounding spaces count as the same.
-pub fn name_taken(s: &Settings, name: &str, except: Option<u32>) -> bool {
+pub fn name_taken(s: &DeviceData, name: &str, except: Option<u32>) -> bool {
     let key = name.trim().to_lowercase();
     s.profiles.iter().any(|p| Some(p.id) != except && p.name.trim().to_lowercase() == key)
 }
@@ -112,7 +112,7 @@ pub fn numbered(n: usize) -> String {
 }
 
 /// `base` with the first `suffix(n)` no profile uses; the base is cut so the suffix always fits the slot.
-pub fn free_name(s: &Settings, base: &str, suffix: impl Fn(usize) -> String) -> String {
+pub fn free_name(s: &DeviceData, base: &str, suffix: impl Fn(usize) -> String) -> String {
     (1..)
         .map(|n| {
             let tail = suffix(n);
@@ -129,7 +129,7 @@ pub fn free_name(s: &Settings, base: &str, suffix: impl Fn(usize) -> String) -> 
 }
 
 /// Copy of `from` without a slot, right after it.
-pub fn copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
+pub fn copy(s: &mut DeviceData, from: u32, name: String) -> Option<u32> {
     let i = s.profiles.iter().position(|p| p.id == from)?;
     let mut name = slots::fit_name(&name);
     if name.is_empty() {
@@ -142,21 +142,21 @@ pub fn copy(s: &mut Settings, from: u32, name: String) -> Option<u32> {
 }
 
 /// Fitted to the slot's name; returns the slot whose name must be written too.
-pub fn rename(s: &mut Settings, id: u32, name: &str) -> Result<Option<u8>, Error> {
+pub fn rename(s: &mut DeviceData, id: u32, name: &str) -> Result<Option<u8>, Error> {
     let p = s.profile_mut(id).ok_or_else(|| missing(id))?;
     p.name = slots::fit_name(name);
     Ok(p.slot)
 }
 
 /// `05:04` on the profile's slot; returns it.
-pub fn set_startup(t: &impl Transport, s: &Settings, id: u32) -> Result<u8, Error> {
+pub fn set_startup(t: &impl Transport, s: &DeviceData, id: u32) -> Result<u8, Error> {
     let k = s.profile(id).ok_or_else(|| missing(id))?.slot.ok_or_else(|| Error::BadArgument("profile has no slot".into()))?;
     slots::activate(t, k)?;
     Ok(k)
 }
 
 /// Unlists the slot, switching the startup slot away from it first; returns the startup slot after.
-pub fn free_slot(t: &impl Transport, s: &mut Settings, id: u32, startup: u8) -> Result<u8, Error> {
+pub fn free_slot(t: &impl Transport, s: &mut DeviceData, id: u32, startup: u8) -> Result<u8, Error> {
     let k = s.profile(id).ok_or_else(|| missing(id))?.slot.ok_or_else(|| Error::BadArgument("profile has no slot".into()))?;
     let listed = slots::list(t)?;
     // How the firmware behaves without any profile is unknown.
@@ -178,7 +178,7 @@ pub fn free_slot(t: &impl Transport, s: &mut Settings, id: u32, startup: u8) -> 
 }
 
 /// Removes a profile that holds no slot, loading a neighbour if it was loaded.
-pub fn remove(s: &mut Settings, id: u32) -> Result<(), Error> {
+pub fn remove(s: &mut DeviceData, id: u32) -> Result<(), Error> {
     if s.profiles.len() <= 1 {
         return Err(Error::BadArgument("the only profile cannot be deleted".into()));
     }
@@ -191,7 +191,7 @@ pub fn remove(s: &mut Settings, id: u32) -> Result<(), Error> {
 }
 
 /// Writes the profile to its slot, taking a free one if it has none; returns the slot.
-pub fn write_slot(t: &impl Transport, d: &DeviceSpec, s: &mut Settings, id: u32, keys: &[u8]) -> Result<u8, Error> {
+pub fn write_slot(t: &impl Transport, d: &DeviceSpec, s: &mut DeviceData, id: u32, keys: &[u8]) -> Result<u8, Error> {
     let p = s.profile(id).ok_or_else(|| missing(id))?.clone();
     let k = match p.slot {
         Some(k) => k,
@@ -235,13 +235,13 @@ mod tests {
         format!("Slot {k}")
     }
 
-    fn create(s: &mut Settings, name: &str) -> Option<u32> {
+    fn create(s: &mut DeviceData, name: &str) -> Option<u32> {
         let from = s.loaded?;
         copy(s, from, name.into())
     }
 
-    fn synced(kb: &FakeKeyboard) -> Settings {
-        let mut s = Settings::default();
+    fn synced(kb: &FakeKeyboard) -> DeviceData {
+        let mut s = DeviceData::default();
         sync_slots(kb, spec(), &mut s, KEYS, 1, &name, |_, _, _| {}).unwrap();
         s
     }
@@ -252,7 +252,7 @@ mod tests {
         slots::create(&kb, 3).unwrap();
         kb.names.borrow_mut().insert(3, vec![0x41; 200]);
         let mut seen = Vec::new();
-        let mut s = Settings::default();
+        let mut s = DeviceData::default();
         sync_slots(&kb, spec(), &mut s, KEYS, 1, &name, |n, total, a| seen.push((n, total, a.is_some()))).unwrap();
         let all = 2 * 2 * KEYS.len();
         assert_eq!(seen.last(), Some(&(all, all, false)), "progress covers both slots");
@@ -269,7 +269,7 @@ mod tests {
         let kb = FakeKeyboard::new(keys);
         let (fn_id, fn_data) = razer_core::binding::encode(razer_core::binding::factory(slots::LEFT_SHIFT)).unwrap();
         kb.edit(1, 1, slots::LEFT_SHIFT, |a| (a.fn_id, a.fn_data) = (fn_id, fn_data.clone()));
-        let mut s = Settings::default();
+        let mut s = DeviceData::default();
         sync_slots(&kb, spec(), &mut s, keys, 1, &name, |_, _, _| {}).unwrap();
         let p = s.loaded_profile().unwrap();
         assert_eq!(p.data.hypershift[&slots::LEFT_SHIFT].fn_data, [razer_core::binding::SNAP_TAP_CODE]);
@@ -543,7 +543,7 @@ mod tests {
         let id = s.profiles.iter().find(|p| p.slot == Some(2)).unwrap().id;
         assert_eq!(set_startup(&kb, &s, id).unwrap(), 2);
         assert_eq!(kb.active.get(), 2);
-        let free = Settings { profiles: vec![Profile { slot: None, ..s.profile(id).unwrap().clone() }], ..Default::default() };
+        let free = DeviceData { profiles: vec![Profile { slot: None, ..s.profile(id).unwrap().clone() }], ..Default::default() };
         assert!(set_startup(&kb, &free, id).is_err());
     }
 }

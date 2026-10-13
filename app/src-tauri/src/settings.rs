@@ -1,7 +1,7 @@
 //! EasyRazer's own settings: `%APPDATA%\EasyRazer\settings.json`.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use razer_core::lighting::Rgb;
 use razer_core::macros::Event;
@@ -106,35 +106,30 @@ pub const DEV_LOG_SIZES: std::ops::RangeInclusive<usize> = 1000..=50_000;
 /// Settings from before per-model storage hold the profiles of the only model supported then.
 const LEGACY_MODEL: u16 = 0x0266;
 
-/// Profiles and macros of a model the app is not connected to: thresholds and slot caches
-/// mean nothing to another model.
+/// Profiles, macros and mode of one physical keyboard.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ModelData {
+pub struct DeviceData {
+    pub pid: u16,
+    /// The host engine types instead of the firmware.
+    pub driver_mode: bool,
+    /// Order of the list and of Fn+Menu.
     pub profiles: Vec<Profile>,
     pub loaded: Option<u32>,
     pub slots: BTreeMap<u8, Snapshot>,
     pub next_profile_id: u32,
     pub macros: BTreeMap<u16, Macro>,
+    /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
     pub snap_tap_bound: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// PID of the model the profiles, slots and macros below belong to.
-    pub model: Option<u16>,
-    /// The same for every other model seen, by PID.
-    pub other_models: BTreeMap<u16, ModelData>,
-    /// Order of the list and of Fn+Menu.
-    pub profiles: Vec<Profile>,
-    pub loaded: Option<u32>,
-    /// What each flash slot holds, as last read or written.
-    pub slots: BTreeMap<u8, Snapshot>,
-    pub next_profile_id: u32,
-    pub macros: BTreeMap<u16, Macro>,
-    /// The host engine types instead of the firmware.
-    pub driver_mode: bool,
+    /// By firmware serial, see [`device_id`].
+    pub devices: BTreeMap<String, DeviceData>,
+    /// By PID: data saved before it was kept per keyboard, until a keyboard of that model claims it.
+    pub legacy: BTreeMap<u16, DeviceData>,
     /// Ask before writing the keyboard's flash.
     pub confirm_write: bool,
     #[serde(deserialize_with = "lenient")]
@@ -145,8 +140,6 @@ pub struct Settings {
     pub autostart_offered: bool,
     /// Interface language; `None` until the window picks one from the system.
     pub language: Option<String>,
-    /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
-    pub snap_tap_bound: bool,
     pub dev_mode: bool,
     /// Entries the developer log keeps while the mode is on.
     pub dev_log_size: usize,
@@ -161,33 +154,91 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { model: None, other_models: BTreeMap::new(), profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), driver_mode: false, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, snap_tap_bound: false, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None }
+        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None }
     }
 }
 
+/// Where a keyboard's data is kept: its firmware serial, or its model when the serial is empty.
+pub fn device_id(pid: u16, serial: &str) -> String {
+    match serial.trim() {
+        "" => format!("{pid:04x}:noserial"),
+        s => s.to_string(),
+    }
+}
+
+/// The layout before per-keyboard data: one model's data at the top, the others by PID.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct V1 {
+    model: Option<u16>,
+    other_models: BTreeMap<u16, DeviceData>,
+    profiles: Vec<Profile>,
+    loaded: Option<u32>,
+    slots: BTreeMap<u8, Snapshot>,
+    next_profile_id: u32,
+    macros: BTreeMap<u16, Macro>,
+    driver_mode: bool,
+    snap_tap_bound: bool,
+}
+
+/// Moves data of the old layout in `text` to `legacy`; a file already in the new layout is left as it is.
+/// `None` when the old data is damaged.
+fn migrate(mut s: Settings, text: &str) -> Option<Settings> {
+    if !s.devices.is_empty() || !s.legacy.is_empty() {
+        return Some(s);
+    }
+    let v1 = serde_json::from_str::<V1>(text).ok()?;
+    let top = DeviceData {
+        pid: 0,
+        driver_mode: v1.driver_mode,
+        profiles: v1.profiles,
+        loaded: v1.loaded,
+        slots: v1.slots,
+        next_profile_id: v1.next_profile_id,
+        macros: v1.macros,
+        snap_tap_bound: v1.snap_tap_bound,
+    };
+    for (pid, d) in v1.other_models.into_iter().chain([(v1.model.unwrap_or(LEGACY_MODEL), top)]) {
+        if d.profiles.is_empty() && d.macros.is_empty() && d.slots.is_empty() {
+            continue;
+        }
+        s.legacy.insert(pid, DeviceData { pid, driver_mode: v1.driver_mode, ..d });
+    }
+    Some(s)
+}
+
+/// The old file stays next to the new one: a downgrade or a bad migration must not cost the app-only profiles.
+fn backup(p: &Path, s: &Settings, text: &str) {
+    let v1 = p.with_file_name("settings.json.v1");
+    if s.devices.is_empty() && !s.legacy.is_empty() && !v1.exists() {
+        let _ = std::fs::write(v1, text);
+    }
+}
+
+static NO_DATA: DeviceData = DeviceData { pid: 0, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
+
 impl Settings {
-    /// Puts the data of `pid` in place of the current model's; `true` when the model changed.
-    pub fn switch_model(&mut self, pid: u16) -> bool {
-        let current = self.model.unwrap_or(LEGACY_MODEL);
-        self.model = Some(pid);
-        if current == pid {
-            return false;
-        }
-        let incoming = self.other_models.remove(&pid).unwrap_or_default();
-        let outgoing = ModelData {
-            profiles: std::mem::replace(&mut self.profiles, incoming.profiles),
-            loaded: std::mem::replace(&mut self.loaded, incoming.loaded),
-            slots: std::mem::replace(&mut self.slots, incoming.slots),
-            next_profile_id: std::mem::replace(&mut self.next_profile_id, incoming.next_profile_id),
-            macros: std::mem::replace(&mut self.macros, incoming.macros),
-            snap_tap_bound: std::mem::replace(&mut self.snap_tap_bound, incoming.snap_tap_bound),
-        };
-        if outgoing != ModelData::default() {
-            self.other_models.insert(current, outgoing);
-        }
-        true
+    /// The data of keyboard `id`; empty when there is none.
+    pub fn device(&self, id: Option<&str>) -> &DeviceData {
+        id.and_then(|id| self.devices.get(id)).unwrap_or(&NO_DATA)
     }
 
+    pub fn device_mut(&mut self, id: Option<&str>) -> Option<&mut DeviceData> {
+        self.devices.get_mut(id?)
+    }
+
+    /// Creates the data of keyboard `id` on first sight; the first keyboard of a model takes its legacy data.
+    pub fn claim(&mut self, id: &str, pid: u16) -> bool {
+        if self.devices.contains_key(id) {
+            return false;
+        }
+        let d = self.legacy.remove(&pid).unwrap_or_else(|| DeviceData { pid, ..Default::default() });
+        self.devices.insert(id.to_string(), d);
+        true
+    }
+}
+
+impl DeviceData {
     /// Binds the Snap Tap switch to Fn+LShift in every profile, once: one removed later stays removed.
     pub fn bind_snap_tap_once(&mut self) {
         if self.snap_tap_bound {
@@ -232,13 +283,18 @@ fn path() -> Option<PathBuf> {
 
 /// A damaged file is set aside, not overwritten: the next save would destroy the only copy of the app-only profiles.
 pub fn load() -> Settings {
-    let Some(p) = path() else { return Settings::default() };
-    let Ok(text) = std::fs::read_to_string(&p) else { return Settings::default() };
-    serde_json::from_str(&text).unwrap_or_else(|_| {
+    path().map_or_else(Settings::default, |p| load_from(&p))
+}
+
+fn load_from(p: &Path) -> Settings {
+    let Ok(text) = std::fs::read_to_string(p) else { return Settings::default() };
+    let Some(s) = serde_json::from_str(&text).ok().and_then(|s| migrate(s, &text)) else {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let _ = std::fs::rename(&p, p.with_file_name(format!("settings.json.bad-{secs}")));
-        Settings::default()
-    })
+        let _ = std::fs::rename(p, p.with_file_name(format!("settings.json.bad-{secs}")));
+        return Settings::default();
+    };
+    backup(p, &s, &text);
+    s
 }
 
 #[cfg(test)]
@@ -273,25 +329,106 @@ mod tests {
         Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), custom: None }
     }
 
+    const OLD: &str = r#"{"model":614,"profiles":[{"id":1,"name":"p1","slot":1,"data":{"normal":{},"hypershift":{},"look":null}}],
+        "loaded":1,"next_profile_id":1,"driver_mode":true,
+        "other_models":{"678":{"profiles":[{"id":7,"name":"p7","slot":null,"data":{"normal":{},"hypershift":{},"look":null}}],"next_profile_id":7}}}"#;
+
     #[test]
-    fn each_model_keeps_its_own_profiles() {
-        let mut s = Settings { profiles: vec![profile(1, Some(1))], loaded: Some(1), next_profile_id: 1, ..Default::default() };
-        assert!(!s.switch_model(LEGACY_MODEL), "old settings belong to the V2 Analog");
-        assert!(s.switch_model(0x02A6));
-        assert!(s.profiles.is_empty() && s.loaded.is_none());
-        s.profiles = vec![profile(7, None)];
-        assert!(s.switch_model(LEGACY_MODEL));
-        assert_eq!((s.profiles[0].id, s.loaded), (1, Some(1)));
-        assert!(s.switch_model(0x02A6));
-        assert_eq!(s.profiles[0].id, 7);
-        assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
+    fn device_id_is_the_serial_or_the_model() {
+        assert_eq!(device_id(0x0266, " PM2322F51200078 "), "PM2322F51200078");
+        assert_eq!(device_id(0x0266, ""), "0266:noserial");
     }
 
     #[test]
-    fn a_model_without_data_leaves_nothing_behind() {
+    fn old_files_move_to_legacy_by_model() {
+        let s = migrate(parse(OLD), OLD).unwrap();
+        assert!(s.devices.is_empty());
+        let v2 = &s.legacy[&0x0266];
+        assert_eq!((v2.pid, v2.profiles[0].id, v2.loaded, v2.driver_mode), (0x0266, 1, Some(1), true));
+        assert_eq!((s.legacy[&678].pid, s.legacy[&678].profiles[0].id), (678, 7));
+        assert!(s.legacy[&678].driver_mode, "the mode was global");
+    }
+
+    #[test]
+    fn files_from_before_per_model_data_belong_to_the_v2_analog() {
+        let text = r#"{"profiles": [{"id": 3, "name": "a", "slot": 2, "data": {"normal": {}, "hypershift": {}, "look": null}}]}"#;
+        let s = migrate(parse(text), text).unwrap();
+        assert_eq!((s.legacy[&LEGACY_MODEL].profiles[0].id, s.legacy[&LEGACY_MODEL].profiles[0].slot), (3, Some(2)));
+    }
+
+    #[test]
+    fn a_model_without_data_is_not_kept() {
+        let text = r#"{"model":678,"driver_mode":true}"#;
+        assert!(migrate(parse(text), text).unwrap().legacy.is_empty());
+    }
+
+    #[test]
+    fn first_keyboard_of_a_model_claims_its_legacy() {
+        let mut s = migrate(parse(OLD), OLD).unwrap();
+        assert!(s.claim("PM1", 0x0266));
+        assert_eq!(s.devices["PM1"].profiles[0].id, 1);
+        assert!(!s.legacy.contains_key(&0x0266));
+        assert!(!s.claim("PM1", 0x0266), "already there");
+    }
+
+    #[test]
+    fn second_keyboard_of_a_model_starts_empty() {
+        let mut s = migrate(parse(OLD), OLD).unwrap();
+        s.claim("PM1", 0x0266);
+        assert!(s.claim("PM2", 0x0266));
+        assert!(s.devices["PM2"].profiles.is_empty());
+        assert_eq!((s.devices["PM2"].pid, s.devices["PM1"].profiles.len()), (0x0266, 1));
+    }
+
+    #[test]
+    fn legacy_survives_a_round_trip() {
+        let mut s = migrate(parse(OLD), OLD).unwrap();
+        s.claim("PM1", 0x0266);
+        let text = serde_json::to_string(&s).unwrap();
+        let back = migrate(parse(&text), &text).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(back.legacy[&678].profiles[0].id, 7);
+    }
+
+    #[test]
+    fn new_files_are_not_migrated_again() {
         let mut s = Settings::default();
-        s.switch_model(0x02A6);
-        assert!(s.other_models.is_empty());
+        s.claim("PM1", 0x0266);
+        let text = serde_json::to_string(&s).unwrap();
+        assert_eq!(migrate(parse(&text), &text).unwrap(), s);
+    }
+
+    #[test]
+    fn a_damaged_old_file_is_set_aside() {
+        let dir = std::env::temp_dir().join(format!("easyrazer-damaged-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let text = r#"{"profiles":[{"id":1,"name":"p1","slot":300}],"confirm_write":false}"#;
+        std::fs::write(&p, text).unwrap();
+        assert_eq!(load_from(&p), Settings::default());
+        assert!(!p.exists(), "the next save must not overwrite the only copy");
+        let bad: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().into_string().unwrap()).collect();
+        assert!(bad.iter().any(|n| n.starts_with("settings.json.bad-")), "{bad:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn backup_is_written_once() {
+        let dir = std::env::temp_dir().join(format!("easyrazer-backup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let v1 = dir.join("settings.json.v1");
+        let s = migrate(parse(OLD), OLD).unwrap();
+        backup(&p, &s, OLD);
+        assert_eq!(std::fs::read_to_string(&v1).unwrap(), OLD);
+        backup(&p, &s, "{}");
+        assert_eq!(std::fs::read_to_string(&v1).unwrap(), OLD, "never overwritten");
+        let mut claimed = s.clone();
+        claimed.claim("PM1", 0x0266);
+        std::fs::remove_file(&v1).unwrap();
+        backup(&p, &claimed, OLD);
+        assert!(!v1.exists(), "new layout: nothing to back up");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -300,31 +437,26 @@ mod tests {
         p.data = snap(&[31, 44]);
         let (fn_id, fn_data) = binding::encode(binding::factory(44)).unwrap();
         p.data.hypershift.insert(44, RawKey { thr_low: 0, thr_high: 0, fn_id, fn_data });
-        let mut s = Settings { profiles: vec![p], ..Default::default() };
+        let mut s = DeviceData { profiles: vec![p], ..Default::default() };
         s.bind_snap_tap_once();
         assert_eq!(s.profiles[0].data.hypershift[&44].fn_data, [binding::SNAP_TAP_CODE]);
         let plain = s.profiles[0].data.normal[&44].clone();
         s.profiles[0].data.hypershift.insert(44, plain);
         s.bind_snap_tap_once();
         assert_eq!(s.profiles[0].data.hypershift[&44].fn_id, 2, "removed later, it stays removed");
-        assert!(parse(&serde_json::to_string(&s).unwrap()).snap_tap_bound);
+        assert!(serde_json::from_str::<DeviceData>(&serde_json::to_string(&s).unwrap()).unwrap().snap_tap_bound);
     }
 
     #[test]
     fn profiles_round_trip() {
-        let s = Settings { profiles: vec![profile(1, Some(1)), profile(2, None)], loaded: Some(2), slots: [(1, snap(&[31]))].into(), next_profile_id: 2, ..Default::default() };
+        let d = DeviceData { pid: 0x0266, profiles: vec![profile(1, Some(1)), profile(2, None)], loaded: Some(2), slots: [(1, snap(&[31]))].into(), next_profile_id: 2, ..Default::default() };
+        let s = Settings { devices: [("PM1".into(), d)].into(), ..Default::default() };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
     }
 
     #[test]
-    fn a_profile_missing_new_fields_still_parses() {
-        let s = parse(r#"{"profiles": [{"id": 3, "name": "a", "slot": 2, "data": {"normal": {}, "hypershift": {}, "look": null}}]}"#);
-        assert_eq!((s.profiles.len(), s.profiles[0].id, s.profiles[0].slot), (1, 3, Some(2)));
-    }
-
-    #[test]
     fn profile_ids_are_never_reused() {
-        let mut s = Settings::default();
+        let mut s = DeviceData::default();
         assert_eq!((s.new_profile_id(), s.new_profile_id()), (1, 2));
     }
 
@@ -339,26 +471,32 @@ mod tests {
     #[test]
     fn missing_fields_keep_their_defaults() {
         let s = parse("{\"confirm_write\": false}");
-        assert_eq!((s.driver_mode, s.confirm_write), (false, false));
+        assert_eq!((s.watch_synapse, s.confirm_write), (true, false));
     }
 
     #[test]
     fn round_trips() {
         let s = Settings {
-            model: Some(0x0266),
-            other_models: [(0x02A6, ModelData { profiles: vec![profile(2, None)], ..Default::default() })].into(),
-            profiles: vec![profile(1, Some(1))],
-            loaded: Some(1),
-            slots: BTreeMap::new(),
-            next_profile_id: 1,
-            macros: [(0x8000, Macro { name: "ab".into(), events: vec![Event::Key { key: 31, down: true }, Event::Delay { ms: 20 }], written: true })].into(),
-            driver_mode: true,
+            devices: [(
+                "PM1".into(),
+                DeviceData {
+                    pid: 0x0266,
+                    driver_mode: true,
+                    profiles: vec![profile(1, Some(1))],
+                    loaded: Some(1),
+                    slots: BTreeMap::new(),
+                    next_profile_id: 1,
+                    macros: [(0x8000, Macro { name: "ab".into(), events: vec![Event::Key { key: 31, down: true }, Event::Delay { ms: 20 }], written: true })].into(),
+                    snap_tap_bound: true,
+                },
+            )]
+            .into(),
+            legacy: [(0x02A6, DeviceData { pid: 0x02A6, profiles: vec![profile(2, None)], ..Default::default() })].into(),
             confirm_write: false,
             close_action: CloseAction::Tray,
             watch_synapse: false,
             autostart_offered: true,
             language: Some("ru".into()),
-            snap_tap_bound: true,
             dev_mode: true,
             dev_log_size: 2000,
             unverified_writes: true,
