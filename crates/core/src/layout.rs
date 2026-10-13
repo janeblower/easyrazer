@@ -315,7 +315,8 @@ mod tests {
 
     #[test]
     fn pro_tkl_keys_are_its_sensor_matrix() {
-        // The 7 × 14 matrix of the V3 Pro TKL firmware 1.04.00, `0x2001CEB0`; the TKL 8 kHz has the same.
+        // The 7 × 14 matrix of the V3 Pro TKL firmware 1.04.00, `0x2001CEB0`; the TKL 8 kHz and the Signature
+        // Edition have the same, the Low-profile TKL 8 kHz the same keys without 87.
         const MATRIX: [u8; 98] = [
             110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 123, 13, 14,
             15, 75, 80, 85, 28, 29, 76, 81, 86, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0, 30, 31, 32, 33, 34, 35, 36,
