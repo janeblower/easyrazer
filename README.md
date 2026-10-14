@@ -32,7 +32,7 @@
 - **Settings live in the keyboard.** Actuation points and profiles are written to the
   keyboard's memory and keep working with no software running at all.
 - **The firmware types, not the host.** By default the keyboard detects presses itself;
-  the host steps in only for Rapid Trigger.
+  the host steps in only where the firmware cannot, such as Rapid Trigger on the V2 Analog.
 - **Offline.** No account, no network, no telemetry.
 
 Full comparison and the reasoning behind it: [how it works](docs/en/how-it-works.md).
@@ -119,8 +119,9 @@ Windows drops input injected by ordinary apps there, so EasyRazer hands typing b
 the firmware while such a window has focus. See
 [admin windows](docs/en/how-it-works.md#admin-windows-lock-screen-uac).
 
-**Why is the actuation range narrower without Rapid Trigger?**
-In HW mode the firmware clamps it to 1.62–3.56 mm; the full 1.5–3.6 mm needs driver mode.
+**Why is the actuation range narrower in HW mode?**
+On the V2 Analog line the firmware clamps it to 1.62–3.56 mm; the full 1.5–3.6 mm needs
+driver mode. The V3 line has no such limit: 0.1–4.0 mm in both modes.
 
 ## Building from source
 

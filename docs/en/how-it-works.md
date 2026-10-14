@@ -30,6 +30,11 @@ mode when it exits, fails, or sees Synapse start.
 The trade-off: in HW mode the firmware clamps actuation to 1.62–3.56 mm; the full
 1.5–3.6 mm range needs driver mode.
 
+The Huntsman V3 line does more in firmware: in HW mode it runs Rapid Trigger itself and
+one Snap Tap pair, and actuation covers 0.1–4.0 mm in both modes. EasyRazer sends Rapid
+Trigger and the pair to the keyboard's RAM, so on these keyboards driver mode is needed
+only for Snap Tap beyond one pair or with rules other than "Last".
+
 ## Admin windows, lock screen, UAC
 
 Windows drops keys that an ordinary app injects into windows run as administrator and

@@ -46,8 +46,8 @@ After a reconnect EasyRazer, if running, restores applied values itself.
 Before the first write in a session, a backup of all keys is saved to
 `%APPDATA%\EasyRazer\backup-*.txt`.
 
-Rapid Trigger, Snap Tap and the custom colour layout exist only in the app and are
-never written to the keyboard.
+Rapid Trigger, Snap Tap and the custom colour layout are kept in the app and are never
+written to the keyboard's flash.
 
 ## HW and Driver modes
 
@@ -57,9 +57,18 @@ launch. While Synapse runs, the switch is unavailable.
 | | **HW** | **Driver** |
 |---|---|---|
 | Who types | the keyboard, as with no software | EasyRazer, from the reported key depth |
-| Actuation range | 1.62–3.56 mm (firmware limit) | 1.5–3.6 mm |
-| Rapid Trigger, Snap Tap | — | ✅ |
 | Without the app running | works | the keyboard is silent |
+
+What each mode offers depends on the keyboard line:
+
+| | Huntsman V2 Analog, Mini Analog | Huntsman V3 line 🧪 |
+|---|---|---|
+| Actuation range | HW: 1.62–3.56 mm (firmware limit); Driver: 1.5–3.6 mm | 0.1–4.0 mm in both modes; Low-profile TKL: up to 2.8 mm |
+| Rapid Trigger | Driver only, computed by the app | HW: run by the firmware; Driver: computed by the app |
+| Snap Tap | Driver only, any groups | HW: run by the firmware, one pair; Driver: any groups |
+
+On the V2 line Driver mode is needed only for Rapid Trigger and Snap Tap. On the V3 line
+HW mode covers both, with the Snap Tap limit described [below](#snap-tap).
 
 In Driver mode:
 
@@ -117,12 +126,14 @@ shared. "Apply" and "Save" send the changes of both sections at once.
 
 ### Actuation
 
-Actuation point of each key: 1.5–3.6 mm, step 0.1 mm. 1.5 mm is the most sensitive.
+Actuation point of each key, step 0.1 mm; the lower the value, the more sensitive the
+key. The range depends on the model: 1.5–3.6 mm on the V2 line, 0.1–4.0 mm on the V3 line
+(up to 2.8 mm on the Low-profile TKL).
 
 - In Driver mode the slider fills green to the depth of the first pressed key — handy
   for fitting the point to your travel. In HW mode the keyboard does not report depth.
-- In HW mode the slider marks the limits 1.62 and 3.56 mm: a point beyond them can be
-  chosen, but the keyboard will actuate at the limit — then the mark lights up.
+- V2 line, HW mode: the slider marks the limits 1.62 and 3.56 mm. A point beyond them can
+  be chosen, but the keyboard will actuate at the limit — then the mark lights up.
 - "Write" stores the values in the slot of the loaded profile; for a profile without a
   slot, in a free slot.
 - "● not applied: N" — how many keys are changed but not yet applied.
@@ -145,10 +156,16 @@ soon as it starts going up — without waiting for the actuation point.
   slider shows which way the key has to move next.
 - Keys with RT are marked "RT" on the map.
 
+Where RT runs depends on the model:
+
+- **V2 line** — only in Driver mode: these keyboards have no hardware RT, so the app
+  computes it. In HW mode the RT settings are kept but have no effect.
+- **V3 line** — in both modes: in HW mode the firmware runs it, in Driver mode the app.
+
 > [!NOTE]
-> RT works only in Driver mode and is stored in EasyRazer, not in the keyboard: the
-> Huntsman V2 Analog has no hardware RT, so the app computes it. In HW mode the RT
-> settings are kept but have no effect.
+> Either way RT is stored in EasyRazer, not in the keyboard's flash. On the V3 line the
+> app sends it to the keyboard's RAM with the loaded profile, so without the app it lasts
+> until reconnect.
 
 ### Snap Tap
 
@@ -162,7 +179,11 @@ do not cancel each other while strafing.
 - Group keys are marked on the map with a coloured strip on top.
 - Fn+LShift turns Snap Tap on and off without opening the window; it can be moved to
   another combination in [Hypershift](#hypershift).
-- Snap Tap is stored in EasyRazer and works only in Driver mode.
+- Snap Tap is stored in EasyRazer, not in the keyboard's flash.
+- **V2 line** — works only in Driver mode.
+- **V3 line** — in Driver mode any groups work. In HW mode the firmware runs a single
+  pair: the first two keys of the first group, and only with the "Last" rule; the rest is
+  kept but has no effect.
 
 > [!CAUTION]
 > Some games (for example, CS2 on Valve servers) forbid Snap Tap — turn it off there.
