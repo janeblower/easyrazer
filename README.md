@@ -27,7 +27,7 @@
 
 ## Why EasyRazer
 
-- **Tiny.** One 8 MB `.exe` and one process, ~33 MB of RAM in the tray. Synapse 4 is
+- **Tiny.** One 9 MB `.exe` and one process, ~31 MB of RAM in the tray. Synapse 4 is
   ~1.2 GB on disk, 13 processes and ~1.75 GB of RAM.
 - **Settings live in the keyboard.** Actuation points and profiles are written to the
   keyboard's memory and keep working with no software running at all.
