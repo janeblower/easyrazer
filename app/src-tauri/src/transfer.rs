@@ -296,7 +296,7 @@ mod tests {
         let mut src = board(0x0266);
         let deep = src_spec.analog.threshold(src_spec.analog.range[1]);
         let p = with_profile(&mut src, "Game", &[(KEPT, key(deep, None)), (MISSING, key(100, None))], &[(MISSING, key(100, None))]);
-        src.profiles[0].rapid.insert(MISSING, Rapid { enabled: true, press: 0.3, release: 0.3 });
+        src.profiles[0].rapid.insert(MISSING, Rapid { enabled: true, press: 0.3, release: 0.3, continuous: false });
         src.profiles[0].custom = Some([(MISSING, [1, 2, 3]), (KEPT, [4, 5, 6])].into());
         let f = export(&src, p).unwrap();
         let mut dst = board(TARGET);

@@ -2,13 +2,15 @@
 //!
 //! `02:1A`: `mode profile (fwID on up:u16 down:u16)*`, mode `00` for u16 BE distances at
 //! 1638 per 0.1 mm; a zero distance keeps the stored one. `fwID` `FF` sets every key and the
-//! profile's own switch, which per-key entries leave alone. `02:21`: `profile on fwID fwID`, one pair.
+//! profile's own switch, which per-key entries leave alone. `02:20`: `profile on`, continuous
+//! Rapid Trigger for the whole profile. `02:21`: `profile on fwID fwID`, one pair.
 //! Profile 0 is RAM only.
 
 use crate::packet::{self, Command};
 use crate::transport::{Error, Transport, exchange};
 
 pub(crate) const SET_RAPID: Command = Command::new(0x02, 0x1A);
+pub(crate) const SET_CONTINUOUS: Command = Command::new(0x02, 0x20);
 pub(crate) const SET_SNAP_TAP: Command = Command::new(0x02, 0x21);
 const U16: u8 = 0;
 const ALL_KEYS: u8 = 0xFF;
@@ -36,6 +38,10 @@ pub fn set_rapid(t: &impl Transport, profile: u8, keys: &[(u8, Option<(f32, f32)
         exchange(t, SET_RAPID, args.len() as u8, &args)?;
     }
     Ok(())
+}
+
+pub fn set_continuous(t: &impl Transport, profile: u8, on: bool) -> Result<(), Error> {
+    exchange(t, SET_CONTINUOUS, 2, &[profile, on.into()]).map(|_| ())
 }
 
 /// One Snap Tap pair, or none.
@@ -75,6 +81,13 @@ mod tests {
         set_rapid(&kb, 0, &keys).unwrap();
         let sizes: Vec<usize> = kb.rapid_sent.borrow().iter().map(Vec::len).collect();
         assert_eq!(sizes, [80, 80, 2 + 5 * ENTRY], "the switch entry rides in the first packet");
+    }
+
+    #[test]
+    fn continuous_switch() {
+        let kb = FakeKeyboard::new(&[A]);
+        set_continuous(&kb, 0, true).unwrap();
+        assert_eq!(kb.continuous.borrow()[&0], 1);
     }
 
     #[test]

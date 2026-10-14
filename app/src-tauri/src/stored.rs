@@ -290,8 +290,8 @@ mod tests {
 
     #[test]
     fn groups_equal_values() {
-        let on = Rapid { enabled: true, press: 1.0, release: 1.0 };
-        let fine = Rapid { enabled: true, press: 0.7, release: 0.7 };
+        let on = Rapid { enabled: true, press: 1.0, release: 1.0, continuous: false };
+        let fine = Rapid { enabled: true, press: 0.7, release: 0.7, continuous: false };
         let mut rapid: BTreeMap<u8, Rapid> = (1..=103).map(|k| (k, on)).collect();
         rapid.insert(31, fine);
         let mut custom: BTreeMap<u8, Rgb> = (1..=103).map(|k| (k, [255, 64, 128])).collect();
@@ -410,7 +410,7 @@ mod tests {
     }
     #[test]
     fn prints_f32_as_written() {
-        let rapid: BTreeMap<u8, Rapid> = [(1, Rapid { enabled: true, press: 0.7, release: 0.4 })].into();
+        let rapid: BTreeMap<u8, Rapid> = [(1, Rapid { enabled: true, press: 0.7, release: 0.4, continuous: false })].into();
         let text = to_text(&G { rapid, custom: None }).unwrap();
         assert!(text.contains(r#""press": 0.7, "release": 0.4"#), "{text}");
     }

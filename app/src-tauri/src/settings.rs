@@ -31,6 +31,8 @@ pub struct Rapid {
     pub enabled: bool,
     pub press: f32,
     pub release: f32,
+    #[serde(default)]
+    pub continuous: bool,
 }
 
 /// Snap Tap of a profile; the groups stay while it is off, so Fn+LShift brings them back.
@@ -622,7 +624,7 @@ mod tests {
     fn saves_a_profile_compactly() {
         let layer = || (1..=103u8).filter_map(|k| Some((k, crate::stored::factory(k)?))).collect::<BTreeMap<_, _>>();
         let snap = Snapshot { normal: layer(), hypershift: layer(), look: None };
-        let rapid = (1..=103).map(|k| (k, Rapid { enabled: true, press: 1.0, release: 1.0 })).collect();
+        let rapid = (1..=103).map(|k| (k, Rapid { enabled: true, press: 1.0, release: 1.0, continuous: false })).collect();
         let custom = Some((1..=103).map(|k| (k, [255, 64, 128])).collect());
         let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), custom };
         let d = DeviceData { pid: 0x0266, profiles: vec![p], slots: BTreeMap::from([(1, snap)]), ..Default::default() };

@@ -19,6 +19,7 @@ import type {
   MacroState,
   ProfilesView,
   Rapid,
+  RapidMode,
   SnapTap,
   System,
   WriteResult,
@@ -56,7 +57,7 @@ const layout = ref<KeyView[]>([]);
 let layoutModel: string | null = null;
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
 const edits = ref<KeyMap<number>>({}); // mm, not applied yet
-const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4 };
+const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4, continuous: false };
 const rapidBase = ref<KeyMap<Rapid>>({}); // as last applied
 const rapidEdits = ref<KeyMap<Rapid>>({}); // not applied yet
 const splitOn = ref(false);
@@ -181,14 +182,18 @@ function takeHypershift(h: Hypershift) {
 }
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
-const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;
+const sameRapid = (a: Rapid, b: Rapid) =>
+  a.enabled === b.enabled && a.press === b.press && a.release === b.release && a.continuous === b.continuous;
+const modeOf = (r: Rapid): RapidMode => (r.enabled ? (r.continuous ? "crt" : "rt") : "off");
 
 const selectedRapid = computed(() => {
   const r = Array.from(selection.value, rapidOf);
-  return { enabled: common(r.map((x) => x.enabled)), press: common(r.map((x) => x.press)), release: common(r.map((x) => x.release)) };
+  return { mode: common(r.map(modeOf)), press: common(r.map((x) => x.press)), release: common(r.map((x) => x.release)) };
 });
 const split = computed(() => splitOn.value || Array.from(selection.value, rapidOf).some((r) => r.release !== r.press));
-const rapidKeys = computed(() => new Set(layout.value.map((k) => k.key).filter((k) => rapidOf(k).enabled)));
+const rapidKeys = computed(
+  () => new Map(layout.value.filter((k) => rapidOf(k.key).enabled).map((k) => [k.key, modeOf(rapidOf(k.key)).toUpperCase()])),
+);
 const rapidEdited = computed(() => new Set(Object.keys(rapidEdits.value).map(Number)));
 
 function setRapid(change: (r: Rapid) => Rapid) {
@@ -955,7 +960,7 @@ onUnmounted(() => {
               :edited="mapEdited"
               :errors="section === 'actuation' ? errors : bindErrors"
               :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-              :rapid="rapidHere && section === 'actuation' ? rapidKeys : new Set()"
+              :rapid="rapidHere && section === 'actuation' ? rapidKeys : new Map()"
               :snap="rapidHere && section === 'actuation' ? snapColors(snap) : {}"
               :rapid-edited="rapidEdited"
               :hs-values="mapHs"
@@ -978,7 +983,7 @@ onUnmounted(() => {
                   :driver="driver"
                   :analog="status?.analog ?? null"
                   @set="setValue"
-                  @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+                  @rapid="(m) => setRapid((r) => ({ ...r, enabled: m !== 'off', continuous: m === 'off' ? r.continuous : m === 'crt' }))"
                   @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
                   @release="(v) => setRapid((r) => ({ ...r, release: v }))"
                   @split="onSplit"

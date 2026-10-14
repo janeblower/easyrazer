@@ -3,10 +3,10 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ours } from "../keyboard";
-import type { Analog } from "../types";
+import type { Analog, RapidMode } from "../types";
 
 interface RapidView {
-  enabled: boolean | null;
+  mode: RapidMode | null;
   press: number | null;
   release: number | null;
 }
@@ -25,7 +25,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   set: [mm: number];
-  rapid: [on: boolean];
+  rapid: [mode: RapidMode];
   press: [mm: number];
   release: [mm: number];
   split: [on: boolean];
@@ -35,10 +35,10 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value) * 10) / 10;
-const checked = (e: Event) => (e.target as HTMLInputElement).checked;
 // The host runs Rapid Trigger in driver mode, some firmwares in HW mode too.
 const rtHere = computed(() => props.driver || !!props.analog?.firmware_rapid);
-const rtOn = computed(() => rtHere.value && props.rapid.enabled === true);
+const rtOn = computed(() => rtHere.value && props.rapid.mode != null && props.rapid.mode !== "off");
+const MODES: RapidMode[] = ["off", "rt", "crt"];
 const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
 
 const V2: Analog = { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false };
@@ -114,20 +114,7 @@ const rtSliders = computed(() => {
 <template>
   <div class="flex gap-6 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
-      <span class="text-sm h-5">{{ $t("actuation.title") }}, {{ $t("actuation.unit") }}</span>
-      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
-        <button
-          v-for="on in [false, true]"
-          :key="String(on)"
-          class="text-xs px-2 py-0 seg-btn"
-          :class="hsSplit === on && (on ? 'border-hs bg-hs text-ink' : 'seg-on')"
-          :aria-pressed="hsSplit === on"
-          :disabled="!count"
-          @click="emit('hsSplit', on)"
-        >
-          {{ on ? "Hypershift" : $t("actuation.shared") }}
-        </button>
-      </span>
+      <span class="text-sm flex h-6 items-center">{{ $t("actuation.title") }}, {{ $t("actuation.unit") }}</span>
       <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
       <div class="flex w-[144px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
         <div class="flex flex-col gap-1 items-center">
@@ -191,6 +178,19 @@ const rtSliders = computed(() => {
           <span class="text-xs text-hs">Hypershift</span>
         </div>
       </div>
+      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="hsSplit === on && (on ? 'border-hs bg-hs text-ink' : 'seg-on')"
+          :aria-pressed="hsSplit === on"
+          :disabled="!count"
+          @click="emit('hsSplit', on)"
+        >
+          {{ on ? "Hypershift" : $t("actuation.shared") }}
+        </button>
+      </span>
     </div>
     <svg class="h-[200px] self-center" viewBox="0 0 120 200" aria-hidden="true">
       <g class="press chev">
@@ -212,29 +212,18 @@ const rtSliders = computed(() => {
       <path d="M34 172H86" style="stroke: var(--error)" stroke-width="3" stroke-linecap="round" />
     </svg>
     <div class="flex flex-col gap-1 items-center">
-      <label class="switch text-sm h-5 whitespace-nowrap">
-        <input
-          type="checkbox"
-          role="switch"
-          :checked="rapid.enabled === true"
-          :indeterminate="count > 0 && rapid.enabled === null"
-          :disabled="!count || !rtHere"
-          @change="emit('rapid', checked($event))"
-        />
-        {{ $t("rapid.title") }}, {{ $t("actuation.unit") }}
-      </label>
-      <span v-if="!rtHere" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
-      <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
+      <span class="inline-flex h-6" role="group" :title="$t('rapid.title')">
         <button
-          v-for="on in [false, true]"
-          :key="String(on)"
+          v-for="m in MODES"
+          :key="m"
           class="text-xs px-2 py-0 seg-btn"
-          :class="{ 'seg-on': split === on }"
-          :aria-pressed="split === on"
-          :disabled="!rtOn"
-          @click="emit('split', on)"
+          :class="{ 'seg-on': rapid.mode === m }"
+          :aria-pressed="rapid.mode === m"
+          :title="$t(`rapid.${m}Hint`)"
+          :disabled="!count || !rtHere"
+          @click="emit('rapid', m)"
         >
-          {{ $t(on ? "rapid.separate" : "rapid.together") }}
+          {{ $t(`rapid.${m}`) }}
         </button>
       </span>
       <div class="flex w-[144px]" :class="split ? 'justify-between' : 'justify-center'">
@@ -258,6 +247,20 @@ const rtSliders = computed(() => {
           <span class="text-xs text-muted" :class="{ invisible: !split }">{{ $t(`rapid.${s.kind}`) }}</span>
         </div>
       </div>
+      <span v-if="!rtHere" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
+      <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="{ 'seg-on': split === on }"
+          :aria-pressed="split === on"
+          :disabled="!rtOn"
+          @click="emit('split', on)"
+        >
+          {{ $t(on ? "rapid.separate" : "rapid.together") }}
+        </button>
+      </span>
     </div>
   </div>
 </template>

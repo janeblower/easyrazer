@@ -46,6 +46,8 @@ pub struct FakeKeyboard {
     pub rapid_sent: RefCell<Vec<Vec<u8>>>,
     /// `02:21` per profile: `on fwID fwID`.
     pub snap: RefCell<BTreeMap<u8, [u8; 3]>>,
+    /// `02:20` per profile.
+    pub continuous: RefCell<BTreeMap<u8, u8>>,
     reply: RefCell<Report>,
 }
 
@@ -91,6 +93,7 @@ impl FakeKeyboard {
             macros: RefCell::new(BTreeMap::new()),
             rapid_sent: RefCell::new(Vec::new()),
             snap: RefCell::new(BTreeMap::new()),
+            continuous: RefCell::new(BTreeMap::new()),
             reply: RefCell::new([0; packet::LEN + 1]),
         }
     }
@@ -229,6 +232,10 @@ impl FakeKeyboard {
             }
             (0x02, 0x1A) if a.len() >= 2 && (a.len() - 2).is_multiple_of(6) => {
                 self.rapid_sent.borrow_mut().push(a.to_vec());
+                (OK, a.to_vec())
+            }
+            (0x02, 0x20) => {
+                self.continuous.borrow_mut().insert(a[0], a[1]);
                 (OK, a.to_vec())
             }
             (0x02, 0x21) => {

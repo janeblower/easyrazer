@@ -70,7 +70,7 @@ async function mockBackend() {
   const state = {
     values: all(() => 2) as Record<number, unknown>,
     unsaved: [] as number[],
-    rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4 })) as Record<number, unknown>,
+    rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4, continuous: false })) as Record<number, unknown>,
     snap: {
       enabled: true,
       groups: [

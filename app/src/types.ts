@@ -111,7 +111,10 @@ export interface Rapid {
   enabled: boolean;
   press: number;
   release: number;
+  continuous: boolean;
 }
+
+export type RapidMode = "off" | "rt" | "crt";
 
 export type SnapRule = "last" | "neutral" | "deeper";
 

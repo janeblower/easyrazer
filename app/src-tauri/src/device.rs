@@ -405,6 +405,8 @@ impl Device {
         let keys: Vec<(u8, Option<(f32, f32)>)> =
             editable_keys(d.layout).into_iter().map(|k| (k, p.rapid.get(&k).filter(|r| r.enabled).map(|r| (r.press, r.release)))).collect();
         trigger::set_rapid(t, actuation::LIVE, &keys)?;
+        // The firmware has one continuous switch per profile, not per key.
+        trigger::set_continuous(t, actuation::LIVE, p.rapid.values().any(|r| r.enabled && r.continuous))?;
         trigger::set_snap_tap(t, actuation::LIVE, firmware_pair(&p.snap_tap))
     }
 
@@ -1251,7 +1253,7 @@ fn engine_config(
         c.fn_bind[k as usize] = binding::decode(r.fn_id, &r.fn_data);
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
-        c.rapid[k as usize] = Some(Trigger { press: scale.units(r.press), release: scale.units(r.release) });
+        c.rapid[k as usize] = Some(Trigger { press: scale.units(r.press), release: scale.units(r.release), continuous: r.continuous });
     }
     c
 }
@@ -1524,15 +1526,15 @@ mod tests {
     fn engine_config_from_press_points_and_rapid_trigger() {
         let thresholds = BTreeMap::from([(31, 43), (33, 0)]);
         let rapid = BTreeMap::from([
-            (31, Rapid { enabled: true, press: 0.4, release: 0.1 }),
-            (33, Rapid { enabled: false, press: 0.4, release: 0.4 }),
+            (31, Rapid { enabled: true, press: 0.4, release: 0.1, continuous: true }),
+            (33, Rapid { enabled: false, press: 0.4, release: 0.4, continuous: false }),
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
         let c = engine_config(v2(), &thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
-        assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
+        assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12, continuous: true }));
         assert_eq!(c.rapid[33], None);
         assert_eq!((c.repeat_delay, c.repeat_interval), t);
     }

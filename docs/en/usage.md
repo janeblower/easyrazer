@@ -153,15 +153,18 @@ key. The range depends on the model: 1.5–3.6 mm on the V2 line, 0.1–4.0 mm o
 The key actuates again as soon as it starts going down after a lift, and releases as
 soon as it starts going up — without waiting for the actuation point.
 
-- The "Rapid Trigger" checkbox and sensitivity 0.1–1.0 mm: how far the key has to move
-  to actuate or release.
+- "Off / RT / CRT" and sensitivity 0.1–1.0 mm: how far the key has to move
+  to actuate or release. RT works only below the actuation point. CRT (Continuous Rapid
+  Trigger) works along the whole travel once the key has actuated, until it is fully up.
+  On the V3 line in HW mode the firmware has one CRT switch per profile: if any key is
+  set to CRT, every RT key works as CRT.
 - "Separate press and release" — a separate slider for release.
 - The sliders show the travel of the first pressed key since the last extreme point.
   When going down, the fill grows from the top to the slider; when going up, from the
   slider upward; once it reaches the end, the key has actuated or released. With separate
   settings the slider of whatever happens next fills, and the arrow at the actuation
   slider shows which way the key has to move next.
-- Keys with RT are marked "RT" on the map.
+- Keys with RT are marked "RT" or "CRT" on the map.
 
 Where RT runs depends on the model:
 
