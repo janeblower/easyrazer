@@ -10,7 +10,7 @@
 | Huntsman Mini Analog (`1532:0282`) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Huntsman V3 Pro (`1532:02A6`, `1532:02CF`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro TKL (`1532:02A7`, `1532:02D0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
-| Huntsman V3 Pro Mini (`1532:02B0`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
+| Huntsman V3 Pro Mini (`1532:02B0`) | ✅ | ✅ | ✅ | — | — | — | ✅ |
 | Huntsman V3 TKL 8KHz (`1532:02E5`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman Signature Edition (`1532:02D8`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
 | Huntsman V3 Pro Low-profile TKL 8KHz (`1532:02E6`) | 🧪 | 🧪 | 🧪 | — | — | — | 🧪 |
@@ -41,7 +41,11 @@ is the same. No custom lighting effect.
 
 ## Huntsman V3 Pro Mini
 
-Same as the V3 Pro, with a 60% key map; no custom lighting effect.
+Tested on hardware ([#45](https://github.com/janeblower/easyrazer/issues/45), firmware 2.00):
+actuation, Rapid Trigger and Snap Tap in HW and driver mode, the lighting effects and
+brightness. Writes still go to the keyboard's RAM only, after allowing it in Settings.
+Switching to driver mode makes profile 1 the startup one, and it stays so. Profile names
+are not read yet; no custom lighting effect.
 
 ## Huntsman V3 TKL 8KHz
 
