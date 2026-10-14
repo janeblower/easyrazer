@@ -2,7 +2,8 @@
 
 [Русская версия](../../../ru/devices/huntsman-v3-analog/protocol.md)
 
-Not verified on hardware. Sources: the Synapse 4 module for `678` (`1532:02A6`),
+Checked on hardware on the V3 Pro Mini only (firmware 2.00, [#45](https://github.com/janeblower/easyrazer/issues/45)), see its
+section. Sources: the Synapse 4 module for `678` (`1532:02A6`),
 firmware 1.03.00 ([firmware.md](firmware.md)) and the OpenRazer driver. Where
 there is a single source, it is noted. Packet format — [in the overview](../README.md#control-packet).
 
@@ -13,7 +14,7 @@ there is a single source, it is noted. Packet format — [in the overview](../RE
 | Huntsman V3 Pro | `1532:02A6` | full size, 104 | 1.03.00 | not checked |
 | Huntsman V3 Pro TKL | `1532:02A7` | TKL without PrtSc / ScrLk / Pause, 84 | 1.04.00 | not checked |
 | Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
-| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
+| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | checked on 2.00 |
 | Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
 | Huntsman V3 Pro 8KHz | `1532:02CF` | as the V3 Pro | 1.03.00 | not checked |
 | Huntsman Signature Edition | `1532:02D8` | as the V3 Pro TKL | 1.02.00 | not checked |
@@ -42,7 +43,9 @@ Per the firmware descriptors.
 - Mode `00:04` / `00:84`: `00` hardware, `03` driver, `01` is a flag, probably
   bootloader entry, as on V2. On switching to driver mode the firmware makes
   profile 1 active and saves that to flash if another one was active
-  ([details](firmware.md#mode-switch)). Snap Tap (`02:21`) is disabled in driver mode.
+  ([details](firmware.md#mode-switch)); on the V3 Pro Mini `05:84` goes from `02` to `01`
+  and stays `01` after leaving driver mode and after a replug. Snap Tap (`02:21`) is
+  disabled in driver mode.
 - Profile `0` is RAM only for every command, as on V2.
 - Profiles: `0` is the working copy in RAM, `1`–`6` are persistent. Synapse uses 5
   slots (`OBMSlots: 5`) and stores profile names in the firmware, including the first.
@@ -128,10 +131,9 @@ rows, whether the buttons and the dial are lit is unknown.
 
 ## Not verified
 
-- Everything in this file is without hardware.
-- First on hardware: `05:84` before and after `00:04 03` with startup slot 2 — it
-  should become `01`; whether that survives a replug. And whether `02:92` after
-  `00:04` reads what was written to profile 0.
+- Everything not checked on the V3 Pro Mini.
+- Whether `02:92` after `00:04` reads what was written to profile 0.
+- Profile names (`05:88`): the app shows none on the V3 Pro Mini, the reply is not seen yet.
 - Reports `04`, `05`, `07` on MI_01 and interface MI_05.
 - fwIDs of the dial and the three buttons, and whether they are lit.
 - Effect `0A`, flag `02:1F`, the meaning of bytes `+1`, `+2` in threshold entries.
@@ -153,6 +155,9 @@ Per the firmware the protocol is that of the V3 Pro, with these differences.
 - 60% board: sensor matrix 5 × 14, 61 keys in ANSI. No F-row, arrows, navigation
   block, numpad, media buttons or dial.
 - Lighting matrix size is unknown, so the custom effect is not offered.
+- Checked on hardware, firmware 2.00: `02:92` / `02:12` thresholds, RT `02:1A`, Snap Tap
+  `02:21` and lighting `0F:02` / `0F:04` on profile 0; the depth stream `0B` and the
+  mode switch above. `05:81` lists six slots: `06 01 02 03 04 05 06`.
 
 ## Huntsman V3 TKL 8KHz
 

@@ -15,7 +15,7 @@ Conclusions without direct verification are marked "probably". Commands are in
 | Huntsman V3 Pro | `1532:02A6` | full size, 104 | 1.03.00 | not checked |
 | Huntsman V3 Pro TKL | `1532:02A7` | TKL without PrtSc / ScrLk / Pause, 84 | 1.04.00 | not checked |
 | Huntsman V3 Pro TKL 8KHz | `1532:02D0` | as the V3 Pro TKL | 1.04.00 | not checked |
-| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | not checked |
+| Huntsman V3 Pro Mini | `1532:02B0` | 60%, 61 | 2.01.00 | checked on 2.00 |
 | Huntsman V3 TKL 8KHz | `1532:02E5` | TKL, 87 | 1.02.00 | not checked |
 | Huntsman V3 Pro 8KHz | `1532:02CF` | as the V3 Pro | 1.03.00 | not checked |
 | Huntsman Signature Edition | `1532:02D8` | as the V3 Pro TKL | 1.02.00 | not checked |
@@ -177,7 +177,8 @@ further switches write nothing; leaving driver mode does not bring the old profi
 back. So the profile the keyboard starts with without the app silently becomes 1, and
 an app that sets another startup slot and enters driver mode again costs one erase
 each time. Mode `01` sets only `0x2002686D` (probably a request to reboot into the
-bootloader).
+bootloader). Confirmed on the V3 Pro Mini, firmware 2.00: the startup profile
+becomes 1 and stays so after leaving driver mode and after a replug.
 
 ## Key matrix
 
