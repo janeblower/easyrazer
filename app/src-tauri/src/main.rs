@@ -14,6 +14,7 @@ mod settings;
 mod stored;
 mod transfer;
 mod tray;
+mod wake;
 mod wheel;
 
 use std::panic::AssertUnwindSafe;
@@ -77,19 +78,27 @@ fn main() {
                     }));
                 }
             });
+            let events = wake::listen();
             std::thread::spawn(move || {
                 // The first connect reads the keyboard; a shown window should see it. The timeout keeps
                 // the keyboard restored if the page never loads.
                 if shown {
                     let _ = ready.recv_timeout(Duration::from_secs(10));
                 }
-                // A board busy when the list changed gets its listener on a later poll.
+                // A board busy when the list changed gets its listener on a later step.
                 let mut unsynced = std::collections::BTreeSet::new();
+                let (mut woke, mut synapse_was) = (true, None);
                 loop {
                     // One failed step must not end the watching for the rest of the session.
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         let state = handle.state::<commands::AppState>();
-                        let (statuses, changed, synapse) = commands::poll(&state);
+                        let synapse = state.settings().watch_synapse && device::synapse_running();
+                        let retry = wake::take_retry();
+                        if !woke && !retry && unsynced.is_empty() && synapse_was == Some(synapse) {
+                            return;
+                        }
+                        synapse_was = Some(synapse);
+                        let (statuses, changed) = commands::poll(&state, synapse);
                         if changed {
                             unsynced.extend(state.boards.all().into_iter().map(|(id, _)| id));
                         }
@@ -112,7 +121,13 @@ fn main() {
                             let _ = handle.emit("status", &status);
                         }
                     }));
-                    std::thread::sleep(Duration::from_secs(2));
+                    // Synapse has no start event to wait for; the rest wakes the loop.
+                    woke = events.recv_timeout(Duration::from_secs(2)).is_ok();
+                    if woke {
+                        // A keyboard plugs in as a burst of interfaces; one step after them sees it whole.
+                        std::thread::sleep(Duration::from_millis(500));
+                        while events.try_recv().is_ok() {}
+                    }
                 }
             });
             Ok(())

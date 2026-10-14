@@ -29,6 +29,7 @@ use crate::engine::{self, EngineHandle, MenuListener, Sink};
 use crate::i18n;
 use crate::profiles;
 use crate::transfer;
+use crate::wake;
 use crate::settings::{self, DeviceData, Macro, Rapid, Shared, SnapTap};
 
 pub type Control = Logged<HidTransport>;
@@ -316,6 +317,7 @@ impl Device {
             })
         {
             self.restore_error = Some(i18n::tf(&self.lang(), "backend.restoreProfile", &[("error", &e)]));
+            wake::retry();
             return;
         }
         self.ram = None;
@@ -367,6 +369,7 @@ impl Device {
                 // Profile 0 holds a partial write, so the next load must write every key.
                 self.ram = Some(Snapshot::default());
                 self.restore_error = Some(i18n::tf(&self.lang(), "backend.restoreProfile", &[("error", &e.to_string())]));
+                wake::retry();
             }
         }
     }
@@ -1035,7 +1038,10 @@ impl Device {
                 let _ = control::set_led(t, control::LED_GAME, false, false);
                 self.restore();
             }
-            Err(e) => self.restore_error = Some(i18n::tf(&self.lang(), "backend.engine", &[("error", &e)])),
+            Err(e) => {
+                self.restore_error = Some(i18n::tf(&self.lang(), "backend.engine", &[("error", &e)]));
+                wake::retry();
+            }
         }
     }
 

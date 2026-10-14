@@ -110,7 +110,10 @@ impl EngineHandle {
             let (engine, stop, sink) = (engine.clone(), stop.clone(), sink.clone());
             std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
-                stop.store(true, Ordering::SeqCst);
+                // Not stopped by its owner: the watcher replaces the engine.
+                if !stop.swap(true, Ordering::SeqCst) {
+                    crate::wake::wake();
+                }
                 let out = lock(&engine).release_all();
                 emit(&out, &sink);
             })
