@@ -223,14 +223,22 @@ fn main() {
 }
 
 fn sink(h: AppHandle, id: String) -> Sink {
-    Arc::new(move |o| {
-        if let Output::Depth { depth, travel, down } = o {
-            // Up to 1 kHz while a key moves: skip it while nobody sees the window, but not the release.
-            if let Some(w) = h.get_webview_window("main")
+    // Up to 1 kHz while a key moves, and an emit can take a millisecond: the reader must not wait for it.
+    let (depth_tx, depth_rx) = mpsc::channel::<(u8, u8, bool)>();
+    let (dh, did) = (h.clone(), id.clone());
+    std::thread::spawn(move || {
+        while let Ok((depth, travel, down)) = depth_rx.recv() {
+            // Skipped while nobody sees the window, but not the release.
+            if let Some(w) = dh.get_webview_window("main")
                 && (depth == 0 || w.is_visible().unwrap_or(false))
             {
-                let _ = w.emit("key-depth", (&id, depth, travel, down));
+                let _ = w.emit("key-depth", (&did, depth, travel, down));
             }
+        }
+    });
+    Arc::new(move |o| {
+        if let Output::Depth { depth, travel, down } = o {
+            let _ = depth_tx.send((depth, travel, down));
             return;
         }
         let (h, id) = (h.clone(), id.clone());
