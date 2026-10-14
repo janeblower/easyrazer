@@ -116,7 +116,8 @@ the keys that changed. Before the first write of a session a backup goes to
 
 **Why doesn't Rapid Trigger work in admin windows or on the lock screen?**
 Windows drops input injected by ordinary apps there, so EasyRazer hands typing back to
-the firmware while such a window has focus. See
+the firmware while such a window has focus. The V2 Analog line has no hardware Rapid
+Trigger; the V3 line keeps it there. See
 [admin windows](docs/en/how-it-works.md#admin-windows-lock-screen-uac).
 
 **Why is the actuation range narrower in HW mode?**

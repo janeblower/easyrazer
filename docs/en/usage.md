@@ -46,6 +46,10 @@ After a reconnect EasyRazer, if running, restores applied values itself.
 Before the first write in a session, a backup of all keys is saved to
 `%APPDATA%\EasyRazer\backup-*.txt`.
 
+Models not yet tested on hardware (🧪 in [supported keyboards](supported.md)) get only
+"Apply", and only after turning on "Write to keyboards not yet checked on hardware" in
+Settings.
+
 Rapid Trigger, Snap Tap and the custom colour layout are kept in the app and are never
 written to the keyboard's flash.
 
@@ -74,15 +78,18 @@ In Driver mode:
 
 - In windows run as administrator, on the lock screen and in UAC prompts the keyboard
   switches to HW for that time: Windows does not let keystrokes from a regular app
-  through there. Ctrl+Alt+Del does not work.
+  through there. On the V2 line Rapid Trigger and Snap Tap stop there; on the V3 line
+  the firmware keeps Rapid Trigger and one Snap Tap pair. Ctrl+Alt+Del does not work.
 - The app returns the keyboard to HW on exit, on a crash and when Synapse starts. If the
   process is killed forcibly (Task Manager), the keyboard is silent until the cable is
   reconnected.
 - Key repeat comes from the Windows keyboard settings.
-- EasyRazer handles the Fn layer from the profile's [Hypershift](#hypershift) layer;
-  media keys and the volume wheel work as usual.
-- The keyboard sends the volume wheel as a mouse wheel and EasyRazer turns it into
-  volume. Games that read the mouse via Raw Input still see it as scrolling.
+- V2 line: EasyRazer handles the Fn layer from the profile's [Hypershift](#hypershift)
+  layer; media keys and the volume wheel work as usual. The keyboard sends the volume
+  wheel as a mouse wheel and EasyRazer turns it into volume. Games that read the mouse
+  via Raw Input still see it as scrolling.
+- V3 line: entering Driver mode makes the firmware switch the startup profile (⏻) to
+  slot 1.
 
 Why the modes exist: [how it works](how-it-works.md#hw-mode-and-driver-mode).
 
@@ -138,8 +145,8 @@ key. The range depends on the model: 1.5–3.6 mm on the V2 line, 0.1–4.0 mm o
   slot, in a free slot.
 - "● not applied: N" — how many keys are changed but not yet applied.
 - A red key — the keyboard did not confirm the value; details in the tooltip.
-- The Fn key itself is not configurable; the actuation point of the Fn layer is the
-  "Separate for Hypershift" switch under the slider.
+- The Fn key itself is not configurable. On models with [Hypershift](#hypershift) the
+  actuation point of the Fn layer is the "Separate for Hypershift" switch under the slider.
 
 ### Rapid Trigger
 
@@ -190,6 +197,8 @@ do not cancel each other while strafing.
 
 ### Bindings
 
+Huntsman V2 Analog and Mini Analog.
+
 A binding is changed on one key at a time: pick it with a click. What it does in the
 normal layer:
 
@@ -208,6 +217,8 @@ EasyRazer, in HW by the firmware; those written to memory work in both modes.
 
 ### Hypershift
 
+Huntsman V2 Analog and Mini Analog.
+
 The "Hypershift · Fn+K" card sets the action for each combination with Fn: key, mouse,
 media, macro, system (brightness, sleep, game mode, M indicator, next profile, Snap Tap)
 or disabled.
@@ -224,6 +235,8 @@ Fn+F9 blinks M, Fn+Menu — next profile, Fn+LShift — Snap Tap.
   Snap Tap.
 
 ### Macros
+
+Huntsman V2 Analog only.
 
 A macro is a sequence of presses and releases of keys, mouse buttons and pauses.
 **Record** captures keyboard presses together with the pauses between them (the "With
@@ -244,7 +257,8 @@ unwritten macro, EasyRazer offers to write it; writing a binding writes the macr
 
 Built-in keyboard effects with live preview: off, static, breathing (1 colour, 2 colours,
 random), spectrum, wave (direction, speed), reactive (key or ripple), starlight, fire,
-custom layout. A shared brightness slider.
+custom layout. A shared brightness slider. The set depends on the model; see
+[supported keyboards](supported.md).
 
 - **Apply** — the effect turns on now and on every EasyRazer launch.
 - **Write** (💾) — the effect is written to keyboard memory and works without the app.
@@ -252,6 +266,8 @@ custom layout. A shared brightness slider.
   height and palette are baked into the firmware; only brightness works.
 
 ### Custom layout
+
+Huntsman V2 Analog only.
 
 Each key and zone gets its own colour. Zones on the map: case trim (the frame around the
 keys), media keys and wheel (above the numpad), wrist rest (the strip at the bottom).
@@ -263,7 +279,8 @@ while EasyRazer runs, including minimized to the tray. The last layout is rememb
 ### Windows Dynamic Lighting
 
 If Windows "Dynamic Lighting" controls the lighting, keyboard effects are not visible —
-the app warns and offers to turn it off. The switch is also on the tab.
+the app warns and offers to turn it off. The switch is also on the tab. The V3 TKL 8KHz
+and V3 Pro Low-profile TKL 8KHz do not support Dynamic Lighting.
 
 ## Settings and tray
 
