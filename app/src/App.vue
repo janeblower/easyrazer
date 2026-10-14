@@ -82,6 +82,8 @@ const progress = ref<[number, number] | null>(null); // reads done, reads in all
 const docked = computed(() => (dev.mode && dev.panel?.open && dev.panel.dock !== "window" ? dev.panel.dock : null));
 const editableCount = computed(() => layout.value.filter((k) => k.editable).length);
 const busy = ref(false);
+// The backend sends a status only when something changed, so one dropped while busy would be lost.
+let missed = false;
 const profiles = ref<ProfilesView | null>(null);
 const removing = ref<number | null>(null); // asked before deleting
 const switching = ref<(() => void | Promise<void>) | null>(null); // asked before dropping edits
@@ -426,8 +428,11 @@ function revert() {
 async function onStatus(s: DeviceStatus) {
   if (!ours(s.id)) return;
   if (s.error) showError(s.error);
-  // Mid read or apply the table is being rewritten; the next event brings a fresh status anyway.
-  if (busy.value) return;
+  // Mid read or apply the table is being rewritten; the status is asked again once it is done.
+  if (busy.value) {
+    missed = true;
+    return;
+  }
   status.value = s;
   if (s.model && s.model !== layoutModel) {
     layoutModel = s.model;
@@ -443,6 +448,13 @@ async function onStatus(s: DeviceStatus) {
   if (act.revert) revert();
   if (act.load) await load();
 }
+
+watch(busy, (b) => {
+  if (b || !missed) return;
+  missed = false;
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- refresh and load call each other
+  void refresh();
+});
 
 async function refresh() {
   try {

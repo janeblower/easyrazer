@@ -18,7 +18,7 @@ use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, Ma
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
 use crate::settings::{self, CloseAction, DevPanel, DevWindow, Rapid, Settings, Shared, SnapTap};
-use crate::{autostart, dynamic_lighting, i18n, tray};
+use crate::{autostart, dynamic_lighting, i18n, tray, wake};
 
 pub struct AppState {
     pub settings: Shared,
@@ -133,14 +133,12 @@ impl From<Written> for WriteResult {
     }
 }
 
-/// One watcher step: the Synapse check runs outside every lock, `tasklist` takes a few hundred ms.
-pub fn poll(state: &AppState) -> (Vec<Status>, bool, bool) {
-    let watch = state.settings().watch_synapse;
-    let synapse = watch && device::synapse_running();
+/// One watcher step; `true` when the keyboards changed.
+pub fn poll(state: &AppState, synapse: bool) -> (Vec<Status>, bool) {
     let mut changed = state.hooks.get().is_some_and(|h| state.boards.discover(&state.settings, h, synapse));
     let (out, moved) = state.boards.statuses(synapse);
     changed |= moved;
-    (out, changed, synapse)
+    (out, changed)
 }
 
 /// The status of a keyboard not attached this session, or of none at all.
@@ -399,12 +397,17 @@ pub async fn set_close_action(state: State<'_, AppState>, action: CloseAction) -
 
 #[tauri::command]
 pub async fn set_watch_synapse(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.update_settings(|s| s.watch_synapse = on)
+    state.update_settings(|s| s.watch_synapse = on)?;
+    wake::wake();
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn set_unverified_writes(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    state.update_settings(|s| s.unverified_writes = on)
+    state.update_settings(|s| s.unverified_writes = on)?;
+    // The engine starts only for keyboards the app may write to.
+    wake::wake();
+    Ok(())
 }
 
 #[tauri::command]

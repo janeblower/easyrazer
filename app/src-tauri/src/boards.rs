@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::device::{Device, Progress, Status};
 use crate::engine::Sink;
 use crate::settings::{self, Settings, Shared};
+use crate::wake;
 
 pub struct Board {
     pub device: Arc<Mutex<Device>>,
@@ -167,7 +168,10 @@ impl Boards {
         let mut changed = false;
         let mut out = Vec::new();
         for (id, d) in self.all() {
-            let Some(mut dev) = try_guard(&d) else { continue };
+            let Some(mut dev) = try_guard(&d) else {
+                wake::retry();
+                continue;
+            };
             let s = dev.status(synapse);
             drop(dev);
             changed |= self.set_connected(&id, s.device);
@@ -191,8 +195,14 @@ impl Boards {
         twins.retain(|c, id| self.is_connected(id) && units.iter().any(|u| u.container.as_ref() == Some(c)));
         for unit in units_to_attach(units, &held, &twins) {
             // A failed serial read would file the keyboard's data under another key; the next poll retries.
-            let Ok(t) = hid::open_control(&api, &unit) else { continue };
-            let Ok(serial) = control::serial(&t) else { continue };
+            let Ok(t) = hid::open_control(&api, &unit) else {
+                wake::retry();
+                continue;
+            };
+            let Ok(serial) = control::serial(&t) else {
+                wake::retry();
+                continue;
+            };
             let id = settings::device_id(unit.spec.pid, &serial);
             // Keyboards without a readable serial share an id; taking the live board's device would detach it.
             if self.is_connected(&id) {
@@ -210,6 +220,7 @@ impl Boards {
             // A command may hold a disconnected device for long; waiting here would stall every board.
             let Some(mut dev) = try_guard(&device) else {
                 self.set_connected(&id, false);
+                wake::retry();
                 continue;
             };
             dev.attach(unit, t, &id, (hooks.sink)(&id), (hooks.progress)(&id), synapse);
