@@ -15,9 +15,6 @@ use crate::commands::{AppState, lock};
 use crate::device::Device;
 use crate::settings::{DEV_LOG_SIZES, DevPanel, DevWindow, DeviceData, Settings};
 
-/// Log lines a bug report carries.
-const REPORT_ENTRIES: usize = 200;
-
 #[derive(Serialize)]
 pub struct DeviceInfo {
     model: String,
@@ -226,7 +223,7 @@ pub fn report(info: Option<&DeviceInfo>, s: &Settings, d: &DeviceData, entries: 
         s.language,
     );
     out.push_str("\nlog:\n");
-    for e in &entries[entries.len().saturating_sub(REPORT_ENTRIES)..] {
+    for e in entries {
         let (a, r) = if uncensored { (e.args.len(), e.reply.len()) } else { logged::public_len(e) };
         let _ = write!(out, "#{} {} {} [{}] {} <- {} {} {}ms", e.seq, e.time, e.cmd, e.size, hex_cut(&e.args, a), e.status.as_deref().unwrap_or("-"), hex_cut(&e.reply, r), e.ms);
         if e.polls > 0 {
@@ -286,10 +283,10 @@ mod tests {
     }
 
     #[test]
-    fn a_report_carries_the_last_entries() {
+    fn a_report_carries_the_whole_log() {
         let entries: Vec<Entry> = (0..250).map(|i| entry(i, "00:84", vec![], vec![3, 0])).collect();
         let r = report(None, &Settings::default(), &DeviceData::default(), &entries, false);
-        assert!(r.contains("\n#50 ") && !r.contains("\n#49 ") && r.contains("\n#249 "));
+        assert!(r.contains("\n#0 ") && r.contains("\n#249 "));
         assert!(r.contains("device: not connected"));
     }
 }
