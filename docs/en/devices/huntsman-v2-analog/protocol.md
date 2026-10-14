@@ -1,5 +1,7 @@
 # Huntsman V2 Analog line protocol
 
+[Русская версия](../../../ru/devices/huntsman-v2-analog/protocol.md)
+
 Verified on a live device (`1532:0266`, firmware 1.06 — the same one that was analyzed) or read from
 the Synapse 4 and firmware 1.06 code ([firmware.md](firmware.md)). In the "Firmware commands"
 section, items are unverified by default; in the other sections, unverified items are marked.

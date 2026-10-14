@@ -1,5 +1,7 @@
 # Keyboard models
 
+[Русская версия](../../ru/devices/README.md)
+
 Protocol and firmware, per keyboard line: models that differ only in form factor share
 one document. This page covers what the lines share and how they differ.
 

@@ -1,5 +1,7 @@
 # Huntsman V3 analog line protocol
 
+[Русская версия](../../../ru/devices/huntsman-v3-analog/protocol.md)
+
 Not verified on hardware. Sources: the Synapse 4 module for `678` (`1532:02A6`),
 firmware 1.03.00 ([firmware.md](firmware.md)) and the OpenRazer driver. Where
 there is a single source, it is noted. Packet format — [in the overview](../README.md#control-packet).

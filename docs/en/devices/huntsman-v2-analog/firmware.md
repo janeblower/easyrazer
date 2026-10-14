@@ -1,5 +1,7 @@
 # Huntsman V2 Analog line firmware
 
+[Русская версия](../../../ru/devices/huntsman-v2-analog/firmware.md)
+
 Analysis of the official Firmware Updater `v1.06.00` (firmware `1.06.00`). This is a
 reference for the protocol: no firmware code is carried over into the project.
 Addresses are for this version. Conclusions without direct verification are marked

@@ -1,5 +1,7 @@
 # Протокол аналоговой линейки Huntsman V3
 
+[English version](../../../en/devices/huntsman-v3-analog/protocol.md)
+
 На железе не проверено. Источники: модуль Synapse 4 для `678` (`1532:02A6`),
 прошивка 1.03.00 ([firmware.md](firmware.md)) и драйвер OpenRazer. Где источник
 один — помечено. Формат пакета — [в обзоре](../README.md#пакет-управления).
