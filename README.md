@@ -148,7 +148,9 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 ## Roadmap
 
 - [ ] Host-driven lighting animations
-- [ ] Game mode, gamepad
+- [ ] A proper macro editor (the current one works but is a rough draft)
+- [ ] Game mode
+- [ ] Gamepad emulation — unlikely; [open an issue](https://github.com/janeblower/easyrazer/issues) if you need it
 - [ ] Hardware-tested support for more keyboard models
 - [ ] Linux
 

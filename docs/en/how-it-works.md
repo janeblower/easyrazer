@@ -17,7 +17,7 @@ runs; opening it adds 6 × WebView2 processes, ~350 MB.
 | Network | loads device modules from `apps.razer.com` | none, works offline |
 | Who detects key presses | the host, always: Synapse sets every key to `0/0` and runs the keyboard in driver mode | the keyboard firmware by default (HW mode); the host only in driver mode, when you want Rapid Trigger on the V2 Analog line or Snap Tap beyond one pair on the V3 line |
 
-Synapse still has game mode and gamepad emulation; both are on the roadmap.
+Synapse still has game mode (on the roadmap) and gamepad emulation (unlikely).
 
 ## HW mode and driver mode
 
