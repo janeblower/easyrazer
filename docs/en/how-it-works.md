@@ -15,7 +15,7 @@ runs; opening it adds 6 × WebView2 processes, ~400 MB working set and ~200 MB p
 | Processes | 13: 11 × `RazerAppEngine`, Elevation Service, Game Manager Service | 1: `easyrazer` |
 | RAM, working set / private | ~1.75 GB / ~1.07 GB | ~31 MB / ~7 MB in the tray (+~400 MB / ~200 MB for WebView2 while the window is open) |
 | Network | loads device modules from `apps.razer.com` | none, works offline |
-| Who detects key presses | V2 Analog: always the host — Synapse sets every key to `0/0` and keeps the keyboard in driver mode while running, tray included. V3 line: going by its Synapse module, the firmware — Synapse hands it RT and Snap Tap (not verified on hardware) | the keyboard firmware by default (HW mode); the host only in driver mode, when you want Rapid Trigger on the V2 Analog line or Snap Tap beyond one pair on the V3 line |
+| Who detects key presses | V2 Analog: always the host — Synapse sets every key to `0/0` and keeps the keyboard in driver mode while running, tray included. V3 line: the host too — Synapse keeps it in driver mode while running, tray included, where the firmware types nothing; actuation, RT and Snap Tap also go to the keyboard's memory for when Synapse is closed. Each Synapse start makes slot 1 the startup profile | the keyboard firmware by default (HW mode); the host only in driver mode, when you want Rapid Trigger on the V2 Analog line or Snap Tap beyond one pair on the V3 line |
 
 Synapse still has game mode (on the roadmap) and gamepad emulation (unlikely).
 

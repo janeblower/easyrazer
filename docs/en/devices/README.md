@@ -48,8 +48,10 @@ are in the model's protocol doc.
 |---|---|---|
 | Threshold in the protocol | 1 byte, `0..255` ↔ 1.5–3.6 mm | u16 BE, 1638 = 0.1 mm, up to 4.0 mm |
 | Actuation | in the key assignment, `02:12` / `02:92` | `02:19` / `02:99`, up to 15 keys per packet; `02:12` also works, threshold is the high byte of the u16 |
-| Rapid Trigger | host only, in driver mode | in firmware: `02:1A` / `02:9A`, `02:20` |
-| Snap Tap | host only | in firmware, one key pair: `02:21` |
+| Rapid Trigger | host only, in driver mode | in firmware, HW mode only: `02:1A` / `02:9A`, `02:20` |
+| Snap Tap | host only | in firmware, HW mode only, one key pair: `02:21` |
+| Driver mode | the firmware types nothing, the host handles presses | same (V3 Pro Mini, [#45](https://github.com/janeblower/easyrazer/issues/45)) |
+| Synapse | keeps driver mode while running, tray included, and does everything on the host | same; besides, it writes actuation, RT and Snap Tap to the slot for when it is closed |
 | Depth stream (driver mode) | report `07`, 1-byte depth | report `0B`, u16 BE depth |
 | Saving to flash | deferred, on a timer | immediate, on every command to profile 1–6 |
 | Sensor matrix | 8 × 16 | 8 × 14, same fwIDs except `152` / `153` |
