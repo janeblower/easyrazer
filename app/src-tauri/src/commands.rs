@@ -91,6 +91,8 @@ pub struct Actuation {
     rapid: BTreeMap<u8, Rapid>,
     /// Snap Tap of the loaded profile.
     snap: SnapTap,
+    /// Firmware continuous Rapid Trigger of the loaded profile.
+    continuous: bool,
     /// `null` for a binding the app cannot show, such as the Fn key.
     bindings: BTreeMap<u8, Option<Action>>,
     unsaved_bindings: Vec<u8>,
@@ -222,6 +224,7 @@ pub async fn read_all(app: AppHandle, state: State<'_, AppState>, id: String) ->
         unsaved,
         rapid: device.rapid(),
         snap: device.snap_tap(),
+        continuous: device.continuous(),
         unsaved_bindings,
         bindings: device.bindings(),
         hypershift: device.hypershift(),
@@ -236,11 +239,12 @@ pub async fn apply(
     changes: Vec<(u8, f32)>,
     rapid: BTreeMap<u8, Rapid>,
     snap: Option<SnapTap>,
+    continuous: Option<bool>,
     bindings: Vec<(u8, Action)>,
     hypershift: HypershiftEdits,
 ) -> Result<WriteResult, String> {
     let d = state.device(&id)?;
-    let r = lock(&d).apply(&changes, &rapid, snap.as_ref(), &bindings, &hypershift);
+    let r = lock(&d).apply(&changes, &rapid, snap.as_ref(), continuous, &bindings, &hypershift);
     r.map(Into::into)
 }
 

@@ -20,12 +20,15 @@ const props = defineProps<{
   hs: number | null;
   hsSplit: boolean;
   driver: boolean;
+  /** The firmware's continuous Rapid Trigger for the whole profile; `null` where it is per key. */
+  crt: boolean | null;
   /** Scale of the connected keyboard; `null` falls back to the Huntsman V2 Analog's. */
   analog: Analog | null;
 }>();
 const emit = defineEmits<{
   set: [mm: number];
   rapid: [mode: RapidMode];
+  crt: [on: boolean];
   press: [mm: number];
   release: [mm: number];
   split: [on: boolean];
@@ -38,7 +41,7 @@ const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value)
 // The host runs Rapid Trigger in driver mode, some firmwares in HW mode too.
 const rtHere = computed(() => props.driver || !!props.analog?.firmware_rapid);
 const rtOn = computed(() => rtHere.value && props.rapid.mode != null && props.rapid.mode !== "off");
-const MODES: RapidMode[] = ["off", "rt", "crt"];
+const modes = computed<RapidMode[]>(() => (props.crt == null ? ["off", "rt", "crt"] : ["off", "rt"]));
 const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
 
 const V2: Analog = { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false };
@@ -212,20 +215,32 @@ const rtSliders = computed(() => {
       <path d="M34 172H86" style="stroke: var(--error)" stroke-width="3" stroke-linecap="round" />
     </svg>
     <div class="flex flex-col gap-1 items-center">
-      <span class="inline-flex h-6" role="group" :title="$t('rapid.title')">
+      <div class="flex gap-2 h-6">
+        <span class="inline-flex h-6" role="group" :title="$t('rapid.title')">
+          <button
+            v-for="m in modes"
+            :key="m"
+            class="text-xs px-2 py-0 seg-btn"
+            :class="{ 'seg-on': rapid.mode === m }"
+            :aria-pressed="rapid.mode === m"
+            :title="$t(`rapid.${m}Hint`)"
+            :disabled="!count || !rtHere"
+            @click="emit('rapid', m)"
+          >
+            {{ $t(`rapid.${m}`) }}
+          </button>
+        </span>
         <button
-          v-for="m in MODES"
-          :key="m"
-          class="text-xs px-2 py-0 seg-btn"
-          :class="{ 'seg-on': rapid.mode === m }"
-          :aria-pressed="rapid.mode === m"
-          :title="$t(`rapid.${m}Hint`)"
-          :disabled="!count || !rtHere"
-          @click="emit('rapid', m)"
+          v-if="crt != null"
+          class="text-xs px-2 py-0"
+          :class="{ 'seg-on': crt }"
+          :aria-pressed="crt"
+          :title="$t('rapid.crtProfileHint')"
+          @click="emit('crt', !crt)"
         >
-          {{ $t(`rapid.${m}`) }}
+          CRT
         </button>
-      </span>
+      </div>
       <div class="flex w-[144px]" :class="split ? 'justify-between' : 'justify-center'">
         <div v-for="s in rtSliders" :key="s.kind" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">0.1</span>

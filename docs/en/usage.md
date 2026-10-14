@@ -156,8 +156,8 @@ soon as it starts going up — without waiting for the actuation point.
 - "Off / RT / CRT" and sensitivity 0.1–1.0 mm: how far the key has to move
   to actuate or release. RT works only below the actuation point. CRT (Continuous Rapid
   Trigger) works along the whole travel once the key has actuated, until it is fully up.
-  On the V3 line in HW mode the firmware has one CRT switch per profile: if any key is
-  set to CRT, every RT key works as CRT.
+  On the V3 line in HW mode the firmware has one CRT switch for the whole profile, so
+  keys choose only Off / RT, and the separate "CRT" button turns it on for every RT key.
 - "Separate press and release" — a separate slider for release.
 - The sliders show the travel of the first pressed key since the last extreme point.
   When going down, the fill grows from the top to the slider; when going up, from the

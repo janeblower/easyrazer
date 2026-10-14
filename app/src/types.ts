@@ -133,6 +133,7 @@ export interface Actuation {
   unsaved: number[];
   rapid: KeyMap<Rapid>;
   snap: SnapTap;
+  continuous: boolean;
   // null: a binding the app does not edit, such as a service code.
   bindings: KeyMap<Action | null>;
   unsaved_bindings: number[];
