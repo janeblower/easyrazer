@@ -186,17 +186,36 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
 }
 
 fn emit(out: &[Output], sink: &Sink) {
+    let mut inputs = Vec::new();
     for &o in out {
         match o {
-            Output::Key { key, down } => send_key(key, down),
-            Output::Mouse { button, down } => send_mouse(button, down),
-            Output::Media(m) => send_media(m),
-            other => sink(other),
+            Output::Key { key, down } => key_input(key, down, &mut inputs),
+            Output::Mouse { button, down } => inputs.extend(mouse_input(button, down)),
+            Output::Media(m) => media_input(m, &mut inputs),
+            _ => {}
+        }
+    }
+    // One call per report: a call costs about 0.5 ms however many events it carries.
+    send(&inputs);
+    // Windows ignores an injected Win+L; the L still goes out, or the Win release opens Start.
+    let win = || [VK_LWIN, VK_RWIN].iter().any(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0);
+    if out.iter().any(|o| matches!(o, Output::Key { key: L, down: true })) && win() {
+        unsafe { LockWorkStation() };
+    }
+    for &o in out {
+        if !matches!(o, Output::Key { .. } | Output::Mouse { .. } | Output::Media(_)) {
+            sink(o);
         }
     }
 }
 
-fn send_mouse(button: Mouse, down: bool) {
+fn send(inputs: &[INPUT]) {
+    if !inputs.is_empty() {
+        unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
+    }
+}
+
+fn mouse_input(button: Mouse, down: bool) -> Option<INPUT> {
     let pick = |d, u| if down { d } else { u };
     let (flags, data) = match button {
         Mouse::Left => (pick(MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP), 0),
@@ -205,36 +224,29 @@ fn send_mouse(button: Mouse, down: bool) {
         Mouse::Back => (pick(MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP), u32::from(XBUTTON1)),
         Mouse::Forward => (pick(MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP), u32::from(XBUTTON2)),
         // One notch per press, like the firmware.
-        Mouse::WheelUp | Mouse::WheelDown if !down => return,
+        Mouse::WheelUp | Mouse::WheelDown if !down => return None,
         Mouse::WheelUp => (MOUSEEVENTF_WHEEL, WHEEL_DELTA),
         Mouse::WheelDown => (MOUSEEVENTF_WHEEL, WHEEL_DELTA.wrapping_neg()),
     };
     let mi = MOUSEINPUT { dx: 0, dy: 0, mouseData: data, dwFlags: flags, time: 0, dwExtraInfo: 0 };
-    let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi } };
-    unsafe { SendInput(1, &input, size_of::<INPUT>() as i32) };
+    Some(INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi } })
 }
 
-fn send(ki: KEYBDINPUT) {
-    let input = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki } };
-    unsafe { SendInput(1, &input, size_of::<INPUT>() as i32) };
+fn keyboard(ki: KEYBDINPUT) -> INPUT {
+    INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki } }
 }
 
-fn send_key(key: u8, down: bool) {
+fn key_input(key: u8, down: bool, inputs: &mut Vec<INPUT>) {
     let up = if down { 0 } else { KEYEVENTF_KEYUP };
     if key == PAUSE {
-        return send(KEYBDINPUT { wVk: VK_PAUSE, wScan: 0, dwFlags: up, time: 0, dwExtraInfo: 0 });
+        return inputs.push(keyboard(KEYBDINPUT { wVk: VK_PAUSE, wScan: 0, dwFlags: up, time: 0, dwExtraInfo: 0 }));
     }
     let Some(sc) = scancode(key) else { return };
     let ext = if sc > 0xFF { KEYEVENTF_EXTENDEDKEY } else { 0 };
-    send(KEYBDINPUT { wVk: 0, wScan: sc & 0xFF, dwFlags: KEYEVENTF_SCANCODE | ext | up, time: 0, dwExtraInfo: 0 });
-    // Windows ignores an injected Win+L; the L still goes out, or the Win release opens Start.
-    let win = || [VK_LWIN, VK_RWIN].iter().any(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0);
-    if key == L && down && win() {
-        unsafe { LockWorkStation() };
-    }
+    inputs.push(keyboard(KEYBDINPUT { wVk: 0, wScan: sc & 0xFF, dwFlags: KEYEVENTF_SCANCODE | ext | up, time: 0, dwExtraInfo: 0 }));
 }
 
-pub(crate) fn send_media(m: Media) {
+fn media_input(m: Media, inputs: &mut Vec<INPUT>) {
     let vk = match m {
         Media::Prev => VK_MEDIA_PREV_TRACK,
         Media::Play => VK_MEDIA_PLAY_PAUSE,
@@ -245,8 +257,14 @@ pub(crate) fn send_media(m: Media) {
         Media::VolumeDown => VK_VOLUME_DOWN,
     };
     for flags in [KEYEVENTF_EXTENDEDKEY, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP] {
-        send(KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 });
+        inputs.push(keyboard(KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 }));
     }
+}
+
+pub(crate) fn send_media(m: Media) {
+    let mut inputs = Vec::new();
+    media_input(m, &mut inputs);
+    send(&inputs);
 }
 
 pub fn sleep() {
