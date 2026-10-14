@@ -35,6 +35,14 @@ async function mockBackend() {
     tkl: "Razer Huntsman V3 TKL 8KHz",
     proTkl: "Razer Huntsman V3 Pro TKL",
   };
+  // Copies of `analog` in crates/core/devices, which the dev server does not serve.
+  const V3 = { zero_mm: 0, full_mm: 3.985_35, range: [0.1, 4], firmware_rapid: true };
+  const ANALOG: Record<string, unknown> = {
+    v2: { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false },
+    mini: V3,
+    tkl: V3,
+    proTkl: V3,
+  };
   const pick = new URLSearchParams(location.search).get("model");
   const model = pick && pick in MODELS ? pick : "v2";
   if (location.hash !== "#devtools") showModelPicker(MODELS, model);
@@ -296,6 +304,7 @@ async function mockBackend() {
       synapse: false,
       // Rapid Trigger shows on the map only in driver mode.
       driver_mode: true,
+      analog: ANALOG[model],
       profile: 1,
       profile_name: "Dev",
       model: MODELS[model],
@@ -314,6 +323,14 @@ async function mockBackend() {
       }
       if (cmd === "status" && (args as { id?: string }).id === "OFFLINE")
         return { ...(replies.status as object), id: "OFFLINE", device: false };
+      if (cmd === "set_driver_mode") {
+        // New objects: the window keeps the old ones and would not see a change made in place.
+        const on = (args as { on: boolean }).on;
+        replies.status = { ...(replies.status as object), driver_mode: on };
+        const view = replies.devices as { devices: { id: string }[] };
+        replies.devices = { ...view, devices: view.devices.map((d) => (d.id === "MOCK" ? { ...d, driver_mode: on } : d)) };
+        return null;
+      }
       if (cmd === "rename_device") {
         const { id, name } = args as { id: string; name: string };
         const view = replies.devices as { devices: { id: string; name: string; model: string }[] };
