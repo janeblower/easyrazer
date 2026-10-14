@@ -311,13 +311,13 @@ const rtSliders = computed(() => {
   stroke-width: 5;
   stroke-linecap: round;
   stroke-linejoin: round;
-  animation: 2s ease-in-out infinite;
 }
+/* The minifier turns a shorthand without a name into `animation: none`. */
 .press {
-  animation-name: press;
+  animation: press 2s ease-in-out infinite;
 }
 .release {
-  animation-name: release;
+  animation: release 2s ease-in-out infinite;
 }
 @keyframes press {
   0% {
