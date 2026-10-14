@@ -1,9 +1,11 @@
 # Development
 
+[Русская версия](../ru/development.md)
+
 ## Environment
 
 Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools, Bun.
-Building and running — see the [README](../../README.md#building).
+Building and running — see the [README](../../README.md#building-from-source).
 
 Tests:
 
@@ -47,6 +49,16 @@ Protocol and firmware per model — [devices/](devices/README.md).
   (second model, second OS).
 - New strings go into both locales, `ru.json` and `en.json`.
 
+## Pull requests
+
+- One branch per change, from a fresh `master`.
+- `cargo test` and `bun run lint` pass; changes to the protocol are checked on a live
+  keyboard (`--ignored` tests) or say they were not.
+- Commit messages: `<area>: <what it does>` in the imperative, e.g.
+  `settings: save profiles compactly`. Title under 50 characters; a body only when the
+  *why* is not obvious.
+- New UI strings go into both locales; user-facing docs change in both `docs/en` and `docs/ru`.
+
 ## New keyboard model
 
 Lighting, the press-point scale and the depth stream come from the description;
@@ -74,7 +86,7 @@ layout and key bindings are still shared with the Huntsman V2 Analog.
    and Snap Tap in HW mode (`02:1A`/`02:21`, `trigger.rs`); in driver mode the host engine
    does it for every model.
 6. A fake in `fake.rs` if the model answers differently; an `--ignored` test on hardware.
-7. **Docs** — a model folder in `docs/devices/` (`protocol.md`, and `firmware.md` if the
+7. **Docs** — a model folder in `docs/en/devices/` and `docs/ru/devices/` (`protocol.md`, and `firmware.md` if the
    firmware is analyzed) and a line in the [model overview](devices/README.md).
 
 An unknown Razer keyboard shows in the window as "This Razer keyboard model is not supported (PID …)".
@@ -87,7 +99,7 @@ direction, speed) from the template itself.
 
 ## Where to look next
 
-Snap Tap, macros, binds and game mode will need reading Synapse again:
+Game mode and the gamepad will need reading Synapse again:
 
 - device logic bundles are cached in
   `%LOCALAPPDATA%\Razer\RazerAppEngine\User Data\Default\Service Worker\CacheStorage\…`
@@ -98,7 +110,7 @@ Snap Tap, macros, binds and game mode will need reading Synapse again:
   (the `appEngine value` line shows what Synapse hands to its engine);
 - the Synapse host engine — `CommonDLL\mapping_engine.dll`.
 
-## Known nits
+## Known issues
 
 - The window hangs on the close button while actuation is being read.
 - `reg.exe` is called on the main thread from the tray menu.

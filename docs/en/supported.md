@@ -1,6 +1,8 @@
 # Supported keyboards
 
-✅ supported, 🧪 implemented but not tested on hardware, — not supported.
+[Русская версия](../ru/supported.md)
+
+✅ supported and tested on hardware · 🧪 implemented, not tested on hardware · — not supported
 
 | Model | Actuation | Rapid Trigger | Snap Tap | Remapping | Macros | Hypershift | Lighting |
 |---|---|---|---|---|---|---|---|
@@ -62,3 +64,10 @@ shallower. No Windows Dynamic Lighting. Its firmware is the code base of the V3 
 8KHz.
 
 Protocol and firmware notes for each model: [devices](devices/README.md).
+
+## Help test your model
+
+Own one of the 🧪 models? Run EasyRazer, turn on "Write to keyboards not yet checked
+on hardware" in Settings, try the features above and
+[open an issue](https://github.com/janeblower/easyrazer/issues) with what worked and what
+did not. Writes go only to the keyboard's RAM, so a reconnect undoes them.

@@ -1,5 +1,7 @@
 # Huntsman V3 analog line firmware
 
+[Русская версия](../../../ru/devices/huntsman-v3-analog/firmware.md)
+
 Analysis of the official Firmware Updater `v1.03.00_r1` (firmware `1.03.00`, the
 same one Synapse calls `1.3.0.0`). This is a reference for the protocol: firmware
 code is not carried over into the project. Addresses are for this version.
