@@ -35,6 +35,8 @@ pub struct Exported {
     #[serde(with = "crate::stored::grouped")]
     pub rapid: BTreeMap<u8, Rapid>,
     pub snap_tap: SnapTap,
+    #[serde(default)]
+    pub continuous: bool,
     #[serde(default, with = "crate::stored::colors")]
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
@@ -77,7 +79,7 @@ pub fn export(d: &DeviceData, profile: u32) -> Option<ProfileFile> {
         format: FORMAT,
         pid: format!("{:04X}", d.pid),
         model: devices::by_pid(d.pid).map(|s| s.name.clone()).unwrap_or_default(),
-        profile: Exported { name: p.name.clone(), data: p.data.clone(), rapid: p.rapid.clone(), snap_tap: p.snap_tap.clone(), custom: p.custom.clone() },
+        profile: Exported { name: p.name.clone(), data: p.data.clone(), rapid: p.rapid.clone(), snap_tap: p.snap_tap.clone(), continuous: p.continuous, custom: p.custom.clone() },
         macros,
     })
 }
@@ -125,7 +127,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
         }
         has
     };
-    let Exported { name, mut data, mut rapid, mut snap_tap, mut custom } = f.profile;
+    let Exported { name, mut data, mut rapid, mut snap_tap, continuous, mut custom } = f.profile;
 
     let rescale = source != d.pid;
     let [lo, hi] = to.analog.range.map(|mm| to.analog.threshold(mm));
@@ -159,7 +161,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
 
     let name = profiles::free_name(d, &name, |n| if n == 1 { String::new() } else { format!(" ({n})") });
     let id = d.new_profile_id();
-    d.profiles.push(Profile { id, name: name.clone(), slot: None, data, rapid, snap_tap, custom });
+    d.profiles.push(Profile { id, name: name.clone(), slot: None, data, rapid, snap_tap, continuous, custom });
     d.macros = library;
     Ok(Imported { id, name, dropped: dropped.len() })
 }
@@ -296,7 +298,7 @@ mod tests {
         let mut src = board(0x0266);
         let deep = src_spec.analog.threshold(src_spec.analog.range[1]);
         let p = with_profile(&mut src, "Game", &[(KEPT, key(deep, None)), (MISSING, key(100, None))], &[(MISSING, key(100, None))]);
-        src.profiles[0].rapid.insert(MISSING, Rapid { enabled: true, press: 0.3, release: 0.3 });
+        src.profiles[0].rapid.insert(MISSING, Rapid { enabled: true, press: 0.3, release: 0.3, continuous: false });
         src.profiles[0].custom = Some([(MISSING, [1, 2, 3]), (KEPT, [4, 5, 6])].into());
         let f = export(&src, p).unwrap();
         let mut dst = board(TARGET);

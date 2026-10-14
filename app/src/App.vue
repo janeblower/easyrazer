@@ -19,6 +19,7 @@ import type {
   MacroState,
   ProfilesView,
   Rapid,
+  RapidMode,
   SnapTap,
   System,
   WriteResult,
@@ -56,13 +57,16 @@ const layout = ref<KeyView[]>([]);
 let layoutModel: string | null = null;
 const baseline = ref<KeyMap<number>>({}); // mm, as last read from the keyboard
 const edits = ref<KeyMap<number>>({}); // mm, not applied yet
-const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4 };
+const DEFAULT_RAPID: Rapid = { enabled: false, press: 0.4, release: 0.4, continuous: false };
 const rapidBase = ref<KeyMap<Rapid>>({}); // as last applied
 const rapidEdits = ref<KeyMap<Rapid>>({}); // not applied yet
 const splitOn = ref(false);
 const SNAP_OFF: SnapTap = { enabled: false, groups: [] };
 const snapBase = ref<SnapTap>(SNAP_OFF); // as last applied
 const snapEdit = ref<SnapTap | null>(null); // not applied yet
+// The firmware's continuous Rapid Trigger, one for the whole profile.
+const crtBase = ref(false); // as last applied
+const crtEdit = ref<boolean | null>(null); // not applied yet
 const errors = ref<KeyMap<string>>({}); // message from the last apply
 const unsaved = ref(new Set<number>()); // applied, lost on replug unless saved
 const bindBase = ref<KeyMap<Action | null>>({}); // as last read or applied
@@ -110,7 +114,9 @@ const dirty = computed(
       ...Object.keys(bindEdits.value),
       ...Object.keys(hsEdits.value),
       ...Object.keys(hsBindEdits.value),
-    ]).size + (snapEdit.value ? 1 : 0),
+    ]).size +
+    (snapEdit.value ? 1 : 0) +
+    (crtEdit.value == null ? 0 : 1),
 );
 trackUnapplied(() => dirty.value > 0);
 const online = computed(() => !!status.value?.device);
@@ -122,6 +128,9 @@ const driver = computed(() => !!status.value?.driver_mode);
 const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
 // Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
 const rapidHere = computed(() => driver.value || fwRapid.value);
+// The firmware runs Rapid Trigger, so continuous is one switch for the profile, not per key.
+const fwHw = computed(() => fwRapid.value && !driver.value);
+const crt = computed(() => crtEdit.value ?? crtBase.value);
 const canApply = computed(() => writable.value && dirty.value > 0);
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
 const canSave = computed(
@@ -181,14 +190,23 @@ function takeHypershift(h: Hypershift) {
 }
 
 const rapidOf = (k: number) => rapidEdits.value[k] ?? rapidBase.value[k] ?? DEFAULT_RAPID;
-const sameRapid = (a: Rapid, b: Rapid) => a.enabled === b.enabled && a.press === b.press && a.release === b.release;
+const sameRapid = (a: Rapid, b: Rapid) =>
+  a.enabled === b.enabled && a.press === b.press && a.release === b.release && a.continuous === b.continuous;
+const modeOf = (r: Rapid): RapidMode => (r.enabled ? (r.continuous && !fwHw.value ? "crt" : "rt") : "off");
 
 const selectedRapid = computed(() => {
   const r = Array.from(selection.value, rapidOf);
-  return { enabled: common(r.map((x) => x.enabled)), press: common(r.map((x) => x.press)), release: common(r.map((x) => x.release)) };
+  return { mode: common(r.map(modeOf)), press: common(r.map((x) => x.press)), release: common(r.map((x) => x.release)) };
 });
 const split = computed(() => splitOn.value || Array.from(selection.value, rapidOf).some((r) => r.release !== r.press));
-const rapidKeys = computed(() => new Set(layout.value.map((k) => k.key).filter((k) => rapidOf(k).enabled)));
+const rapidKeys = computed(
+  () =>
+    new Map(
+      layout.value
+        .filter((k) => rapidOf(k.key).enabled)
+        .map((k) => [k.key, modeOf(rapidOf(k.key)) === "crt" || (fwHw.value && crt.value) ? "CRT" : "RT"]),
+    ),
+);
 const rapidEdited = computed(() => new Set(Object.keys(rapidEdits.value).map(Number)));
 
 function setRapid(change: (r: Rapid) => Rapid) {
@@ -370,6 +388,7 @@ async function load() {
       unsaved: keys,
       rapid,
       snap: snapRead,
+      continuous,
       bindings,
       unsaved_bindings,
       hypershift,
@@ -387,6 +406,8 @@ async function load() {
     );
     snapBase.value = snapRead;
     if (snapEdit.value && sameSnap(snapEdit.value, snapRead)) snapEdit.value = null;
+    crtBase.value = continuous;
+    if (crtEdit.value === continuous) crtEdit.value = null;
     unsaved.value = new Set(keys);
     edits.value = Object.fromEntries(Object.entries(edits.value).filter(([k, mm]) => base[Number(k)] !== mm));
     errors.value = {};
@@ -418,6 +439,7 @@ function revert() {
   edits.value = {};
   rapidEdits.value = {};
   snapEdit.value = null;
+  crtEdit.value = null;
   errors.value = {};
   bindEdits.value = {};
   hsEdits.value = {};
@@ -649,6 +671,7 @@ async function write(command: "apply" | "save", done: string) {
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
     const rapid = command === "apply" ? rapidEdits.value : null;
     const snapNext = command === "apply" ? snapEdit.value : null;
+    const crtNext = command === "apply" ? crtEdit.value : null;
     const bindings = Object.entries(bindEdits.value).map(([k, a]) => [Number(k), a]);
     const hypershift = {
       values: Object.entries(hsEdits.value).map(([k, mm]) => [Number(k), mm]),
@@ -662,7 +685,7 @@ async function write(command: "apply" | "save", done: string) {
       hypershift: layer,
     } = await call<WriteResult>(
       command,
-      rapid ? { changes, rapid, snap: snapNext, bindings, hypershift } : { changes, bindings, hypershift },
+      rapid ? { changes, rapid, snap: snapNext, continuous: crtNext, bindings, hypershift } : { changes, bindings, hypershift },
     );
     // The window moved to another keyboard meanwhile; its edits were dropped with the switch.
     if (!ours(id)) return;
@@ -675,6 +698,8 @@ async function write(command: "apply" | "save", done: string) {
       rapidEdits.value = {};
       if (snapNext) snapBase.value = snapNext;
       snapEdit.value = null;
+      if (crtNext != null) crtBase.value = crtNext;
+      crtEdit.value = null;
     }
     unsaved.value = new Set(keys);
     const applied = merge(
@@ -955,7 +980,7 @@ onUnmounted(() => {
               :edited="mapEdited"
               :errors="section === 'actuation' ? errors : bindErrors"
               :unsaved="section === 'actuation' ? unsaved : bindUnsaved"
-              :rapid="rapidHere && section === 'actuation' ? rapidKeys : new Set()"
+              :rapid="rapidHere && section === 'actuation' ? rapidKeys : new Map()"
               :snap="rapidHere && section === 'actuation' ? snapColors(snap) : {}"
               :rapid-edited="rapidEdited"
               :hs-values="mapHs"
@@ -972,13 +997,17 @@ onUnmounted(() => {
                   :count="selection.size"
                   :value="selectedValue"
                   :rapid="selectedRapid"
+                  :crt="fwHw ? crt : null"
                   :split="split"
                   :hs="selectedHs"
                   :hs-split="hsSplit"
                   :driver="driver"
                   :analog="status?.analog ?? null"
                   @set="setValue"
-                  @rapid="(on) => setRapid((r) => ({ ...r, enabled: on }))"
+                  @rapid="
+                    (m) => setRapid((r) => ({ ...r, enabled: m !== 'off', continuous: m === 'off' || fwHw ? r.continuous : m === 'crt' }))
+                  "
+                  @crt="(on) => (crtEdit = on === crtBase ? null : on)"
                   @press="(v) => setRapid((r) => ({ ...r, press: v, release: split ? r.release : v }))"
                   @release="(v) => setRapid((r) => ({ ...r, release: v }))"
                   @split="onSplit"

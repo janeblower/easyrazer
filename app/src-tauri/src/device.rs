@@ -405,6 +405,7 @@ impl Device {
         let keys: Vec<(u8, Option<(f32, f32)>)> =
             editable_keys(d.layout).into_iter().map(|k| (k, p.rapid.get(&k).filter(|r| r.enabled).map(|r| (r.press, r.release)))).collect();
         trigger::set_rapid(t, actuation::LIVE, &keys)?;
+        trigger::set_continuous(t, actuation::LIVE, p.continuous)?;
         trigger::set_snap_tap(t, actuation::LIVE, firmware_pair(&p.snap_tap))
     }
 
@@ -504,6 +505,10 @@ impl Device {
 
     pub fn snap_tap(&self) -> SnapTap {
         self.data().loaded_profile().map(|p| p.snap_tap.clone()).unwrap_or_default()
+    }
+
+    pub fn continuous(&self) -> bool {
+        self.data().loaded_profile().is_some_and(|p| p.continuous)
     }
 
     /// Fn+LShift: the engine has switched already; the profile follows so the window and the next start agree.
@@ -702,6 +707,7 @@ impl Device {
         changes: &[(u8, f32)],
         rapid: &BTreeMap<u8, Rapid>,
         snap: Option<&SnapTap>,
+        continuous: Option<bool>,
         bindings: &[(u8, Action)],
         hs: &HypershiftEdits,
     ) -> Result<Written, String> {
@@ -752,6 +758,9 @@ impl Device {
         if let Some(s) = snap {
             p.snap_tap = s.clone();
         }
+        if let Some(c) = continuous {
+            p.continuous = c;
+        }
         if let Some(ram) = &mut self.ram {
             for (k, o) in &results {
                 if let (Outcome::Ok(a) | Outcome::Unconfirmed(a), Some(r)) = (o, ram.normal.get_mut(k)) {
@@ -777,7 +786,7 @@ impl Device {
         // The Hypershift layer reaches profile 0 only through `restore`, its press points in driver mode too.
         if (!host && !(results.is_empty() && bound.is_empty())) || !hs.is_empty() {
             self.restore();
-        } else if !rapid.is_empty() || snap.is_some() {
+        } else if !rapid.is_empty() || snap.is_some() || continuous.is_some() {
             self.sync_firmware_rapid().map_err(|e| e.to_string())?;
         }
         self.sync_engine();
@@ -789,7 +798,7 @@ impl Device {
         let applied = if edits.is_empty() && bind_edits.is_empty() && hs.is_empty() {
             self.written(Vec::new(), Vec::new())
         } else {
-            self.apply(edits, &BTreeMap::new(), None, bind_edits, hs)?
+            self.apply(edits, &BTreeMap::new(), None, None, bind_edits, hs)?
         };
         let id = self.data().loaded.ok_or_else(|| self.msg("backend.noKeyboard"))?;
         self.write_profile(id)?;
@@ -1251,7 +1260,7 @@ fn engine_config(
         c.fn_bind[k as usize] = binding::decode(r.fn_id, &r.fn_data);
     }
     for (&k, r) in rapid.iter().filter(|(_, r)| r.enabled) {
-        c.rapid[k as usize] = Some(Trigger { press: scale.units(r.press), release: scale.units(r.release) });
+        c.rapid[k as usize] = Some(Trigger { press: scale.units(r.press), release: scale.units(r.release), continuous: r.continuous });
     }
     c
 }
@@ -1524,15 +1533,15 @@ mod tests {
     fn engine_config_from_press_points_and_rapid_trigger() {
         let thresholds = BTreeMap::from([(31, 43), (33, 0)]);
         let rapid = BTreeMap::from([
-            (31, Rapid { enabled: true, press: 0.4, release: 0.1 }),
-            (33, Rapid { enabled: false, press: 0.4, release: 0.4 }),
+            (31, Rapid { enabled: true, press: 0.4, release: 0.1, continuous: true }),
+            (33, Rapid { enabled: false, press: 0.4, release: 0.4, continuous: false }),
         ]);
         let t = (Duration::from_millis(500), Duration::from_millis(33));
         let bindings = BTreeMap::from([(31, Some(Action::Disabled)), (33, None)]);
         let c = engine_config(v2(), &thresholds, &bindings, &BTreeMap::new(), &rapid, &SnapTap::default(), t);
         assert_eq!((c.act[31], c.act[33], c.act[18]), (43, 0, 0));
         assert_eq!((c.bind[31], c.bind[33]), (Some(Action::Disabled), None));
-        assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12 }));
+        assert_eq!(c.rapid[31], Some(Trigger { press: 49, release: 12, continuous: true }));
         assert_eq!(c.rapid[33], None);
         assert_eq!((c.repeat_delay, c.repeat_interval), t);
     }
@@ -1560,10 +1569,10 @@ mod tests {
             (profile, actuation::read_key(t, profile, a).unwrap(), actuation::read_key(t, actuation::LIVE, a).unwrap())
         };
         dev.read_all(|_, _, _| {}).unwrap();
-        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
+        let w = dev.apply(&[(a, 2.4)], &BTreeMap::new(), None, None, &[], &HypershiftEdits::default()).unwrap();
         let (t, _) = dev.connect().unwrap();
         let profile_after = actuation::read_key(t, profile, a).unwrap();
-        dev.apply(&[(a, mm(v2(), live.threshold_low))], &BTreeMap::new(), None, &[], &HypershiftEdits::default()).unwrap();
+        dev.apply(&[(a, mm(v2(), live.threshold_low))], &BTreeMap::new(), None, None, &[], &HypershiftEdits::default()).unwrap();
         assert!(matches!(&w.results[0].1, Outcome::Ok(s) if s.threshold_low == v2().threshold(2.4)), "{:?}", w.results);
         assert_eq!(w.unsaved, [a]);
         assert_eq!(profile_after, saved);

@@ -40,6 +40,13 @@
     "together": "Вместе",
     "separate": "Раздельно",
     "split": "Раздельно для нажатия и отпускания",
+    "off": "Выкл",
+    "rt": "RT",
+    "crt": "CRT",
+    "offHint": "Rapid Trigger выключен",
+    "rtHint": "Rapid Trigger: работает ниже точки нажатия",
+    "crtHint": "Continuous Rapid Trigger: работает по всему ходу, пока клавиша не отпущена полностью",
+    "crtProfileHint": "Continuous Rapid Trigger для всех клавиш с RT: у прошивки один переключатель на весь профиль",
     "hwOnly": "(недоступно в HW режиме)"
   },
   "snap": {

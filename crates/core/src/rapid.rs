@@ -22,6 +22,8 @@ const DEPTH_STEP: u8 = 3;
 pub struct Trigger {
     pub press: u8,
     pub release: u8,
+    /// Continuous: once the key has gone down, it stays on Rapid Trigger until fully up.
+    pub continuous: bool,
 }
 
 /// How a Snap Tap group picks the key that types while several of its keys are held.
@@ -71,18 +73,22 @@ struct KeyState {
     sent: Option<Action>,
     /// Went down while Fn was held: the Hypershift layer's point and action, no Rapid Trigger or Snap Tap.
     fn_layer: bool,
+    /// Has gone down since it was last fully up.
+    engaged: bool,
 }
 
 /// One depth sample of a key; `Some(down)` on a transition.
 /// With Rapid Trigger, above the release line the key goes down after moving `press`
 /// deeper than its shallowest point and up after rising `release` from its deepest one.
+/// Continuous Rapid Trigger keeps that up to the top of the travel once the key has gone down.
 fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>, margin: u8) -> Option<bool> {
     let was = k.down;
     let act = act.max(1);
-    if depth == 0 || depth < act.saturating_sub(margin) {
+    let cont = k.engaged && rt.is_some_and(|r| r.continuous);
+    if depth == 0 || (depth < act.saturating_sub(margin) && !cont) {
         k.down = false;
         k.extreme = depth;
-    } else if let Some(r) = rt.filter(|_| k.down || depth >= act) {
+    } else if let Some(r) = rt.filter(|_| k.down || depth >= act || cont) {
         // In u16: at the bottom of the travel depth + distance would saturate and release at once.
         let d = u16::from(depth);
         if k.down {
@@ -93,7 +99,7 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>, margin: u8) -
             }
         } else {
             k.extreme = k.extreme.min(depth);
-            if d >= u16::from(k.extreme) + u16::from(r.press) || k.extreme <= act.saturating_sub(margin) {
+            if d >= u16::from(k.extreme) + u16::from(r.press) || (!cont && k.extreme <= act.saturating_sub(margin)) {
                 k.down = true;
                 k.extreme = depth;
             }
@@ -103,6 +109,7 @@ fn step(k: &mut KeyState, depth: u8, act: u8, rt: Option<Trigger>, margin: u8) -
         // Kept current so Rapid Trigger turned on mid-press measures from the right point.
         k.extreme = if k.down { k.extreme.max(depth) } else { k.extreme.min(depth) };
     }
+    k.engaged = depth != 0 && (k.engaged || k.down);
     (k.down != was).then_some(k.down)
 }
 
@@ -519,7 +526,7 @@ mod tests {
         depths.iter().filter_map(|&d| step(&mut k, d, act, rt, 12)).collect()
     }
 
-    const RT10: Option<Trigger> = Some(Trigger { press: 10, release: 10 });
+    const RT10: Option<Trigger> = Some(Trigger { press: 10, release: 10, continuous: false });
 
     #[test]
     fn fixed_point_releases_below_the_hysteresis() {
@@ -530,7 +537,7 @@ mod tests {
     fn noise_at_the_point_does_not_chatter() {
         let noisy = [0, 99, 100, 99, 101, 98, 100, 95, 87];
         assert_eq!(run(&noisy, 100, None), [true, false]);
-        assert_eq!(run(&noisy, 100, Some(Trigger { press: 30, release: 30 })), [true, false]);
+        assert_eq!(run(&noisy, 100, Some(Trigger { press: 30, release: 30, continuous: false })), [true, false]);
     }
 
     #[test]
@@ -545,7 +552,7 @@ mod tests {
 
     #[test]
     fn noise_while_lifting_through_the_point_does_not_press() {
-        let rt = Some(Trigger { press: 12, release: 12 });
+        let rt = Some(Trigger { press: 12, release: 12, continuous: false });
         assert_eq!(run(&[0, 140, 128, 110, 99, 100, 97, 0], 100, rt), [true, false]);
     }
 
@@ -556,13 +563,21 @@ mod tests {
 
     #[test]
     fn split_press_and_release() {
-        let rt = Some(Trigger { press: 10, release: 30 });
+        let rt = Some(Trigger { press: 10, release: 30, continuous: false });
         assert_eq!(run(&[0, 110, 200, 185, 170, 175, 180], 100, rt), [true, false, true]);
     }
 
     #[test]
+    fn continuous_rapid_trigger_works_above_the_point_until_fully_up() {
+        let crt = Some(Trigger { press: 10, release: 10, continuous: true });
+        let travel = [0, 110, 60, 50, 65, 40, 0, 50, 60];
+        assert_eq!(run(&travel, 100, crt), [true, false, true, false]);
+        assert_eq!(run(&travel, 100, RT10), [true, false]);
+    }
+
+    #[test]
     fn deepest_point_does_not_overflow() {
-        assert_eq!(run(&[0, 255, 255, 200], 100, Some(Trigger { press: 255, release: 50 })), [true, false]);
+        assert_eq!(run(&[0, 255, 255, 200], 100, Some(Trigger { press: 255, release: 50, continuous: false })), [true, false]);
     }
 
     fn depth_report(pid: u16) -> &'static DepthReport {
@@ -839,7 +854,7 @@ mod tests {
         let (mut e, t) = (engine(), Instant::now());
         e.feed_depth(&depth(&[(A, 150)]), t);
         let mut cfg = e.cfg.clone();
-        cfg.rapid[A as usize] = Some(Trigger { press: 10, release: 10 });
+        cfg.rapid[A as usize] = Some(Trigger { press: 10, release: 10, continuous: false });
         e.set_config(cfg);
         assert_eq!(e.feed_depth(&depth(&[(A, 135)]), t), [key(A, false)]);
     }
@@ -1038,7 +1053,7 @@ mod tests {
     fn snap_with_rapid_trigger_brings_back_the_other_key() {
         let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
         let mut cfg = e.cfg.clone();
-        cfg.rapid[D as usize] = Some(Trigger { press: 10, release: 10 });
+        cfg.rapid[D as usize] = Some(Trigger { press: 10, release: 10, continuous: false });
         e.set_config(cfg);
         assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
         assert_eq!(e.feed_depth(&depth(&[(A, 150), (D, 200)]), t), [key(A, false), key(D, true)]);

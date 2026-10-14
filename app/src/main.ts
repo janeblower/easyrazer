@@ -70,7 +70,8 @@ async function mockBackend() {
   const state = {
     values: all(() => 2) as Record<number, unknown>,
     unsaved: [] as number[],
-    rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4 })) as Record<number, unknown>,
+    rapid: all(() => ({ enabled: true, press: 0.4, release: 0.4, continuous: false })) as Record<number, unknown>,
+    continuous: false,
     snap: {
       enabled: true,
       groups: [
@@ -98,6 +99,7 @@ async function mockBackend() {
     hypershift: { values: Pairs; bindings: Pairs };
     rapid?: Record<number, unknown>;
     snap?: unknown;
+    continuous?: boolean | null;
   }
   const { emit } = await import("@tauri-apps/api/event");
   const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
@@ -204,6 +206,7 @@ async function mockBackend() {
     hs.unsaved = keep(hs.bindings, w.hypershift.bindings, keep(hs.values, w.hypershift.values, hs.unsaved));
     if (w.rapid) Object.assign(state.rapid, w.rapid);
     if (w.snap) state.snap = w.snap;
+    if (w.continuous != null) state.continuous = w.continuous;
     for (const [k] of w.changes) entry("02:12", [0, k, 0]);
     return {
       results: w.changes.map(([key, mm]) => ({ status: "ok", key, mm })),

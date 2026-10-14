@@ -40,6 +40,13 @@
     "together": "Together",
     "separate": "Separate",
     "split": "Separate press and release",
+    "off": "Off",
+    "rt": "RT",
+    "crt": "CRT",
+    "offHint": "Rapid Trigger off",
+    "rtHint": "Rapid Trigger: works below the press point",
+    "crtHint": "Continuous Rapid Trigger: works along the whole travel until the key is fully up",
+    "crtProfileHint": "Continuous Rapid Trigger for every key with RT: the firmware has one switch for the whole profile",
     "hwOnly": "(not available in HW mode)"
   },
   "snap": {
