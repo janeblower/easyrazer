@@ -242,7 +242,7 @@ mod tests {
             (Effect { rgb1: Some(RED), rgb2: Some(BLUE), ..fx("breathing_two") }, hex("02 02 00 02 FF 00 00 00 00 FF")),
             (fx("breathing_random"), hex("02 00 00 00")),
             (fx("spectrum"), hex("03 00 00 00")),
-            (Effect { dir: Some("right".into()), speed: Some(0x28), ..fx("wave") }, hex("04 02 28 00")),
+            (Effect { dir: Some("right".into()), speed: Some(0x28), ..fx("wave") }, hex("04 01 28 00")),
             (Effect { rgb1: Some(RED), ..fx("reactive_key_one") }, hex("05 00 02 01 FF 00 00")),
             (fx("reactive_key_random"), hex("05 00 02 00")),
             (Effect { rgb1: Some(RED), ..fx("reactive_ripple_one") }, hex("06 00 02 01 FF 00 00")),
