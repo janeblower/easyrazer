@@ -237,9 +237,11 @@ function up(e: PointerEvent) {
         <span v-if="inline && values[k.key] != null" class="text-xs truncate" :class="labelClass(k.key)">{{ values[k.key] }}</span>
         <span v-else class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
-          <span v-if="rapid.has(k.key)" :class="rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent'">{{
-            rapid.get(k.key)
-          }}</span>
+          <span
+            v-if="rapid.has(k.key)"
+            :class="[rapidEdited.has(k.key) ? 'font-semibold text-edited' : 'text-accent', { 'text-[9px]': rapid.get(k.key) === 'CRT' }]"
+            >{{ rapid.get(k.key) }}</span
+          >
           <span
             v-if="hsBinds[k.key]"
             class="flex min-w-0"
