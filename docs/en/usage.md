@@ -79,7 +79,8 @@ In Driver mode:
 - In windows run as administrator, on the lock screen and in UAC prompts the keyboard
   switches to HW for that time: Windows does not let keystrokes from a regular app
   through there. On the V2 line Rapid Trigger and Snap Tap stop there; on the V3 line
-  the firmware keeps Rapid Trigger and one Snap Tap pair. Ctrl+Alt+Del does not work.
+  the firmware keeps Rapid Trigger and one Snap Tap pair. Ctrl+Alt+Del does not work,
+  see [why](ctrl-alt-del.md).
 - The app returns the keyboard to HW on exit, on a crash and when Synapse starts. If the
   process is killed forcibly (Task Manager), the keyboard is silent until the cable is
   reconnected.
