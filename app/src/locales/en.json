@@ -66,6 +66,10 @@
   },
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros", "gamepad": "Gamepad" },
   "gamepad": {
+    "checkingDriver": "Checking HIDMaestro…",
+    "driverMissing": "HIDMaestro v1.12.0 is required to use the gamepad.",
+    "install": "Install HIDMaestro",
+    "installing": "Downloading and installing HIDMaestro…",
     "maxDepth": "Maximum depth",
     "title": "Gamepad",
     "hint": "Select a gamepad control and assign a keyboard key.",

@@ -66,6 +66,10 @@
   },
   "keys": { "actuation": "Срабатывание", "bindings": "Назначения", "macros": "Макросы", "gamepad": "Геймпад" },
   "gamepad": {
+    "checkingDriver": "Проверка HIDMaestro…",
+    "driverMissing": "Для геймпада требуется HIDMaestro v1.12.0.",
+    "install": "Установить HIDMaestro",
+    "installing": "Скачивание и установка HIDMaestro…",
     "maxDepth": "Максимальная глубина",
     "title": "Геймпад",
     "hint": "Выберите элемент геймпада и назначьте клавишу клавиатуры.",

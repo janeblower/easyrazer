@@ -19,6 +19,7 @@ const props = defineProps<{
     | "ban"
     | "plug"
     | "plug_off"
+    | "shield"
     | System;
 }>();
 

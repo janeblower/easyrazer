@@ -17,8 +17,13 @@ const props = defineProps<{
   driver: boolean;
   running: boolean;
   error: string | null;
+  driverInstalled: boolean | null;
+  installing: boolean;
+  installError: string | null;
 }>();
-const emit = defineEmits<{ update: [config: GamepadConfig] }>();
+const emit = defineEmits<{ update: [config: GamepadConfig]; install: [] }>();
+const available = computed(() => props.driver && props.driverInstalled === true && !props.installing);
+const canEdit = computed(() => props.editable && available.value);
 const { t } = useI18n();
 const capture = ref<GamepadBinding | null>(null);
 let previous: number[] = [];
@@ -38,7 +43,7 @@ const title = computed(() =>
       : t(`gamepad.${selected.value}`),
 );
 function setMaximum(binding: GamepadBinding, event: Event) {
-  if (!props.editable) return;
+  if (!canEdit.value) return;
   emit("update", {
     ...props.config,
     max_depth: { ...props.config.max_depth, [binding]: Number((event.target as HTMLInputElement).value) },
@@ -51,7 +56,7 @@ function bindingName(binding: GamepadBinding) {
 }
 
 function assign(binding: GamepadBinding, key: number | undefined) {
-  if (!props.editable || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
+  if (!canEdit.value || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
   const bindings = { ...props.config.bindings };
   if (key === undefined) delete bindings[binding];
   else bindings[binding] = key;
@@ -60,6 +65,7 @@ function assign(binding: GamepadBinding, key: number | undefined) {
 }
 
 function beginCapture(binding: GamepadBinding) {
+  if (!canEdit.value) return;
   previous = [...props.depth];
   capture.value = capture.value === binding ? null : binding;
 }
@@ -89,7 +95,7 @@ watch(
     if (key !== null) assign(capture.value, key);
   },
 );
-watch([() => props.config, () => props.layout, () => props.driver, () => props.editable, selected], () => {
+watch([() => props.config, () => props.layout, canEdit, selected], () => {
   capture.value = null;
 });
 onMounted(() => {
@@ -104,78 +110,101 @@ onUnmounted(() => {
 
 <template>
   <section class="gamepad-tab">
-    <header class="gamepad-heading">
-      <div>
-        <h2>{{ t("gamepad.title") }}</h2>
-        <p class="hint">{{ t("gamepad.hint") }}</p>
-      </div>
-      <label class="switch"
-        ><input
-          type="checkbox"
-          :checked="config.enabled"
-          :disabled="!editable"
-          @change="emit('update', { ...config, enabled: ($event.target as HTMLInputElement).checked })"
-        />{{ t("gamepad.enabled") }}</label
-      >
-    </header>
-    <p v-if="error" class="gamepad-error" role="alert">{{ error }}</p>
-    <div class="gamepad-workspace">
-      <div class="gamepad-stage"><GamepadModel :config="config" :depth="depth" :selected="selected" @select="selected = $event" /></div>
-      <aside class="gamepad-editor">
-        <template v-if="selected">
-          <h3>{{ title }}</h3>
-          <p class="hint">{{ t("gamepad.assignHint") }}</p>
-          <div v-for="binding in rows" :key="binding" class="assignment">
-            <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
-            <div class="assignment-input">
-              <button
-                :id="`gamepad-${binding}`"
-                class="record-key"
-                :disabled="!editable || !driver"
-                :class="{ capturing: capture === binding }"
-                :aria-pressed="capture === binding"
-                :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
-                @click="beginCapture(binding)"
-              >
-                {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
-              </button>
-              <button
-                class="icon-btn"
-                :disabled="!editable || config.bindings[binding] === undefined"
-                :title="t('gamepad.clear')"
-                :aria-label="t('gamepad.clear')"
-                @click="assign(binding, undefined)"
-              >
-                <AppIcon name="remove" />
-              </button>
-            </div>
-            <label v-if="ANALOG_BINDINGS.includes(binding)" class="maximum-depth">
-              <span
-                >{{ t("gamepad.maxDepth") }} <output>{{ config.max_depth?.[binding] ?? 100 }}%</output></span
-              >
-              <input
-                type="range"
-                min="1"
-                max="100"
-                step="1"
-                :value="config.max_depth?.[binding] ?? 100"
-                :disabled="!editable"
-                :aria-label="`${rowLabel(binding)}: ${t('gamepad.maxDepth')}`"
-                @input="setMaximum(binding, $event)"
-              />
-            </label>
-          </div>
-        </template>
-        <p v-else class="hint">{{ t("gamepad.selectHint") }}</p>
-        <div class="input-help">
-          <h3>{{ t("gamepad.inputTitle") }}</h3>
-          <p class="hint">{{ t("gamepad.inputHint") }}</p>
-          <p class="hint">{{ t("gamepad.selectedHint") }}</p>
-          <p class="input-status" :class="{ running }" role="status">
-            <span />{{ t(!driver ? "gamepad.driverRequired" : running ? "gamepad.running" : "gamepad.stopped") }}
-          </p>
+    <div v-if="driverInstalled !== true || !driver || installing" class="gamepad-notice" role="status" :aria-busy="installing">
+      <span>{{
+        t(
+          installing
+            ? "gamepad.installing"
+            : driverInstalled === null
+              ? "gamepad.checkingDriver"
+              : !driverInstalled
+                ? "gamepad.driverMissing"
+                : "gamepad.driverRequired",
+        )
+      }}</span>
+      <button v-if="driverInstalled === false || installing" :disabled="installing" @click="emit('install')">
+        <span v-if="installing" class="install-spinner" aria-hidden="true" />
+        <AppIcon v-else name="shield" />
+        {{ t("gamepad.install") }}
+      </button>
+    </div>
+    <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
+    <div class="gamepad-content" :class="{ unavailable: !available }" :inert="!available">
+      <header class="gamepad-heading">
+        <div>
+          <h2>{{ t("gamepad.title") }}</h2>
+          <p class="hint">{{ t("gamepad.hint") }}</p>
         </div>
-      </aside>
+        <label class="switch"
+          ><input
+            type="checkbox"
+            :checked="config.enabled"
+            :disabled="!canEdit"
+            @change="emit('update', { ...config, enabled: ($event.target as HTMLInputElement).checked })"
+          />{{ t("gamepad.enabled") }}</label
+        >
+      </header>
+      <p v-if="error" class="gamepad-error" role="alert">{{ error }}</p>
+      <div class="gamepad-workspace">
+        <div class="gamepad-stage">
+          <GamepadModel :config="config" :depth="available ? depth : []" :selected="selected" @select="available && (selected = $event)" />
+        </div>
+        <aside class="gamepad-editor">
+          <template v-if="selected">
+            <h3>{{ title }}</h3>
+            <p class="hint">{{ t("gamepad.assignHint") }}</p>
+            <div v-for="binding in rows" :key="binding" class="assignment">
+              <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
+              <div class="assignment-input">
+                <button
+                  :id="`gamepad-${binding}`"
+                  class="record-key"
+                  :disabled="!canEdit"
+                  :class="{ capturing: capture === binding }"
+                  :aria-pressed="capture === binding"
+                  :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
+                  @click="beginCapture(binding)"
+                >
+                  {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
+                </button>
+                <button
+                  class="icon-btn"
+                  :disabled="!canEdit || config.bindings[binding] === undefined"
+                  :title="t('gamepad.clear')"
+                  :aria-label="t('gamepad.clear')"
+                  @click="assign(binding, undefined)"
+                >
+                  <AppIcon name="remove" />
+                </button>
+              </div>
+              <label v-if="ANALOG_BINDINGS.includes(binding)" class="maximum-depth">
+                <span
+                  >{{ t("gamepad.maxDepth") }} <output>{{ config.max_depth?.[binding] ?? 100 }}%</output></span
+                >
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  step="1"
+                  :value="config.max_depth?.[binding] ?? 100"
+                  :disabled="!canEdit"
+                  :aria-label="`${rowLabel(binding)}: ${t('gamepad.maxDepth')}`"
+                  @input="setMaximum(binding, $event)"
+                />
+              </label>
+            </div>
+          </template>
+          <p v-else class="hint">{{ t("gamepad.selectHint") }}</p>
+          <div class="input-help">
+            <h3>{{ t("gamepad.inputTitle") }}</h3>
+            <p class="hint">{{ t("gamepad.inputHint") }}</p>
+            <p class="hint">{{ t("gamepad.selectedHint") }}</p>
+            <p class="input-status" :class="{ running }" role="status">
+              <span />{{ t(!driver ? "gamepad.driverRequired" : running ? "gamepad.running" : "gamepad.stopped") }}
+            </p>
+          </div>
+        </aside>
+      </div>
     </div>
   </section>
 </template>
@@ -194,6 +223,47 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+.gamepad-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.unavailable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gamepad-notice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.gamepad-notice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.install-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: install-spin 0.8s linear infinite;
+}
+@keyframes install-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-spinner {
+    animation: none;
+  }
 }
 h2 {
   font-size: 18px;

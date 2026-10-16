@@ -86,6 +86,9 @@ const gamepadBase = ref<GamepadConfig>(defaultGamepad());
 const gamepadSelected = ref<GamepadControl | null>(null);
 const gamepadEdit = ref<GamepadConfig | null>(null);
 const gamepadReady = ref(false);
+const gamepadDriver = ref<boolean | null>(null);
+const gamepadInstalling = ref(false);
+const gamepadInstallError = ref<string | null>(null);
 const gamepadInput = ref<GamepadInput>({ depth: [], running: false, error: null });
 const gamepadConfig = computed(() => gamepadEdit.value ?? gamepadBase.value);
 const visible = ref(!document.hidden);
@@ -135,6 +138,7 @@ const writable = computed(() => online.value && !status.value?.synapse && !busy.
 const editable = computed(() => !!status.value && !status.value.synapse && !busy.value);
 const shown = computed(() => devices.value?.devices.find((d) => d.id === keyboard.value) ?? null);
 const driver = computed(() => !!status.value?.driver_mode);
+const gamepadAvailable = computed(() => driver.value && gamepadDriver.value === true && !gamepadInstalling.value);
 const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
 // Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
 const rapidHere = computed(() => driver.value || fwRapid.value);
@@ -392,6 +396,31 @@ async function loadProfiles() {
 
 function editGamepad(config: GamepadConfig) {
   gamepadEdit.value = sameGamepad(config, gamepadBase.value) ? null : config;
+}
+
+watch([tab, section, visible], async () => {
+  if (tab.value !== "keys" || section.value !== "gamepad" || !visible.value || gamepadInstalling.value) return;
+  try {
+    gamepadDriver.value = await invoke<boolean>("gamepad_driver");
+    gamepadInstallError.value = null;
+  } catch (error) {
+    gamepadDriver.value = null;
+    gamepadInstallError.value = String(error);
+  }
+});
+
+async function installGamepadDriver() {
+  if (gamepadInstalling.value) return;
+  gamepadInstalling.value = true;
+  gamepadInstallError.value = null;
+  try {
+    await invoke("install_gamepad_driver");
+    gamepadDriver.value = await invoke<boolean>("gamepad_driver");
+  } catch (error) {
+    gamepadInstallError.value = String(error);
+  } finally {
+    gamepadInstalling.value = false;
+  }
 }
 
 async function loadGamepad(id: string, profile: number | null) {
@@ -1064,7 +1093,7 @@ onUnmounted(() => {
               </button>
             </span>
             <SelectionBar
-              v-if="section !== 'macros'"
+              v-if="section !== 'macros' && (section !== 'gamepad' || gamepadAvailable)"
               class="ml-auto"
               :count="section === 'gamepad' ? Number(gamepadSelected !== null) : selection.size"
               :single="section === 'bindings' || section === 'gamepad'"
@@ -1091,9 +1120,20 @@ onUnmounted(() => {
               :driver="driver"
               :running="gamepadInput.running"
               :error="gamepadInput.error"
+              :driver-installed="gamepadDriver"
+              :installing="gamepadInstalling"
+              :install-error="gamepadInstallError"
               @update="editGamepad"
+              @install="installGamepadDriver"
             />
-            <ActionBar v-bind="actions" apply-only @revert="revert" @apply="apply" />
+            <ActionBar
+              v-bind="actions"
+              :can-apply="actions.canApply && gamepadAvailable"
+              :can-revert="actions.canRevert && gamepadAvailable"
+              apply-only
+              @revert="revert"
+              @apply="apply"
+            />
           </template>
           <template v-else>
             <KeyboardMap

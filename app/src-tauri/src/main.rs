@@ -30,6 +30,13 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--gamepad-install") {
+        if let Err(e) = gamepad::install_helper(&args[1..]) {
+            eprintln!("HIDMaestro installation: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.first().is_some_and(|a| a == "--gamepad-helper") {
         if let Err(e) = gamepad::helper(&args[1..]) {
             eprintln!("gamepad helper: {e}");
@@ -164,6 +171,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::gamepad_config, commands::set_gamepad_config, commands::gamepad_input,
+            commands::gamepad_driver, commands::install_gamepad_driver,
             commands::status,
             commands::devices,
             commands::rename_device,

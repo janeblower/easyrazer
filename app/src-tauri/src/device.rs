@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -149,6 +149,7 @@ pub struct Device {
     /// Injected keys cannot reach the focused window, so the firmware types meanwhile.
     blocked: bool,
     gamepad_attempted: Option<(u32, crate::gamepad::Config)>,
+    gamepad: Arc<Mutex<crate::gamepad::Runtime>>,
     /// What profile 0 holds; `None` once the firmware reloaded it from the startup slot.
     ram: Option<Snapshot>,
     /// The slot the keyboard starts with, as last read or set.
@@ -184,6 +185,7 @@ impl Device {
             engine: None,
             blocked: false,
             gamepad_attempted: None,
+            gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())),
             ram: None,
             startup: None,
             synced: false,
@@ -1076,7 +1078,7 @@ impl Device {
         let Some(sink) = self.sink.clone() else { return };
         let (t, _) = self.control.as_ref().unwrap();
         // Readers first: if they cannot open, the keyboard never leaves hardware mode.
-        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink, profile, gamepad, launch)
+        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink, profile, gamepad, launch, self.gamepad.clone())
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
             Ok(h) => {
@@ -1097,6 +1099,9 @@ impl Device {
 
     /// Stops the engine and hands typing back to the firmware, unless Synapse owns the keyboard now.
     pub fn stop_engine(&mut self) {
+        if !self.blocked || self.synapse || !self.data().driver_mode || !self.may_write() {
+            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
+        }
         let Some(engine) = self.engine.take() else { return };
         // Held keys go up for good: the firmware presses a key only when it crosses the press point,
         // so one held across the switch stays up until pressed again. The readers take up to a read
@@ -1534,7 +1539,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }

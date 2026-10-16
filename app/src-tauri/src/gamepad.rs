@@ -3,11 +3,13 @@ use razer_core::binding::Action;
 use razer_core::layout::{self, Board};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 mod ipc;
 mod process;
+pub mod drivers;
 
 pub const CONTROLS: [&str; 24] = [
     "left_up", "left_down", "left_left", "left_right", "left_click",
@@ -123,12 +125,13 @@ pub struct Runtime {
     pub profile: u32,
     depth: [u8; 256],
     session: Option<Session>,
+    pending: Option<Receiver<Result<(Writer, process::Process), String>>>,
     error: Option<String>,
 }
 
 impl Runtime {
     pub fn new() -> Self {
-        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, error: None }
+        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None }
     }
 
     pub fn configure(&mut self, profile: u32, config: Config, launch: bool) {
@@ -139,22 +142,36 @@ impl Runtime {
         self.profile = profile;
         self.config = config;
         if !self.config.enabled {
-            self.session = None;
+            self.stop();
             self.error = None;
-        } else if self.session.is_none() && launch {
-            match process::launch() {
-                Ok((writer, process)) => {
-                    self.session = Some(Session { writer, previous: State::default(), process });
-                    self.error = None;
-                }
-                Err(e) => self.error = Some(e),
-            }
-        } else if self.session.is_none() && self.error.is_none() {
+        } else if self.session.is_none() && self.pending.is_none() && launch {
+            self.pending = Some(process::launch());
+            self.error = None;
+        } else if self.session.is_none() && self.pending.is_none() && self.error.is_none() {
             self.error = Some("Apply the gamepad configuration to start the controller.".into());
         }
     }
 
     fn check(&mut self) {
+        if let Some(pending) = &self.pending {
+            match pending.try_recv() {
+                Ok(result) => {
+                    self.pending = None;
+                    match result {
+                        Ok((writer, process)) => {
+                            self.session = Some(Session { writer, previous: State::default(), process });
+                            self.error = None;
+                        }
+                        Err(e) => self.error = Some(e),
+                    }
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.pending = None;
+                    self.error = Some("Gamepad startup interrupted. Apply the configuration to retry.".into());
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
         if let Err(e) = process::cleanup() {
             self.error = Some(format!("Gamepad cleanup: {e}"));
         }
@@ -194,6 +211,11 @@ impl Runtime {
     }
 
     pub fn stop(&mut self) {
+        self.suspend();
+        self.pending = None;
+    }
+
+    pub fn suspend(&mut self) {
         self.neutral();
         self.session = None;
     }
@@ -208,9 +230,32 @@ pub fn helper(args: &[String]) -> Result<(), String> {
     process::helper(args).map_err(|e| e.to_string())
 }
 
+pub fn install_helper(args: &[String]) -> Result<(), String> {
+    process::install_helper(args)
+}
+
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+
+    #[test]
+    fn pending_start_survives_a_temporary_input_block_and_reports_failure() {
+        let mut runtime = Runtime::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        runtime.pending = Some(rx);
+        let config = Config { enabled: true, ..Default::default() };
+        runtime.configure(1, config.clone(), false);
+        assert!(runtime.input().error.is_none());
+        runtime.suspend();
+        assert!(runtime.pending.is_some());
+        runtime.configure(1, config, false);
+        tx.send(Err("UAC cancelled".into())).unwrap();
+        assert_eq!(runtime.input().error.as_deref(), Some("UAC cancelled"));
+        let (_tx, rx) = std::sync::mpsc::channel();
+        runtime.pending = Some(rx);
+        runtime.stop();
+        assert!(runtime.pending.is_none());
+    }
 
     #[test]
     fn analog_maximum_uses_full_depth_by_default_and_scales_each_binding() {

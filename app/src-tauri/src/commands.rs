@@ -572,3 +572,13 @@ pub async fn gamepad_input(state: State<'_, AppState>, id: String) -> Result<cra
     let dev = state.device(&id)?;
     Ok(lock(&dev).gamepad_input())
 }
+
+#[tauri::command]
+pub async fn gamepad_driver() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(crate::gamepad::drivers::installed).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn install_gamepad_driver() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(crate::gamepad::drivers::install).await.map_err(|e| e.to_string())?
+}

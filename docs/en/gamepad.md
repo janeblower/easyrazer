@@ -6,10 +6,17 @@ copies and exported files. The default layout assigns WASD to the left stick
 and Q/E to the left/right triggers. Existing empty layouts receive these defaults
 once; custom assignments and later clearing of assignments are preserved.
 
-Install both HIDMaestro v1.12.0 driver packages, version **1.12.0.2302**,
-separately, following the upstream instructions. EasyRazer does not install
-drivers or change Windows security settings. Launch EasyRazer normally; the
-experimental `--gamepad-test` flag is no longer used.
+The editor, including the controller preview, is inactive in hardware mode
+and until both HIDMaestro driver packages are installed. Click **Install
+HIDMaestro** in the tab and approve Windows' administrator prompt. EasyRazer
+downloads the pinned upstream **v1.12.0** x64 release, verifies its SHA-256,
+and installs both driver packages, version **1.12.0.2302**, in the background.
+An animated indicator stays visible during download and installation; errors
+leave the install button available to retry. Installation uses the upstream
+signing tools and trusts the HIDMaestro code-signing certificate in Windows'
+local-machine Root and TrustedPublisher stores. It does not change Secure Boot
+or test-signing settings. Launch EasyRazer normally; the experimental
+`--gamepad-test` flag is no longer used.
 
 Enable driver mode to receive live key depth. Select a controller control and
 assign a keyboard key, then apply the changes. Gamepad output starts when both

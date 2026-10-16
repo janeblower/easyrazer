@@ -22,6 +22,7 @@ struct Endpoint {
 
 // Retain IPC until exit without waiting under the device or keyboard-engine locks.
 static STOPPING: Mutex<Vec<Endpoint>> = Mutex::new(Vec::new());
+static LAUNCHING: Mutex<()> = Mutex::new(());
 
 impl Drop for Process {
     fn drop(&mut self) {
@@ -89,8 +90,20 @@ pub(super) fn cleanup() -> io::Result<bool> {
     if let Some(e) = error { Err(e) } else { Ok(!stopping.is_empty()) }
 }
 
-pub(super) fn launch() -> Result<(Writer, Process), String> {
-    (|| launch_inner(&std::env::current_exe()?))().map_err(|e| format!("gamepad helper: {e}"))
+pub(super) fn launch() -> std::sync::mpsc::Receiver<Result<(Writer, Process), String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = (|| {
+            let _launch = LAUNCHING.try_lock().map_err(|_| "A gamepad helper is already starting. Apply again after startup finishes.".to_string())?;
+            if !super::drivers::installed()? {
+                return Err("Install HIDMaestro v1.12.0 from the Gamepad tab first.".into());
+            }
+            (|| launch_inner(&std::env::current_exe()?))().map_err(|e| format!("gamepad helper: {e}"))
+        })();
+        let _ = tx.send(result);
+        crate::wake::wake();
+    });
+    rx
 }
 
 fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
@@ -111,10 +124,16 @@ fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
 
 fn spawn(exe: &std::path::Path) -> io::Result<Process> {
     let channel = Channel::create()?;
+    let args = format!("--gamepad-helper {} {}", std::process::id(), channel.name);
+    let handle = elevate(exe, &args)?;
+    Ok(Process { inner: Some(Endpoint { handle, channel }) })
+}
+
+fn elevate(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle> {
     use std::os::windows::ffi::OsStrExt;
     let exe: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
     let verb = wide("runas");
-    let args = wide(&format!("--gamepad-helper {} {}", std::process::id(), channel.name));
+    let args = wide(args);
     let mut info = SHELLEXECUTEINFOW {
         cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS,
@@ -127,9 +146,29 @@ fn spawn(exe: &std::path::Path) -> io::Result<Process> {
     if unsafe { ShellExecuteExW(&mut info) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(Process {
-        inner: Some(Endpoint { handle: owned(info.hProcess)?, channel }),
-    })
+    owned(info.hProcess)
+}
+
+pub(super) fn install() -> Result<(), String> {
+    let run = || -> io::Result<()> {
+        let channel = Channel::create()?;
+        let args = format!("--gamepad-install {} {}", std::process::id(), channel.name);
+        let process = elevate(&std::env::current_exe()?, &args)?;
+        if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
+            return Err(io::Error::last_os_error());
+        }
+        Endpoint { handle: process, channel }.result()?;
+        Ok(())
+    };
+    run().map_err(|e| e.to_string())
+}
+
+pub fn install_helper(args: &[String]) -> Result<(), String> {
+    let (_, name) = endpoint(args).map_err(|e| e.to_string())?;
+    let channel = Channel::open(name).map_err(|e| e.to_string())?;
+    let result = super::drivers::deploy();
+    channel.reply([0; 3], result.as_ref().err().map(String::as_str));
+    result
 }
 
 fn endpoint(args: &[String]) -> io::Result<(u32, &str)> {
@@ -229,6 +268,14 @@ pub(super) fn helper(args: &[String]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_start_returns_without_requesting_elevation() {
+        let _launch = LAUNCHING.lock().unwrap();
+        let pending = launch();
+        let result = pending.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert!(matches!(result, Err(e) if e.contains("already starting")));
+    }
 
     #[test]
     fn slow_cleanup_does_not_block_the_caller() {
