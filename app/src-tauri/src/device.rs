@@ -1417,7 +1417,7 @@ mod tests {
     #[test]
     fn gamepad_shortcut_toggles_the_saved_state_and_keeps_bindings() {
         let shared: Shared = Default::default();
-        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into() };
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into(), ..Default::default() };
         let data = DeviceData { pid: 0x0266, loaded: Some(1), profiles: vec![Profile { id: 1, gamepad: config.clone(), ..Default::default() }], ..Default::default() };
         settings::lock(&shared).devices.insert("K".into(), data);
         let mut d = Device::new(shared.clone()).unwrap();
@@ -1437,12 +1437,12 @@ mod tests {
         settings::lock(&shared).devices.insert("K".into(), data);
         let mut d = Device::new(shared.clone()).unwrap();
         d.offline("K");
-        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into() };
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into(), ..Default::default() };
         assert!(d.set_gamepad_config(2, config.clone()).is_err());
         assert_eq!(d.gamepad_config(), crate::gamepad::Config::default());
         d.set_gamepad_config(1, config.clone()).unwrap();
         assert_eq!(settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad, config);
-        let bad = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 255)].into() };
+        let bad = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 255)].into(), ..Default::default() };
         assert!(d.set_gamepad_config(1, bad).is_err());
         assert_eq!(d.gamepad_config(), config);
         std::fs::remove_dir_all(settings::dir().unwrap()).unwrap();

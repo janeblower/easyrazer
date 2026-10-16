@@ -66,6 +66,7 @@
   },
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros", "gamepad": "Gamepad" },
   "gamepad": {
+    "maxDepth": "Maximum depth",
     "title": "Gamepad",
     "hint": "Select a gamepad control and assign a keyboard key.",
     "enabled": "Enabled in this profile",

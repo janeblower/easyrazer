@@ -2,12 +2,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { KeyView } from "../types";
-import type { GamepadBinding, GamepadConfig } from "../gamepad";
-import { capturedKey } from "../gamepad";
+import type { GamepadBinding, GamepadConfig, GamepadControl } from "../gamepad";
+import { ANALOG_BINDINGS, capturedKey } from "../gamepad";
 import { keyName } from "../bindings";
 import GamepadModel from "./GamepadModel.vue";
 import AppIcon from "./AppIcon.vue";
 
+const selected = defineModel<GamepadControl | null>("selected", { required: true });
 const props = defineProps<{
   config: GamepadConfig;
   depth: number[];
@@ -19,23 +20,30 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ update: [config: GamepadConfig] }>();
 const { t } = useI18n();
-const selected = ref<GamepadBinding | "left" | "right">("left");
 const capture = ref<GamepadBinding | null>(null);
 let previous: number[] = [];
 const keys = computed(() => props.layout.filter((key) => key.editable));
 const rows = computed<GamepadBinding[]>(() => {
+  if (!selected.value) return [];
   const side = selected.value.startsWith("left") ? "left" : selected.value.startsWith("right") ? "right" : null;
   return side
     ? ["up", "down", "left", "right", "click"].map((direction) => `${side}_${direction}` as GamepadBinding)
     : [selected.value as GamepadBinding];
 });
 const title = computed(() =>
-  selected.value.startsWith("left")
+  selected.value?.startsWith("left")
     ? t("gamepad.leftStick")
-    : selected.value.startsWith("right")
+    : selected.value?.startsWith("right")
       ? t("gamepad.rightStick")
       : t(`gamepad.${selected.value}`),
 );
+function setMaximum(binding: GamepadBinding, event: Event) {
+  if (!props.editable) return;
+  emit("update", {
+    ...props.config,
+    max_depth: { ...props.config.max_depth, [binding]: Number((event.target as HTMLInputElement).value) },
+  });
+}
 const rowLabel = (binding: GamepadBinding) => t(`gamepad.${binding.replace(/^(?:left|right)_/, "")}`);
 function bindingName(binding: GamepadBinding) {
   const key = keys.value.find((entry) => entry.key === props.config.bindings[binding]);
@@ -61,9 +69,10 @@ function cancelCapture() {
 }
 
 function escape(event: KeyboardEvent) {
-  if (capture.value && event.key === "Escape") {
+  if (event.key === "Escape" && (capture.value || selected.value)) {
     event.preventDefault();
     capture.value = null;
+    selected.value = null;
   }
 }
 
@@ -113,34 +122,51 @@ onUnmounted(() => {
     <div class="gamepad-workspace">
       <div class="gamepad-stage"><GamepadModel :config="config" :depth="depth" :selected="selected" @select="selected = $event" /></div>
       <aside class="gamepad-editor">
-        <h3>{{ title }}</h3>
-        <p class="hint">{{ t("gamepad.assignHint") }}</p>
-        <div v-for="binding in rows" :key="binding" class="assignment">
-          <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
-          <div class="assignment-input">
-            <button
-              :id="`gamepad-${binding}`"
-              class="record-key"
-              :disabled="!editable || !driver"
-              :class="{ capturing: capture === binding }"
-              :aria-pressed="capture === binding"
-              :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
-              @click="beginCapture(binding)"
-            >
-              {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
-            </button>
-            <button
-              class="icon-btn"
-              :disabled="!editable || config.bindings[binding] === undefined"
-              :title="t('gamepad.clear')"
-              :aria-label="t('gamepad.clear')"
-              @click="assign(binding, undefined)"
-            >
-              <AppIcon name="remove" />
-            </button>
+        <template v-if="selected">
+          <h3>{{ title }}</h3>
+          <p class="hint">{{ t("gamepad.assignHint") }}</p>
+          <div v-for="binding in rows" :key="binding" class="assignment">
+            <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
+            <div class="assignment-input">
+              <button
+                :id="`gamepad-${binding}`"
+                class="record-key"
+                :disabled="!editable || !driver"
+                :class="{ capturing: capture === binding }"
+                :aria-pressed="capture === binding"
+                :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
+                @click="beginCapture(binding)"
+              >
+                {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
+              </button>
+              <button
+                class="icon-btn"
+                :disabled="!editable || config.bindings[binding] === undefined"
+                :title="t('gamepad.clear')"
+                :aria-label="t('gamepad.clear')"
+                @click="assign(binding, undefined)"
+              >
+                <AppIcon name="remove" />
+              </button>
+            </div>
+            <label v-if="ANALOG_BINDINGS.includes(binding)" class="maximum-depth">
+              <span
+                >{{ t("gamepad.maxDepth") }} <output>{{ config.max_depth?.[binding] ?? 100 }}%</output></span
+              >
+              <input
+                type="range"
+                min="1"
+                max="100"
+                step="1"
+                :value="config.max_depth?.[binding] ?? 100"
+                :disabled="!editable"
+                :aria-label="`${rowLabel(binding)}: ${t('gamepad.maxDepth')}`"
+                @input="setMaximum(binding, $event)"
+              />
+            </label>
           </div>
-        </div>
-        <p v-if="capture" class="hint" role="status">{{ t("gamepad.capturing") }}</p>
+        </template>
+        <p v-else class="hint">{{ t("gamepad.selectHint") }}</p>
         <div class="input-help">
           <h3>{{ t("gamepad.inputTitle") }}</h3>
           <p class="hint">{{ t("gamepad.inputHint") }}</p>
@@ -224,10 +250,38 @@ p {
   align-items: center;
   gap: 6px;
 }
+.maximum-depth {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.maximum-depth span {
+  display: flex;
+  justify-content: space-between;
+}
+.maximum-depth input {
+  width: 100%;
+  margin: 0;
+}
+.gamepad-editor:has(.maximum-depth) .assignment {
+  margin: 6px 0;
+}
+.gamepad-editor:has(.maximum-depth) .input-help {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.gamepad-editor:has(.maximum-depth) p {
+  margin-bottom: 6px;
+}
 .record-key {
   width: 100%;
   min-width: 0;
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .assignment-input .capturing {
   border-color: var(--accent);

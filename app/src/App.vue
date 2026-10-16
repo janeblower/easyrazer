@@ -33,7 +33,7 @@ import { sameSnap, snapColors } from "./snap";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
 import GamepadTab from "./components/GamepadTab.vue";
-import { type GamepadConfig, type GamepadInput, defaultGamepad, sameGamepad } from "./gamepad";
+import { type GamepadConfig, type GamepadControl, type GamepadInput, defaultGamepad, sameGamepad } from "./gamepad";
 import { UNIQUE, common, factory, hsFactory, keyName, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
@@ -83,6 +83,7 @@ const hsBindEdits = ref<KeyMap<Action>>({});
 const hsUnsaved = ref(new Set<number>());
 const section = ref<"actuation" | "bindings" | "macros" | "gamepad">("actuation");
 const gamepadBase = ref<GamepadConfig>(defaultGamepad());
+const gamepadSelected = ref<GamepadControl | null>(null);
 const gamepadEdit = ref<GamepadConfig | null>(null);
 const gamepadReady = ref(false);
 const gamepadInput = ref<GamepadInput>({ depth: [], running: false, error: null });
@@ -885,7 +886,14 @@ async function onOffer(on: boolean) {
 let firstKeyboard: Promise<void> | null = null;
 const onVisibility = () => (visible.value = !document.hidden);
 
+function escapeSelection(event: KeyboardEvent) {
+  if (event.key !== "Escape") return;
+  selection.value = new Set();
+  gamepadSelected.value = null;
+}
+
 onMounted(async () => {
+  window.addEventListener("keydown", escapeSelection);
   document.addEventListener("visibilitychange", onVisibility);
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
@@ -952,6 +960,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener("keydown", escapeSelection);
   document.removeEventListener("visibilitychange", onVisibility);
   for (const f of unlisten) f();
   clearTimeout(errorTimer);
@@ -1055,12 +1064,12 @@ onUnmounted(() => {
               </button>
             </span>
             <SelectionBar
-              v-if="section === 'actuation' || section === 'bindings'"
+              v-if="section !== 'macros'"
               class="ml-auto"
-              :count="selection.size"
-              :single="section === 'bindings'"
+              :count="section === 'gamepad' ? Number(gamepadSelected !== null) : selection.size"
+              :single="section === 'bindings' || section === 'gamepad'"
               @select-all="selectAll"
-              @clear="selection = new Set()"
+              @clear="section === 'gamepad' ? (gamepadSelected = null) : (selection = new Set())"
             />
           </div>
           <MacroEditor
@@ -1074,6 +1083,7 @@ onUnmounted(() => {
           <template v-else-if="section === 'gamepad'">
             <GamepadTab
               :key="`${keyboard}:${status?.profile}`"
+              v-model:selected="gamepadSelected"
               :config="gamepadConfig"
               :depth="gamepadInput.depth"
               :layout="layout"

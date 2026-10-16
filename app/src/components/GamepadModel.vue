@@ -8,7 +8,7 @@ const props = defineProps<{ config: GamepadConfig; depth: number[]; selected: Ga
 const emit = defineEmits<{ select: [control: GamepadBinding | "left" | "right"] }>();
 const { t } = useI18n();
 const uid = useId().replace(/:/g, "");
-const state = computed(() => gamepadState(props.config.bindings, props.depth));
+const state = computed(() => gamepadState(props.config.bindings, props.depth, props.config.max_depth));
 const sticks = computed(() => [
   { id: "left" as const, cx: 230, cy: 350, label: "L", axes: state.value.left, ...stickDisplay(state.value.left) },
   { id: "right" as const, cx: 490, cy: 500, label: "R", axes: state.value.right, ...stickDisplay(state.value.right) },

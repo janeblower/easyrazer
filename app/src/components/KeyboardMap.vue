@@ -79,14 +79,25 @@ const size = computed(() => ({
   zoom: scale.value,
 }));
 
+function escapeSelection(event: KeyboardEvent) {
+  if (event.key !== "Escape") return;
+  selection.value = new Set();
+  band.value = null;
+  start = null;
+}
+
 onMounted(() => {
+  window.addEventListener("keydown", escapeSelection);
   if (!props.fit) return;
   observer = new ResizeObserver(() => {
     scale.value = Math.min(1, box.value!.clientWidth / width.value);
   });
   observer.observe(box.value!);
 });
-onUnmounted(() => observer?.disconnect());
+onUnmounted(() => {
+  observer?.disconnect();
+  window.removeEventListener("keydown", escapeSelection);
+});
 
 function norm(b: Band): Band {
   return { x0: Math.min(b.x0, b.x1), y0: Math.min(b.y0, b.y1), x1: Math.max(b.x0, b.x1), y1: Math.max(b.y0, b.y1) };

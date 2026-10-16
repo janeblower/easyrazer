@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GAMEPAD_BINDINGS, capturedKey, defaultGamepad, gamepadState, sameGamepad, stickDisplay } from "./gamepad";
+import { ANALOG_BINDINGS, GAMEPAD_BINDINGS, capturedKey, defaultGamepad, gamepadState, sameGamepad, stickDisplay } from "./gamepad";
 
 test("default layout has independent WASD and QE assignments", () => {
   const config = defaultGamepad();
@@ -32,9 +32,27 @@ test("opposite axes cancel and preserve full linear depth", () => {
 
 test("every digital control uses the same inclusive threshold", () => {
   for (const binding of GAMEPAD_BINDINGS) {
+    if (ANALOG_BINDINGS.includes(binding)) continue;
     expect(gamepadState({ [binding]: 0 }, [127]).buttons[binding]).toBe(false);
     expect(gamepadState({ [binding]: 0 }, [128]).buttons[binding]).toBe(true);
   }
+});
+
+test("analog controls reach full output only at their configured maximum", () => {
+  const bindings = { left_right: 0, lt: 1, rt: 2 };
+  const half = gamepadState(bindings, [128, 128, 128]);
+  expect(half.left.x).toBe(128 / 255);
+  expect(half.lt).toBe(128 / 255);
+  expect(half.buttons.lt).toBe(false);
+  const scaled = gamepadState(bindings, [128, 128, 128], { left_right: 50, lt: 50 });
+  expect(scaled.left.x).toBe(1);
+  expect(scaled.lt).toBe(1);
+  expect(scaled.rt).toBe(128 / 255);
+  expect(scaled.buttons.lt).toBe(true);
+  expect(gamepadState(bindings, [255, 255, 255]).lt).toBe(1);
+  expect(gamepadState(bindings, [255, 255, 255], { lt: 50 }).lt).toBe(1);
+  expect(sameGamepad({ enabled: true, bindings }, { enabled: true, bindings, max_depth: { lt: 100 } })).toBe(true);
+  expect(sameGamepad({ enabled: true, bindings }, { enabled: true, bindings, max_depth: { lt: 50 } })).toBe(false);
 });
 
 test("stick presentation clamps diagonals and hides neutral overlays", () => {

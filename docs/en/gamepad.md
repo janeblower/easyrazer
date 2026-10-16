@@ -28,6 +28,13 @@ suppressed in both keyboard layers, and Snap Tap groups containing them are
 suspended while gamepad output is enabled. These keys remain suppressed if the
 helper fails; disable the gamepad switch to restore their keyboard bindings.
 
+Each stick direction and trigger has a **Maximum depth** slider beside its
+assignment. At the default 100%, full output requires full reported key travel;
+at 50%, half travel produces full output. Deeper presses stay at 100% output.
+The controller preview uses the same scaling. Trigger highlighting marks full
+output. Use **Clear selection** or Esc to clear the selected controller control;
+Esc also clears key selections in the other tabs.
+
 Switching profiles or assignments releases previous outputs. Leaving driver
 mode, disconnecting the keyboard or closing EasyRazer releases keyboard keys
 and closes that keyboard's virtual controller. After a temporary driver-mode

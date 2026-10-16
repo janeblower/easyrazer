@@ -130,6 +130,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
         has
     };
     let Exported { name, mut data, mut rapid, mut snap_tap, mut gamepad, continuous, mut custom } = f.profile;
+    gamepad.validate_depth().map_err(Refused::Broken)?;
 
     let rescale = source != d.pid;
     let [lo, hi] = to.analog.range.map(|mm| to.analog.threshold(mm));
@@ -201,7 +202,7 @@ mod tests {
     #[test]
     fn gamepad_assignments_survive_export_and_drop_unavailable_keys() {
         let mut source = DeviceData { pid: 0x0266, ..Default::default() };
-        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18), ("b".into(), 91)].into() };
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18), ("b".into(), 91)].into(), max_depth: [("lt".into(), 50)].into() };
         source.profiles.push(Profile { id: 1, name: "Game".into(), gamepad: config.clone(), ..Default::default() });
         let file = export(&source, 1).unwrap();
         assert_eq!(file.profile.gamepad, config);
@@ -210,6 +211,7 @@ mod tests {
         let imported = import(&mut target, parse(&text).unwrap()).unwrap();
         let gamepad = &target.profile(imported.id).unwrap().gamepad;
         assert!(gamepad.enabled);
+        assert_eq!(gamepad.max_depth, config.max_depth);
         assert_eq!(gamepad.bindings.get("a"), Some(&18));
         let keys = layout::keys(devices::by_pid(target.pid).unwrap().layout);
         assert!(gamepad.bindings.values().all(|key| keys.iter().any(|k| k.editable && k.key == *key)));
