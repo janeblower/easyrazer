@@ -38,6 +38,9 @@ Closing EasyRazer closes the controller. Losing the helper stops driver mode;
 restart the app to retry. Starting without the flag restores normal behaviour.
 The flag is not added to Windows autostart.
 
-An XInput observer that remains open across removal can leave the HIDMaestro
-XUSB host holding shared mappings, preventing the next creation. Close the
-observer before quitting the test. Compatibility with games is not verified.
+Cleanup is not yet reliable: the HIDMaestro XUSB host can keep shared mappings
+after the controller disappears from XInput, preventing the next creation.
+This occurred with a persistent XInput observer and after exiting EasyRazer
+through the tray. Checks using short-lived observers cleaned up successfully.
+Resolving this lifecycle issue is required before regular use. Compatibility
+with games is not verified.
