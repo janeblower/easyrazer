@@ -44,7 +44,11 @@ The app requests depth snapshots only while the editor is visible.
 
 Input is submitted directly to HIDMaestro shared memory from the keyboard
 reader. The helper watches the app process so a crash also triggers cleanup.
-Normal exit closes the writer before waiting for helper cleanup.
+Disabling the gamepad neutralizes input and closes the writer before signaling
+the helper to stop. Cleanup is checked without blocking the keyboard reader or
+the interface. A new helper cannot start while the previous helper is stopping;
+apply again once cleanup finishes if a restart was requested during that time.
+Cleanup errors are shown in the editor.
 
 The pinned HIDMaestro XUSB driver can retain shared mappings after a controller
 disappears from XInput if another process holds cached XInput handles without

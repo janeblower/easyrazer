@@ -121,7 +121,7 @@ impl EngineHandle {
                 }
                 let out = {
                     let mut e = lock(&engine);
-                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
+                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
                     e.release_all()
                 };
                 emit(&out, &sink);
@@ -136,7 +136,7 @@ impl EngineHandle {
         let out = {
             let mut e = lock(&self.engine);
             self.stop.store(true, Ordering::SeqCst);
-            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
+            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
             e.release_all()
         };
         emit(&out, &self.sink);
