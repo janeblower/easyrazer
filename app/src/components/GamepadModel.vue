@@ -59,7 +59,7 @@ const choose = (id: GamepadBinding | "left" | "right", e: KeyboardEvent) => {
         @keydown="choose(s.id, $event)"
       >
         <path d="M158 142 C193 140 225 136 251 128 C264 140 279 148 299 146 V211 H265 C210 211 170 188 158 142 Z" />
-        <path d="M167 281 C175 261 200 249 224 243 C243 238 260 243 271 251 C238 251 202 261 167 281 Z" />
+        <path d="M164 299 C166 276 180 260 204 250 C231 237 250 236 267 247 C278 254 287 254 301 254 V340 H164 Z" />
         <text x="229" y="181" :transform="s.mirror ? 'translate(458 0) scale(-1 1)' : ''">{{ s.id.toUpperCase() }}</text>
       </g>
       <g
