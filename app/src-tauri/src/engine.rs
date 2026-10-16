@@ -146,7 +146,7 @@ impl EngineHandle {
         let mut e = lock(&self.engine);
         let mut gamepad = self.gamepad.lock().unwrap_or_else(|e| e.into_inner());
         if gamepad.config != config || gamepad.profile != profile || (config.enabled && launch) {
-            emit(&e.release_all(), &self.sink);
+            emit(&e.release_outputs(), &self.sink);
         }
         gamepad.configure(profile, config, launch);
         gamepad.config.configure(&mut cfg);
