@@ -852,6 +852,7 @@ name = "easyrazer"
 version = "0.0.0"
 dependencies = [
  "hidapi",
+ "hidmaestro-client",
  "razer-core",
  "serde",
  "serde_json",
@@ -1456,6 +1457,14 @@ dependencies = [
  "cfg-if",
  "libc",
  "pkg-config",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "hidmaestro-client"
+version = "0.1.0"
+source = "git+https://github.com/janeblower/hidmaestro-client-rust?rev=b48a3defbd056b82be3738169c49ea4ffaf5c9ba#b48a3defbd056b82be3738169c49ea4ffaf5c9ba"
+dependencies = [
  "windows-sys 0.61.2",
 ]
 
