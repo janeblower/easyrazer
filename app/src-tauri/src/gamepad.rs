@@ -17,11 +17,21 @@ pub const CONTROLS: [&str; 24] = [
     "dpad_up", "dpad_down", "dpad_left", "dpad_right",
 ];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub enabled: bool,
     pub bindings: BTreeMap<String, u8>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { enabled: false, bindings: [
+            ("left_up".into(), 18), ("left_down".into(), 32),
+            ("left_left".into(), 31), ("left_right".into(), 33),
+            ("lt".into(), 17), ("rt".into(), 19),
+        ].into() }
+    }
 }
 
 impl Config {
@@ -179,6 +189,22 @@ pub fn helper(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+
+    #[test]
+    fn default_layout_uses_wasd_and_qe_without_overwriting_custom_bindings() {
+        let config = Config::default();
+        assert!(!config.enabled);
+        assert_eq!(config.bindings, [
+            ("left_up".into(), 18), ("left_down".into(), 32),
+            ("left_left".into(), 31), ("left_right".into(), 33),
+            ("lt".into(), 17), ("rt".into(), 19),
+        ].into());
+        assert_eq!(serde_json::from_str::<Config>("{}").unwrap(), config);
+        let custom: Config = serde_json::from_str(r#"{"bindings":{"left_up":37}}"#).unwrap();
+        assert_eq!(custom.bindings, [("left_up".into(), 37)].into());
+        let cleared: Config = serde_json::from_str(r#"{"bindings":{}}"#).unwrap();
+        assert!(cleared.bindings.is_empty());
+    }
 
     #[test]
     fn disabled_capture_and_profile_changes_reset_input_without_launching() {

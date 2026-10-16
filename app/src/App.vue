@@ -33,7 +33,7 @@ import { sameSnap, snapColors } from "./snap";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
 import GamepadTab from "./components/GamepadTab.vue";
-import { type GamepadConfig, type GamepadInput, sameGamepad } from "./gamepad";
+import { type GamepadConfig, type GamepadInput, defaultGamepad, sameGamepad } from "./gamepad";
 import { UNIQUE, common, factory, hsFactory, keyName, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
@@ -82,7 +82,7 @@ const hsBindBase = ref<KeyMap<Action | null>>({});
 const hsBindEdits = ref<KeyMap<Action>>({});
 const hsUnsaved = ref(new Set<number>());
 const section = ref<"actuation" | "bindings" | "macros" | "gamepad">("actuation");
-const gamepadBase = ref<GamepadConfig>({ enabled: false, bindings: {} });
+const gamepadBase = ref<GamepadConfig>(defaultGamepad());
 const gamepadEdit = ref<GamepadConfig | null>(null);
 const gamepadReady = ref(false);
 const gamepadInput = ref<GamepadInput>({ depth: [], running: false, error: null });
@@ -928,6 +928,12 @@ onMounted(async () => {
   await loadDevices();
   await loadMacros();
   unlisten.push(
+    await listen<[string, number, boolean]>("gamepad-enabled", (e) => {
+      const [id, profile, enabled] = e.payload;
+      if (!ours(id) || loadedProfile !== profile) return;
+      gamepadBase.value = { ...gamepadBase.value, enabled };
+      if (gamepadEdit.value) editGamepad({ ...gamepadEdit.value, enabled });
+    }),
     await listen<[string, boolean]>("snap-tap", (e) => {
       const [id, on] = e.payload;
       if (!ours(id)) return;

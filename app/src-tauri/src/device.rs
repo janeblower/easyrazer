@@ -513,6 +513,15 @@ impl Device {
         self.engine.as_ref().map(|e| e.gamepad_input()).unwrap_or_default()
     }
 
+    pub fn toggle_gamepad(&mut self) -> Result<(u32, bool), String> {
+        let profile = self.loaded().ok_or("No active profile")?;
+        let mut config = self.gamepad_config();
+        config.enabled = !config.enabled;
+        let enabled = config.enabled;
+        self.set_gamepad_config(profile, config)?;
+        Ok((profile, enabled))
+    }
+
     pub fn set_gamepad_config(&mut self, profile: u32, config: crate::gamepad::Config) -> Result<(), String> {
         if self.loaded() != Some(profile) {
             return Err("The active profile changed. Reload the gamepad editor.".into());
@@ -1403,6 +1412,21 @@ mod tests {
 
     fn plain(k: u8) -> RawKey {
         RawKey { thr_low: 0, thr_high: 0, fn_id: 0x02, fn_data: vec![0, k] }
+    }
+
+    #[test]
+    fn gamepad_shortcut_toggles_the_saved_state_and_keeps_bindings() {
+        let shared: Shared = Default::default();
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into() };
+        let data = DeviceData { pid: 0x0266, loaded: Some(1), profiles: vec![Profile { id: 1, gamepad: config.clone(), ..Default::default() }], ..Default::default() };
+        settings::lock(&shared).devices.insert("K".into(), data);
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.offline("K");
+        assert_eq!(d.toggle_gamepad().unwrap(), (1, false));
+        assert!(!settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad.enabled);
+        assert_eq!(d.toggle_gamepad().unwrap(), (1, true));
+        assert_eq!(d.gamepad_config(), config);
+        assert_eq!(settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad, config);
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import DevPanel from "./components/DevPanel.vue";
 import { hsFactory } from "./bindings";
+import { defaultGamepad } from "./gamepad";
 import { i18n } from "./i18n";
 import "virtual:uno.css";
 import "./style.css";
@@ -133,7 +134,7 @@ async function mockBackend() {
   entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4], false);
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
-    gamepad_config: ({ id }) => structuredClone(gamepads.get(String(id)) ?? { enabled: false, bindings: {} }),
+    gamepad_config: ({ id }) => structuredClone(gamepads.get(String(id)) ?? defaultGamepad()),
     set_gamepad_config: ({ id, config, profile }) => {
       if (profile !== state.profile) throw new Error("Profile changed");
       const next = config as { enabled: boolean; bindings: Record<string, number> };

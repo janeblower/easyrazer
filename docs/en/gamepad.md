@@ -2,7 +2,9 @@
 
 The Gamepad tab maps analog keyboard keys to an Xbox 360 controller. Assignments
 and the enable switch belong to the active profile and travel with profile
-copies and exported files. Existing profiles start disabled and unassigned.
+copies and exported files. The default layout assigns WASD to the left stick
+and Q/E to the left/right triggers. Existing empty layouts receive these defaults
+once; custom assignments and later clearing of assignments are preserved.
 
 Install both HIDMaestro v1.12.0 driver packages, version **1.12.0.2302**,
 separately, following the upstream instructions. EasyRazer does not install
@@ -15,6 +17,9 @@ driver mode and the gamepad profile switch are enabled. Only the controller
 helper requests administrator rights. A failed controller start leaves the
 keyboard engine running; apply the configuration again to retry. The watcher
 does not repeatedly request elevation after a failure.
+
+The default Fn+F10 game-mode binding also toggles the gamepad in the active
+profile immediately, without pressing Apply. Its Win-key blocking behavior remains.
 
 Both sticks use the full signed XInput range. Opposite directions subtract;
 equal depths cancel. Triggers follow depth linearly from 0 to 255. Buttons,

@@ -271,7 +271,20 @@ fn sink(h: AppHandle, id: String) -> Sink {
                     std::thread::sleep(Duration::from_secs(1));
                     commands::lock(&d).set_led(LED_MACRO, false, false);
                 }
-                Output::GameMode(on) => commands::lock(&d).set_led(LED_GAME, on, false),
+                Output::GameMode(on) => {
+                    let result = {
+                        let mut device = commands::lock(&d);
+                        device.set_led(LED_GAME, on, false);
+                        device.toggle_gamepad()
+                    };
+                    match result {
+                        Ok((profile, enabled)) => { let _ = h.emit("gamepad-enabled", (&id, profile, enabled)); }
+                        Err(e) => {
+                            let model = commands::lock(&d).name();
+                            let _ = h.emit("app-error", format!("{model}: {e}"));
+                        }
+                    }
+                }
                 Output::SnapTap(on) => {
                     let r = commands::lock(&d).set_snap_tap(on);
                     if let Err(e) = r {

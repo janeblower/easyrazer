@@ -260,7 +260,7 @@ unwritten macro, EasyRazer offers to write it; writing a binding writes the macr
 
 In **Keys → Gamepad**, select a button or stick on the controller and record keyboard keys in the panel on the right. Each stick has four directions and a click. Click an assignment, then press a physical key in Driver mode. The button shows the recorded key; click it again to replace it. Release held keys before capture; Esc cancels it.
 
-Enable the gamepad in the profile and press **Apply**. Settings stay in the app's profile; they are not written to the keyboard's flash. Gamepad output requires Driver mode and the HIDMaestro drivers described in [Gamepad setup](gamepad.md).
+The default assignments are WASD for the left stick and Q/E for the left/right triggers. Enable the gamepad in the profile and press **Apply**, or toggle it immediately with the default Fn+F10 game-mode binding. Settings stay in the app's profile; they are not written to the keyboard's flash. Gamepad output requires Driver mode and the HIDMaestro drivers described in [Gamepad setup](gamepad.md).
 
 Trigger scales show real key depth. Moving either stick reveals its axes, angle and displacement. Assigned keys act as gamepad controls instead of typing; Snap Tap groups containing them are suspended while the profile's gamepad is enabled. Disabling the mode or disconnecting the keyboard releases the controller input.
 

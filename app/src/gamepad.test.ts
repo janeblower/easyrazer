@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { GAMEPAD_BINDINGS, capturedKey, gamepadState, sameGamepad, stickDisplay } from "./gamepad";
+import { GAMEPAD_BINDINGS, capturedKey, defaultGamepad, gamepadState, sameGamepad, stickDisplay } from "./gamepad";
+
+test("default layout has independent WASD and QE assignments", () => {
+  const config = defaultGamepad();
+  expect(config).toEqual({ enabled: false, bindings: { left_up: 18, left_down: 32, left_left: 31, left_right: 33, lt: 17, rt: 19 } });
+  config.bindings.left_up = 37;
+  expect(defaultGamepad().bindings.left_up).toBe(18);
+});
 
 test("configuration equality ignores assignment order", () => {
   expect(sameGamepad({ enabled: true, bindings: { a: 1, b: 2 } }, { enabled: true, bindings: { b: 2, a: 1 } })).toBe(true);

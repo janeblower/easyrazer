@@ -35,6 +35,9 @@ export interface GamepadInput {
   running: boolean;
   error: string | null;
 }
+export function defaultGamepad(): GamepadConfig {
+  return { enabled: false, bindings: { left_up: 18, left_down: 32, left_left: 31, left_right: 33, lt: 17, rt: 19 } };
+}
 export interface StickState {
   x: number;
   y: number;
