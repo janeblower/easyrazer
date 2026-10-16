@@ -955,7 +955,7 @@ onUnmounted(() => {
 <template>
   <div class="flex h-screen" :class="{ 'flex-row-reverse': docked === 'left', 'flex-col': docked === 'bottom' }">
     <div class="flex-1 min-h-0 min-w-0 overflow-auto">
-      <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]">
+      <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]" :class="{ 'h-full': tab === 'keys' && section === 'gamepad' }">
         <nav class="flex gap-1">
           <button
             v-for="name in TABS"
@@ -1034,7 +1034,7 @@ onUnmounted(() => {
         <div
           v-if="tab === 'keys'"
           class="flex flex-col gap-4"
-          :class="{ 'min-w-[1121px]': section === 'actuation' || section === 'bindings' }"
+          :class="{ 'min-w-[1121px]': section === 'actuation' || section === 'bindings', 'flex-1 min-h-0': section === 'gamepad' }"
         >
           <div class="flex gap-3 items-center">
             <span class="inline-flex">

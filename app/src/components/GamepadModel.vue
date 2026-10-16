@@ -10,20 +10,20 @@ const { t } = useI18n();
 const uid = useId().replace(/:/g, "");
 const state = computed(() => gamepadState(props.config.bindings, props.depth));
 const sticks = computed(() => [
-  { id: "left" as const, cx: 249, cy: 350, label: "L", axes: state.value.left, ...stickDisplay(state.value.left) },
-  { id: "right" as const, cx: 478, cy: 474, label: "R", axes: state.value.right, ...stickDisplay(state.value.right) },
+  { id: "left" as const, cx: 230, cy: 350, label: "L", axes: state.value.left, ...stickDisplay(state.value.left) },
+  { id: "right" as const, cx: 490, cy: 500, label: "R", axes: state.value.right, ...stickDisplay(state.value.right) },
 ]);
 const faces = [
-  { id: "y", x: 600, y: 314 },
-  { id: "x", x: 552, y: 362 },
-  { id: "b", x: 648, y: 362 },
-  { id: "a", x: 600, y: 410 },
+  { id: "y", x: 570, y: 302 },
+  { id: "x", x: 522, y: 350 },
+  { id: "b", x: 618, y: 350 },
+  { id: "a", x: 570, y: 398 },
 ] as const;
 const dpad = [
-  { id: "dpad_up", x: 319, y: 467, glyph: "⌃" },
-  { id: "dpad_down", x: 319, y: 535, glyph: "⌄" },
-  { id: "dpad_left", x: 285, y: 501, glyph: "‹" },
-  { id: "dpad_right", x: 353, y: 501, glyph: "›" },
+  { id: "dpad_up", x: 310, y: 466, glyph: "⌃" },
+  { id: "dpad_down", x: 310, y: 534, glyph: "⌄" },
+  { id: "dpad_left", x: 276, y: 500, glyph: "‹" },
+  { id: "dpad_right", x: 344, y: 500, glyph: "›" },
 ] as const;
 const shoulders = [
   { id: "lb", trigger: "lt", x: 180, mirror: false },
@@ -58,8 +58,8 @@ const choose = (id: GamepadBinding | "left" | "right", e: KeyboardEvent) => {
         @click="emit('select', s.id)"
         @keydown="choose(s.id, $event)"
       >
-        <path d="M158 142 Q206 139 253 127 Q276 146 300 146 L300 211 L263 211 Q176 211 158 142 Z" />
-        <path d="M163 275 Q165 243 231 235 Q258 230 272 242 L300 252 L275 280 Z" />
+        <path d="M158 142 C193 140 225 136 251 128 C264 140 279 148 299 146 V211 H265 C210 211 170 188 158 142 Z" />
+        <path d="M167 281 C175 261 200 249 224 243 C243 238 260 243 271 251 C238 251 202 261 167 281 Z" />
         <text x="229" y="181" :transform="s.mirror ? 'translate(458 0) scale(-1 1)' : ''">{{ s.id.toUpperCase() }}</text>
       </g>
       <g
@@ -217,7 +217,8 @@ const choose = (id: GamepadBinding | "left" | "right", e: KeyboardEvent) => {
 .controller {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  max-height: 100%;
   overflow: visible;
 }
 .shell {

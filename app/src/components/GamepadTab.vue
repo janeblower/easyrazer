@@ -37,6 +37,10 @@ const title = computed(() =>
       : t(`gamepad.${selected.value}`),
 );
 const rowLabel = (binding: GamepadBinding) => t(`gamepad.${binding.replace(/^(?:left|right)_/, "")}`);
+function bindingName(binding: GamepadBinding) {
+  const key = keys.value.find((entry) => entry.key === props.config.bindings[binding]);
+  return key ? keyName(key, t) : t("gamepad.capture");
+}
 
 function assign(binding: GamepadBinding, key: number | undefined) {
   if (!props.editable || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
@@ -114,30 +118,16 @@ onUnmounted(() => {
         <div v-for="binding in rows" :key="binding" class="assignment">
           <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
           <div class="assignment-input">
-            <select
-              :id="`gamepad-${binding}`"
-              :value="config.bindings[binding] ?? ''"
-              :disabled="!editable"
-              @change="
-                assign(
-                  binding,
-                  ($event.target as HTMLSelectElement).value === '' ? undefined : Number(($event.target as HTMLSelectElement).value),
-                )
-              "
-            >
-              <option value="">{{ t("gamepad.unassigned") }}</option>
-              <option v-for="key in keys" :key="key.key" :value="key.key">{{ keyName(key, t) }}</option>
-            </select>
             <button
-              class="icon-btn"
+              :id="`gamepad-${binding}`"
+              class="record-key"
               :disabled="!editable || !driver"
               :class="{ capturing: capture === binding }"
               :aria-pressed="capture === binding"
-              :title="t(capture === binding ? 'gamepad.capturing' : 'gamepad.capture')"
-              :aria-label="t(capture === binding ? 'gamepad.capturing' : 'gamepad.capture')"
+              :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
               @click="beginCapture(binding)"
             >
-              <AppIcon name="keyboard" />
+              {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
             </button>
             <button
               class="icon-btn"
@@ -170,7 +160,14 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-  margin: 24px 0 20px;
+  margin: 4px 0 12px;
+  flex-shrink: 0;
+}
+.gamepad-tab {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
 }
 h2 {
   font-size: 18px;
@@ -191,9 +188,12 @@ p {
 }
 .gamepad-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 28px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 20px;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
 }
 .gamepad-stage,
 .gamepad-editor {
@@ -202,23 +202,29 @@ p {
   border-radius: 7px;
 }
 .gamepad-stage {
-  padding: 10px 12px 14px;
+  padding: 12px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .gamepad-editor {
-  padding: 24px 20px;
+  padding: 18px;
 }
 .assignment {
   display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
-  margin: 16px 0;
+  margin: 12px 0;
+  font-size: 13px;
 }
 .assignment-input {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.assignment select {
+.record-key {
   width: 100%;
   min-width: 0;
   flex: 1;
@@ -229,12 +235,12 @@ p {
 }
 .input-help {
   border-top: 1px solid var(--line);
-  margin-top: 24px;
-  padding-top: 20px;
+  margin-top: 16px;
+  padding-top: 14px;
 }
 .input-help p {
-  line-height: 1.7;
-  margin-bottom: 12px;
+  line-height: 1.5;
+  margin-bottom: 10px;
 }
 .input-status {
   display: flex;

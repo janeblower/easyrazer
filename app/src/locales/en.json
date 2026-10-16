@@ -73,7 +73,7 @@
     "running": "Controller active",
     "stopped": "Controller inactive",
     "selectHint": "Select a button or stick",
-    "assignHint": "Choose a key from the list, or capture a key press in driver mode. Release held keys first; Esc cancels.",
+    "assignHint": "Click an assignment and press a keyboard key. Release held keys first; Esc cancels.",
     "keyboardKey": "Keyboard key",
     "unassigned": "Unassigned",
     "capture": "Capture key",
