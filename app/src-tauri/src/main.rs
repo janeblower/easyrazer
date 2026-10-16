@@ -8,6 +8,7 @@ mod device;
 mod dynamic_lighting;
 mod engine;
 mod focus;
+mod gamepad;
 mod i18n;
 mod profiles;
 mod settings;
@@ -28,6 +29,25 @@ use engine::Sink;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--gamepad-helper") {
+        if let Err(e) = gamepad::helper(&args[1..]) {
+            eprintln!("gamepad helper: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let _gamepad = if args.iter().any(|a| a == "--gamepad-test") {
+        match gamepad::start() {
+            Ok(session) => Some(session),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // Only the main thread takes the process down; elsewhere panics are caught and the engine restarts.

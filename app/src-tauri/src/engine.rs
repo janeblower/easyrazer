@@ -42,6 +42,7 @@ pub struct EngineHandle {
     threads: Vec<JoinHandle<()>>,
     sink: Sink,
     _wheel: Wheel,
+    gamepad: bool,
 }
 
 fn lock(e: &Mutex<Engine>) -> MutexGuard<'_, Engine> {
@@ -100,7 +101,14 @@ impl Drop for MenuListener {
 
 impl EngineHandle {
     /// Opens the report collections and starts reading; the keyboard only reports once in driver mode.
-    pub fn start(api: &HidApi, unit: &Unit, cfg: Config, sink: Sink) -> Result<Self, String> {
+    pub fn start(api: &HidApi, unit: &Unit, mut cfg: Config, sink: Sink) -> Result<Self, String> {
+        let gamepad = crate::gamepad::enabled_for(unit);
+        if gamepad {
+            if !crate::gamepad::healthy() {
+                return Err("gamepad helper disconnected; restart --gamepad-test".into());
+            }
+            crate::gamepad::configure(&mut cfg);
+        }
         let report = &unit.spec.analog.depth;
         let depth = open(api, unit, &report.collection)?;
         let razer = open(api, unit, "col04")?;
@@ -109,17 +117,23 @@ impl EngineHandle {
         let spawn = |dev: HidDevice, feed: Feed| {
             let (engine, stop, sink) = (engine.clone(), stop.clone(), sink.clone());
             std::thread::spawn(move || {
-                let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
+                let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed, gamepad)));
                 // Not stopped by its owner: the watcher replaces the engine.
                 if !stop.swap(true, Ordering::SeqCst) {
                     crate::wake::wake();
                 }
-                let out = lock(&engine).release_all();
+                let out = {
+                    let mut e = lock(&engine);
+                    if gamepad {
+                        crate::gamepad::neutral();
+                    }
+                    e.release_all()
+                };
                 emit(&out, &sink);
             })
         };
-        let threads = vec![spawn(depth, Box::new(feed_depth(report.clone()))), spawn(razer, Box::new(feed_razer))];
-        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit) })
+        let threads = vec![spawn(depth, Box::new(feed_depth(report.clone(), gamepad))), spawn(razer, Box::new(feed_razer))];
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit), gamepad })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
@@ -127,18 +141,25 @@ impl EngineHandle {
         let out = {
             let mut e = lock(&self.engine);
             self.stop.store(true, Ordering::SeqCst);
+            if self.gamepad {
+                crate::gamepad::neutral();
+            }
             e.release_all()
         };
         emit(&out, &self.sink);
     }
 
-    pub fn set_config(&self, cfg: Config) {
-        lock(&self.engine).set_config(cfg);
+    pub fn set_config(&self, mut cfg: Config) {
+        let mut e = lock(&self.engine);
+        if self.gamepad {
+            crate::gamepad::configure(&mut cfg);
+        }
+        e.set_config(cfg);
     }
 
     /// `false` once a reader lost the keyboard; the handle is then replaced.
     pub fn alive(&self) -> bool {
-        !self.threads.iter().any(JoinHandle::is_finished)
+        !self.threads.iter().any(JoinHandle::is_finished) && (!self.gamepad || crate::gamepad::healthy())
     }
 }
 
@@ -151,9 +172,12 @@ impl Drop for EngineHandle {
     }
 }
 
-fn feed_depth(r: DepthReport) -> impl Fn(&mut Engine, &[u8], Instant) -> Vec<Output> {
+fn feed_depth(r: DepthReport, gamepad: bool) -> impl Fn(&mut Engine, &[u8], Instant) -> Vec<Output> {
     move |e, report, now| {
         let Some(d) = rapid::parse_depth(report, &r) else { return Vec::new() };
+        if gamepad {
+            crate::gamepad::feed(&d);
+        }
         let mut out = e.feed_depth(&d, now);
         out.extend(e.lead(&d));
         out
@@ -164,9 +188,12 @@ fn feed_razer(e: &mut Engine, report: &[u8], _: Instant) -> Vec<Output> {
     rapid::parse_razer(report).map_or_else(Vec::new, |c| e.feed_razer(&c))
 }
 
-fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink, feed: Feed) {
+fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink, feed: Feed, gamepad: bool) {
     let mut buf = [0u8; 64];
     while !stop.load(Ordering::SeqCst) {
+        if gamepad && !crate::gamepad::healthy() {
+            return;
+        }
         let wait = lock(engine).deadline().map_or(POLL, |d| d.saturating_duration_since(Instant::now()).min(POLL));
         // Round up: a zero timeout would spin until the repeat is due.
         let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000) as i32) else { return };
