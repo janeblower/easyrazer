@@ -68,6 +68,7 @@ pub struct Profile {
     pub rapid: BTreeMap<u8, Rapid>,
     /// Works only in driver mode.
     pub snap_tap: SnapTap,
+    pub gamepad: crate::gamepad::Config,
     /// Continuous Rapid Trigger of a firmware that runs it, one switch for the whole profile;
     /// the host engine reads `Rapid::continuous` per key instead.
     pub continuous: bool,
@@ -382,7 +383,7 @@ mod tests {
     }
 
     fn profile(id: u32, slot: Option<u8>) -> Profile {
-        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), continuous: false, custom: None }
+        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), gamepad: Default::default(), continuous: false, custom: None }
     }
 
     const OLD: &str = r#"{"model":614,"profiles":[{"id":1,"name":"p1","slot":1,"data":{"normal":{},"hypershift":{},"look":null}}],
@@ -629,7 +630,7 @@ mod tests {
         let snap = Snapshot { normal: layer(), hypershift: layer(), look: None };
         let rapid = (1..=103).map(|k| (k, Rapid { enabled: true, press: 1.0, release: 1.0, continuous: false })).collect();
         let custom = Some((1..=103).map(|k| (k, [255, 64, 128])).collect());
-        let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), continuous: false, custom };
+        let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), gamepad: Default::default(), continuous: false, custom };
         let d = DeviceData { pid: 0x0266, profiles: vec![p], slots: BTreeMap::from([(1, snap)]), ..Default::default() };
         let s = Settings { devices: BTreeMap::from([("K".into(), d)]), ..Default::default() };
         let text = crate::stored::to_text(&s).unwrap();

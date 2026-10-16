@@ -37,17 +37,6 @@ fn main() {
         }
         return;
     }
-    let mut gamepad = if args.iter().any(|a| a == "--gamepad-test") {
-        match gamepad::start() {
-            Ok(session) => Some(session),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // Only the main thread takes the process down; elsewhere panics are caught and the engine restarts.
@@ -174,6 +163,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::gamepad_config, commands::set_gamepad_config, commands::gamepad_input,
             commands::status,
             commands::devices,
             commands::rename_device,
@@ -237,7 +227,6 @@ fn main() {
                 for (_, d) in app.state::<commands::AppState>().boards.all() {
                     commands::lock(&d).shutdown();
                 }
-                drop(gamepad.take());
             }
             _ => {}
         });

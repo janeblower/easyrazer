@@ -1,220 +1,256 @@
 use hidmaestro_client::{Buttons, State, Writer};
 use razer_core::binding::Action;
-use razer_core::hid::{self, Unit};
-use razer_core::rapid::Config;
+use razer_core::layout::{self, Board};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::os::windows::io::AsRawHandle;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
-#[cfg(test)]
-use std::time::{Duration, Instant};
-use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
-use windows_sys::Win32::System::Threading::{INFINITE, WaitForSingleObject};
+use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 mod ipc;
 mod process;
 
-const KEYS: [usize; 10] = [18, 31, 32, 33, 17, 19, 37, 38, 23, 24];
+pub const CONTROLS: [&str; 24] = [
+    "left_up", "left_down", "left_left", "left_right", "left_click",
+    "right_up", "right_down", "right_left", "right_right", "right_click",
+    "a", "b", "x", "y", "lb", "rb", "lt", "rt", "back", "start",
+    "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+];
 
-struct Runtime {
-    pid: u16,
-    container: Option<String>,
-    writer: Mutex<Option<(Writer, State)>>,
-    alive: AtomicBool,
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    pub enabled: bool,
+    pub bindings: BTreeMap<String, u8>,
 }
 
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+impl Config {
+    pub fn validate(&self, board: Board) -> Result<(), String> {
+        let keys = layout::keys(board);
+        for (control, key) in &self.bindings {
+            if !CONTROLS.contains(&control.as_str()) {
+                return Err(format!("Unsupported gamepad control: {control}"));
+            }
+            if !keys.iter().any(|k| k.key == *key && k.editable) {
+                return Err(format!("Unsupported gamepad key: {key}"));
+            }
+        }
+        Ok(())
+    }
 
-pub struct Session {
-    _process: process::Process,
+    pub fn configure(&self, cfg: &mut razer_core::rapid::Config) {
+        if !self.enabled { return; }
+        for &key in self.bindings.values() {
+            cfg.bind[key as usize] = Some(Action::Disabled);
+            cfg.fn_bind[key as usize] = Some(Action::Disabled);
+        }
+        cfg.snap.retain(|g| !g.keys.iter().any(|k| self.bindings.values().any(|v| v == k)));
+    }
+
+    fn from_depth(&self, depth: &[u8; 256]) -> State {
+        let value = |id: &str| self.bindings.get(id).map_or(0, |&k| depth[k as usize]);
+        let axis = |positive, negative| {
+            let d = i32::from(value(positive)) - i32::from(value(negative));
+            (d * if d < 0 { 32768 } else { 32767 } / 255) as i16
+        };
+        let mut buttons = Buttons::default();
+        for (id, button) in [
+            ("a", Buttons::A), ("b", Buttons::B), ("x", Buttons::X), ("y", Buttons::Y),
+            ("lb", Buttons::LEFT_BUMPER), ("rb", Buttons::RIGHT_BUMPER),
+            ("left_click", Buttons::LEFT_STICK), ("right_click", Buttons::RIGHT_STICK),
+            ("back", Buttons::BACK), ("start", Buttons::START),
+            ("dpad_up", Buttons::UP), ("dpad_down", Buttons::DOWN),
+            ("dpad_left", Buttons::LEFT), ("dpad_right", Buttons::RIGHT),
+        ] {
+            if value(id) >= 128 { buttons = buttons | button; }
+        }
+        State {
+            buttons,
+            left_x: axis("left_right", "left_left"), left_y: axis("left_up", "left_down"),
+            right_x: axis("right_right", "right_left"), right_y: axis("right_up", "right_down"),
+            left_trigger: value("lt"), right_trigger: value("rt"),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct Input {
+    pub depth: Vec<u8>,
+    pub running: bool,
+    pub error: Option<String>,
+}
+
+impl Default for Input {
+    fn default() -> Self { Self { depth: vec![0; 256], running: false, error: None } }
+}
+
+struct Session {
+    writer: Writer,
+    previous: State,
+    process: process::Process,
 }
 
 impl Drop for Session {
-    fn drop(&mut self) {
-        if let Some(runtime) = RUNTIME.get() {
-            runtime.alive.store(false, Ordering::SeqCst);
-            let mut slot = runtime.writer.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some((mut writer, _)) = slot.take()
-                && let Err(e) = writer.submit(&State::default())
-            {
-                eprintln!("gamepad neutral: {e}");
+    fn drop(&mut self) { let _ = self.writer.submit(&State::default()); }
+}
+
+pub struct Runtime {
+    pub config: Config,
+    pub profile: u32,
+    depth: [u8; 256],
+    session: Option<Session>,
+    error: Option<String>,
+}
+
+impl Runtime {
+    pub fn new() -> Self {
+        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, error: None }
+    }
+
+    pub fn configure(&mut self, profile: u32, config: Config, launch: bool) {
+        self.check();
+        if self.config != config || self.profile != profile {
+            self.neutral();
+        }
+        self.profile = profile;
+        self.config = config;
+        if !self.config.enabled {
+            self.session = None;
+            self.error = None;
+        } else if self.session.is_none() && launch {
+            match process::launch() {
+                Ok((writer, process)) => {
+                    self.session = Some(Session { writer, previous: State::default(), process });
+                    self.error = None;
+                }
+                Err(e) => self.error = Some(e),
+            }
+        } else if self.session.is_none() && self.error.is_none() {
+            self.error = Some("Apply the gamepad configuration to start the controller.".into());
+        }
+    }
+
+    fn check(&mut self) {
+        if self.session.as_ref().is_some_and(|s| unsafe { WaitForSingleObject(s.process.handle.as_raw_handle(), 0) } != WAIT_TIMEOUT) {
+            self.error = Some("Gamepad helper disconnected. Apply the configuration to retry.".into());
+            self.session = None;
+        }
+    }
+
+    pub fn feed(&mut self, depth: &[u8; 256]) {
+        self.depth = *depth;
+        self.check();
+        let state = self.config.from_depth(depth);
+        if let Some(s) = &mut self.session {
+            if state == s.previous { return; }
+            match s.writer.submit(&state) {
+                Ok(()) => s.previous = state,
+                Err(e) => {
+                    self.error = Some(e.to_string());
+                    self.session = None;
+                }
             }
         }
     }
-}
 
-pub fn start() -> Result<Session, String> {
-    let api = hidapi::HidApi::new().map_err(|e| e.to_string())?;
-    let units = hid::units(&api);
-    let [unit] = units.as_slice() else {
-        return Err("--gamepad-test requires exactly one supported keyboard".into());
-    };
-    let (writer, process) = process::launch()?;
-    let helper = match process.handle.try_clone() {
-        Ok(h) => h,
-        Err(e) => {
-            drop(writer);
-            return Err(e.to_string());
-        }
-    };
-    RUNTIME
-        .set(Runtime {
-            pid: unit.spec.pid,
-            container: unit.container.clone(),
-            writer: Mutex::new(Some((writer, State::default()))),
-            alive: AtomicBool::new(true),
-        })
-        .map_err(|_| "gamepad test already started")?;
-    std::thread::spawn(move || {
-        if unsafe { WaitForSingleObject(helper.as_raw_handle(), INFINITE) } == WAIT_OBJECT_0
-            && let Some(runtime) = RUNTIME.get()
-            && runtime.alive.swap(false, Ordering::SeqCst)
-        {
-            if let Some((mut writer, _)) = runtime.writer.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                let _ = writer.submit(&State::default());
-            }
-            eprintln!("gamepad helper exited");
-            crate::wake::wake();
-        }
-    });
-    Ok(Session { _process: process })
-}
-
-pub fn enabled_for(unit: &Unit) -> bool {
-    RUNTIME.get().is_some_and(|r| r.pid == unit.spec.pid && r.container == unit.container)
-}
-
-pub fn healthy() -> bool {
-    RUNTIME.get().is_some_and(|r| r.alive.load(Ordering::SeqCst))
-}
-
-pub fn configure(cfg: &mut Config) {
-    for key in KEYS {
-        cfg.bind[key] = Some(Action::Disabled);
-        cfg.fn_bind[key] = Some(Action::Disabled);
-    }
-    cfg.snap.retain(|group| !group.keys.iter().any(|k| KEYS.contains(&(*k as usize))));
-}
-
-pub fn feed(depth: &[u8; 256]) {
-    if let Some(r) = RUNTIME.get() {
-        let mut slot = r.writer.lock().unwrap_or_else(|e| e.into_inner());
-        if !r.alive.load(Ordering::SeqCst) {
-            return;
-        }
-        let state = from_depth(depth);
-        let Some((writer, previous)) = slot.as_mut() else {
-            return;
-        };
-        if state == *previous {
-            return;
-        }
-        match writer.submit(&state) {
-            Ok(()) => *previous = state,
-            Err(e) => {
-                let _ = writer.submit(&State::default());
-                r.alive.store(false, Ordering::SeqCst);
-                slot.take();
-                eprintln!("gamepad input: {e}");
-                crate::wake::wake();
+    pub fn neutral(&mut self) {
+        self.depth = [0; 256];
+        if let Some(s) = &mut self.session {
+            match s.writer.submit(&State::default()) {
+                Ok(()) => s.previous = State::default(),
+                Err(e) => {
+                    self.error = Some(e.to_string());
+                    self.session = None;
+                }
             }
         }
     }
-}
 
-pub fn neutral() {
-    feed(&[0; 256]);
+    pub fn input(&mut self) -> Input {
+        self.check();
+        Input { depth: self.depth.to_vec(), running: self.session.is_some(), error: self.error.clone() }
+    }
 }
 
 pub fn helper(args: &[String]) -> Result<(), String> {
     process::helper(args).map_err(|e| e.to_string())
 }
 
-fn from_depth(depth: &[u8; 256]) -> State {
-    let axis = |positive: usize, negative: usize| {
-        let d = i32::from(depth[positive]) - i32::from(depth[negative]);
-        (d * if d < 0 { 32768 } else { 32767 } / 255) as i16
-    };
-    let mut buttons = Buttons::default();
-    for (key, button) in [(37, Buttons::A), (38, Buttons::B), (23, Buttons::X), (24, Buttons::Y)] {
-        if depth[key] >= 128 {
-            buttons = buttons | button;
-        }
-    }
-    State {
-        buttons,
-        left_x: axis(33, 31),
-        left_y: axis(18, 32),
-        left_trigger: depth[17],
-        right_trigger: depth[19],
-        ..State::default()
-    }
-}
-
 #[cfg(test)]
-mod tests {
+mod editor_tests {
     use super::*;
 
     #[test]
-    fn mapped_keys_do_not_type_or_participate_in_snap_tap() {
-        use razer_core::rapid::{Engine, Output, SnapGroup, SnapRule};
-        let mut cfg = Config {
-            act: [128; 256],
-            fn_act: [128; 256],
-            rapid: [None; 256],
-            bind: [None; 256],
-            fn_bind: [None; 256],
-            repeat_delay: Duration::from_millis(500),
-            repeat_interval: Duration::from_millis(30),
-            macros: Default::default(),
-            margin: 1,
-            snap_on: true,
-            snap: vec![SnapGroup {
-                keys: vec![18, 34],
-                rule: SnapRule::Last,
-            }],
-        };
-        configure(&mut cfg);
-        assert!(cfg.snap.is_empty());
-        for key in KEYS {
-            assert_eq!(cfg.fn_bind[key], Some(Action::Disabled));
-        }
+    fn disabled_capture_and_profile_changes_reset_input_without_launching() {
+        let mut runtime = Runtime::new();
         let mut depth = [0; 256];
-        for key in KEYS {
-            depth[key] = 255;
-        }
-        depth[34] = 255;
-        let mut engine = Engine::new(cfg);
-        let out = engine.feed_depth(&depth, Instant::now());
-        assert_eq!(out, [Output::Key { key: 34, down: true }]);
+        depth[18] = 201;
+        runtime.feed(&depth);
+        assert_eq!(runtime.input().depth[18], 201);
+        assert!(!runtime.input().running);
+        runtime.configure(2, Config::default(), false);
+        assert_eq!(runtime.input().depth, vec![0; 256]);
+        runtime.configure(2, Config { enabled: true, bindings: Default::default() }, false);
+        assert!(runtime.input().error.is_some());
+        runtime.configure(2, Config::default(), false);
+        assert!(runtime.input().error.is_none());
     }
 
     #[test]
-    fn analog_axes_and_triggers_follow_depth() {
+    fn every_digital_control_uses_half_travel() {
+        for id in CONTROLS.into_iter().filter(|id| !id.ends_with("_up") && !id.ends_with("_down") && !id.ends_with("_left") && !id.ends_with("_right") && !["lt", "rt"].contains(id)).chain(["dpad_up", "dpad_down", "dpad_left", "dpad_right"]) {
+            let cfg = Config { enabled: true, bindings: [(id.into(), 18)].into() };
+            let mut depth = [0; 256];
+            depth[18] = 127;
+            assert_eq!(cfg.from_depth(&depth).buttons, Buttons::default(), "{id}");
+            depth[18] = 128;
+            assert_ne!(cfg.from_depth(&depth).buttons, Buttons::default(), "{id}");
+        }
+    }
+
+    #[test]
+    fn mapped_keys_are_suppressed_in_both_layers_and_snap_groups() {
+        use razer_core::rapid::{Engine, Output, SnapGroup, SnapRule};
+        use std::time::{Duration, Instant};
+        let mut cfg = razer_core::rapid::Config {
+            act: [128; 256], fn_act: [128; 256], rapid: [None; 256],
+            bind: [None; 256], fn_bind: [None; 256],
+            repeat_delay: Duration::from_millis(500), repeat_interval: Duration::from_millis(30),
+            macros: Default::default(), margin: 1, snap_on: true,
+            snap: vec![SnapGroup { keys: vec![18, 34], rule: SnapRule::Last }],
+        };
+        Config { enabled: true, bindings: [("left_up".into(), 18)].into() }.configure(&mut cfg);
+        assert!(cfg.snap.is_empty());
+        assert_eq!(cfg.fn_bind[18], Some(Action::Disabled));
+        let mut depth = [0; 256];
+        depth[18] = 255;
+        depth[34] = 255;
+        assert_eq!(Engine::new(cfg).feed_depth(&depth, Instant::now()), [Output::Key { key: 34, down: true }]);
+    }
+
+    #[test]
+    fn defaults_and_control_validation() {
+        assert_eq!(serde_json::from_str::<Config>("{}").unwrap(), Config::default());
+        let mut cfg = Config::default();
+        cfg.bindings.insert("bogus".into(), 18);
+        assert!(cfg.validate(razer_core::layout::Board::Full).is_err());
+        cfg.bindings = [("a".into(), 255)].into();
+        assert!(cfg.validate(razer_core::layout::Board::Full).is_err());
+    }
+
+    #[test]
+    fn configured_axes_buttons_and_triggers() {
+        let cfg = Config { enabled: true, bindings: [("right_up".into(), 18), ("right_left".into(), 31), ("right_right".into(), 33), ("lt".into(), 17), ("a".into(), 37)].into() };
         let mut depth = [0; 256];
         depth[18] = 255;
         depth[31] = 255;
-        depth[17] = 128;
-        depth[19] = 255;
-        let state = from_depth(&depth);
-        assert_eq!((state.left_x, state.left_y), (-32768, 32767));
-        assert_eq!((state.left_trigger, state.right_trigger), (128, 255));
+        depth[17] = 123;
+        depth[37] = 127;
+        let s = cfg.from_depth(&depth);
+        assert_eq!((s.right_x, s.right_y, s.left_trigger, s.buttons), (-32768, 32767, 123, Buttons::default()));
         depth[33] = 255;
-        depth[32] = 255;
-        let state = from_depth(&depth);
-        assert_eq!((state.left_x, state.left_y), (0, 0));
-        assert_eq!(from_depth(&[0; 256]), State::default());
-    }
-
-    #[test]
-    fn buttons_press_at_half_travel() {
-        let mut depth = [0; 256];
-        for key in [37, 38, 23, 24] {
-            depth[key] = 127;
-        }
-        assert_eq!(from_depth(&depth).buttons, Buttons::default());
-        for key in [37, 38, 23, 24] {
-            depth[key] = 128;
-        }
-        assert_eq!(from_depth(&depth).buttons, Buttons::A | Buttons::B | Buttons::X | Buttons::Y);
+        depth[37] = 128;
+        let s = cfg.from_depth(&depth);
+        assert_eq!((s.right_x, s.buttons), (0, Buttons::A));
     }
 }

@@ -256,6 +256,14 @@ unwritten macro, EasyRazer offers to write it; writing a binding writes the macr
 - A macro bound to keys cannot be deleted — remove the bindings first.
 - Pauses are counted in milliseconds at a 1000 Hz polling rate.
 
+### Gamepad
+
+In **Keys → Gamepad**, select a button or stick on the controller and assign keyboard keys in the panel on the right. Each stick has four directions and a click. Use the key list, or capture a physical key press in Driver mode. Release held keys before capture; Esc cancels it.
+
+Enable the gamepad in the profile and press **Apply**. Settings stay in the app's profile; they are not written to the keyboard's flash. Gamepad output requires Driver mode and the HIDMaestro drivers described in [Gamepad setup](gamepad.md).
+
+Trigger scales show real key depth. Moving either stick reveals its axes, angle and displacement. Assigned keys act as gamepad controls instead of typing; Snap Tap groups containing them are suspended while the profile's gamepad is enabled. Disabling the mode or disconnecting the keyboard releases the controller input.
+
 ## Lighting
 
 Built-in keyboard effects with live preview: off, static, breathing (1 colour, 2 colours,

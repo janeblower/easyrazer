@@ -1,0 +1,46 @@
+import { expect, test } from "bun:test";
+import { GAMEPAD_BINDINGS, capturedKey, gamepadState, sameGamepad, stickDisplay } from "./gamepad";
+
+test("configuration equality ignores assignment order", () => {
+  expect(sameGamepad({ enabled: true, bindings: { a: 1, b: 2 } }, { enabled: true, bindings: { b: 2, a: 1 } })).toBe(true);
+  expect(sameGamepad({ enabled: false, bindings: {} }, { enabled: true, bindings: {} })).toBe(false);
+  expect(sameGamepad({ enabled: true, bindings: { a: 1 } }, { enabled: true, bindings: { a: 2 } })).toBe(false);
+});
+test("unassigned controls stay neutral", () => {
+  const state = gamepadState({}, [255, 255]);
+  expect(Object.values(state.buttons).some(Boolean)).toBe(false);
+  expect(state.left).toEqual({ x: 0, y: 0 });
+  expect(state.right).toEqual({ x: 0, y: 0 });
+  expect(state.lt).toBe(0);
+  expect(state.rt).toBe(0);
+});
+
+test("opposite axes cancel and preserve full linear depth", () => {
+  const state = gamepadState({ left_left: 0, left_right: 1, left_up: 2, right_down: 3, lt: 4, rt: 5 }, [255, 255, 255, 128, 255, 128]);
+  expect(state.left).toEqual({ x: 0, y: -1 });
+  expect(state.right).toEqual({ x: 0, y: 128 / 255 });
+  expect(state.lt).toBe(1);
+  expect(state.rt).toBe(128 / 255);
+});
+
+test("every digital control uses the same inclusive threshold", () => {
+  for (const binding of GAMEPAD_BINDINGS) {
+    expect(gamepadState({ [binding]: 0 }, [127]).buttons[binding]).toBe(false);
+    expect(gamepadState({ [binding]: 0 }, [128]).buttons[binding]).toBe(true);
+  }
+});
+
+test("stick presentation clamps diagonals and hides neutral overlays", () => {
+  expect(stickDisplay({ x: 0, y: 0 }).opacity).toBe(0);
+  const diagonal = stickDisplay({ x: 1, y: -1 });
+  expect(diagonal.magnitude).toBe(1);
+  expect(diagonal.angle).toBe(45);
+  expect(Math.abs(Math.hypot(diagonal.x, diagonal.y) - 1) < 0.000_001).toBe(true);
+});
+
+test("capture ignores held and noneditable keys until a fresh press", () => {
+  expect(capturedKey([255, 0, 0], [255, 255, 255], [0, 2])).toBe(2);
+  expect(capturedKey([255], [255], [0])).toBeNull();
+  expect(capturedKey([127], [128], [0])).toBe(0);
+  expect(capturedKey([0], [127], [0])).toBeNull();
+});

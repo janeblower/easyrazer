@@ -32,6 +32,8 @@ import SnapTapCard from "./components/SnapTapCard.vue";
 import { sameSnap, snapColors } from "./snap";
 import BindingCard from "./components/BindingCard.vue";
 import MacroEditor from "./components/MacroEditor.vue";
+import GamepadTab from "./components/GamepadTab.vue";
+import { type GamepadConfig, type GamepadInput, sameGamepad } from "./gamepad";
 import { UNIQUE, common, factory, hsFactory, keyName, sameAction, shortLabel } from "./bindings";
 import StatusBar from "./components/StatusBar.vue";
 import LightingTab from "./components/LightingTab.vue";
@@ -79,7 +81,13 @@ const hsSplitOn = ref(false);
 const hsBindBase = ref<KeyMap<Action | null>>({});
 const hsBindEdits = ref<KeyMap<Action>>({});
 const hsUnsaved = ref(new Set<number>());
-const section = ref<"actuation" | "bindings" | "macros">("actuation");
+const section = ref<"actuation" | "bindings" | "macros" | "gamepad">("actuation");
+const gamepadBase = ref<GamepadConfig>({ enabled: false, bindings: {} });
+const gamepadEdit = ref<GamepadConfig | null>(null);
+const gamepadReady = ref(false);
+const gamepadInput = ref<GamepadInput>({ depth: [], running: false, error: null });
+const gamepadConfig = computed(() => gamepadEdit.value ?? gamepadBase.value);
+const visible = ref(!document.hidden);
 const macroState = ref<MacroState | null>(null);
 const selection = ref(new Set<number>());
 const progress = ref<[number, number] | null>(null); // reads done, reads in all
@@ -106,7 +114,7 @@ const forgetting = ref<string | null>(null); // asked before forgetting
 const unlisten: UnlistenFn[] = [];
 let errorTimer: ReturnType<typeof setTimeout> | undefined;
 
-const dirty = computed(
+const keyDirty = computed(
   () =>
     new Set([
       ...Object.keys(edits.value),
@@ -118,6 +126,7 @@ const dirty = computed(
     (snapEdit.value ? 1 : 0) +
     (crtEdit.value == null ? 0 : 1),
 );
+const dirty = computed(() => keyDirty.value + (gamepadEdit.value ? 1 : 0));
 trackUnapplied(() => dirty.value > 0);
 const online = computed(() => !!status.value?.device);
 const writable = computed(() => online.value && !status.value?.synapse && !busy.value);
@@ -131,7 +140,12 @@ const rapidHere = computed(() => driver.value || fwRapid.value);
 // The firmware runs Rapid Trigger, so continuous is one switch for the profile, not per key.
 const fwHw = computed(() => fwRapid.value && !driver.value);
 const crt = computed(() => crtEdit.value ?? crtBase.value);
-const canApply = computed(() => writable.value && dirty.value > 0);
+const retryGamepad = computed(() => gamepadReady.value && gamepadBase.value.enabled && driver.value && !!gamepadInput.value.error);
+const canApply = computed(
+  () =>
+    (writable.value && (dirty.value > 0 || retryGamepad.value)) ||
+    (editable.value && gamepadReady.value && !!gamepadEdit.value && keyDirty.value === 0),
+);
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
 const canSave = computed(
   () =>
@@ -375,6 +389,62 @@ async function loadProfiles() {
   }
 }
 
+function editGamepad(config: GamepadConfig) {
+  gamepadEdit.value = sameGamepad(config, gamepadBase.value) ? null : config;
+}
+
+async function loadGamepad(id: string, profile: number | null) {
+  gamepadReady.value = false;
+  if (profile === null) return;
+  const config = await call<GamepadConfig>("gamepad_config", {}, id);
+  if (!ours(id) || loadedProfile !== profile) return;
+  gamepadBase.value = config;
+  if (gamepadEdit.value && sameGamepad(gamepadEdit.value, config)) gamepadEdit.value = null;
+  gamepadReady.value = true;
+}
+
+async function storeGamepad(config = gamepadEdit.value) {
+  const id = keyboard.value;
+  const profile = loadedProfile;
+  if (!id || profile === null || !config) return;
+  await call("set_gamepad_config", { profile, config }, id);
+  if (!ours(id) || loadedProfile !== profile) return;
+  gamepadBase.value = config;
+  gamepadEdit.value = null;
+}
+
+watch([keyboard, () => status.value?.profile], () => {
+  gamepadInput.value = { depth: [], running: false, error: null };
+  gamepadReady.value = false;
+});
+
+watch([keyboard, () => status.value?.profile, tab, section, driver, online, busy, visible], (_, __, cleanup) => {
+  const id = keyboard.value;
+  gamepadInput.value = { depth: [], running: false, error: null };
+  if (!id || tab.value !== "keys" || section.value !== "gamepad" || !online.value || !visible.value || busy.value) return;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  cleanup(() => {
+    stopped = true;
+    clearTimeout(timer);
+  });
+  const poll = async () => {
+    let delay = 33;
+    try {
+      const input = await call<GamepadInput>("gamepad_input", {}, id);
+      if (!stopped) gamepadInput.value = input;
+    } catch (error) {
+      if (!stopped) gamepadInput.value = { depth: [], running: false, error: String(error) };
+      delay = 500;
+    }
+    if (!stopped)
+      timer = setTimeout(() => {
+        void poll();
+      }, delay);
+  };
+  void poll();
+});
+
 async function load() {
   const id = keyboard.value;
   // Before any keyboard is known there is nothing to read, and the error would hide the status text.
@@ -423,6 +493,7 @@ async function load() {
     loadedProfile = profile;
     loadedKey = loadKey({ device: !!status.value?.device, profile });
     message.value = "";
+    await loadGamepad(id, profile);
     await loadMacros();
     await loadProfiles();
   } catch (error) {
@@ -436,6 +507,7 @@ async function load() {
 }
 
 function revert() {
+  gamepadEdit.value = null;
   edits.value = {};
   rapidEdits.value = {};
   snapEdit.value = null;
@@ -668,6 +740,7 @@ async function write(command: "apply" | "save", done: string) {
   busy.value = true;
   let failed = false;
   try {
+    if (command === "apply") await storeGamepad(gamepadEdit.value ?? (retryGamepad.value ? gamepadBase.value : null));
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
     const rapid = command === "apply" ? rapidEdits.value : null;
     const snapNext = command === "apply" ? snapEdit.value : null;
@@ -736,6 +809,20 @@ async function write(command: "apply" | "save", done: string) {
 
 // In HW mode the firmware plays only macros in its flash.
 async function apply() {
+  if (keyDirty.value === 0 && (gamepadEdit.value || retryGamepad.value)) {
+    const config = gamepadEdit.value ?? gamepadBase.value;
+    busy.value = true;
+    try {
+      await storeGamepad(config);
+      message.value = t("gamepad.applied");
+    } catch (error) {
+      showError(error);
+    } finally {
+      busy.value = false;
+    }
+    await refresh();
+    return;
+  }
   const ids = driver.value
     ? []
     : [...Object.values(bindEdits.value), ...Object.values(hsBindEdits.value)].flatMap((a) =>
@@ -796,8 +883,10 @@ async function onOffer(on: boolean) {
 }
 
 let firstKeyboard: Promise<void> | null = null;
+const onVisibility = () => (visible.value = !document.hidden);
 
 onMounted(async () => {
+  document.addEventListener("visibilitychange", onVisibility);
   // Before anything that takes the device lock: a connect can hold it for the whole read.
   layout.value = await invoke<KeyView[]>("layout");
   unlisten.push(
@@ -857,6 +946,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onVisibility);
   for (const f of unlisten) f();
   clearTimeout(errorTimer);
 });
@@ -941,11 +1031,15 @@ onUnmounted(() => {
           :error="appError"
         />
         <!-- With the map shown, the tab is as wide as the full-size map on every model, not the window. -->
-        <div v-if="tab === 'keys'" class="flex flex-col gap-4" :class="{ 'min-w-[1121px]': section !== 'macros' }">
+        <div
+          v-if="tab === 'keys'"
+          class="flex flex-col gap-4"
+          :class="{ 'min-w-[1121px]': section === 'actuation' || section === 'bindings' }"
+        >
           <div class="flex gap-3 items-center">
             <span class="inline-flex">
               <button
-                v-for="s in ['actuation', 'bindings', 'macros'] as const"
+                v-for="s in ['actuation', 'bindings', 'macros', 'gamepad'] as const"
                 :key="s"
                 class="seg-btn"
                 :class="{ 'seg-on': section === s }"
@@ -955,7 +1049,7 @@ onUnmounted(() => {
               </button>
             </span>
             <SelectionBar
-              v-if="section !== 'macros'"
+              v-if="section === 'actuation' || section === 'bindings'"
               class="ml-auto"
               :count="selection.size"
               :single="section === 'bindings'"
@@ -971,6 +1065,20 @@ onUnmounted(() => {
             :writable="writable"
             @update="(s) => (macroState = s)"
           />
+          <template v-else-if="section === 'gamepad'">
+            <GamepadTab
+              :key="`${keyboard}:${status?.profile}`"
+              :config="gamepadConfig"
+              :depth="gamepadInput.depth"
+              :layout="layout"
+              :editable="editable && gamepadReady"
+              :driver="driver"
+              :running="gamepadInput.running"
+              :error="gamepadInput.error"
+              @update="editGamepad"
+            />
+            <ActionBar v-bind="actions" apply-only @revert="revert" @apply="apply" />
+          </template>
           <template v-else>
             <KeyboardMap
               v-model:selection="selection"

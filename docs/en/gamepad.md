@@ -1,53 +1,40 @@
-# Experimental gamepad test
+# Gamepad editor
 
-This opt-in test uses one connected keyboard in driver mode and one virtual
-Xbox 360 controller. There is no gamepad editor and no saved gamepad profile.
+The Gamepad tab maps analog keyboard keys to an Xbox 360 controller. Assignments
+and the enable switch belong to the active profile and travel with profile
+copies and exported files. Existing profiles start disabled and unassigned.
 
 Install both HIDMaestro v1.12.0 driver packages, version **1.12.0.2302**,
 separately, following the upstream instructions. EasyRazer does not install
-drivers or change Windows security settings.
+drivers or change Windows security settings. Launch EasyRazer normally; the
+experimental `--gamepad-test` flag is no longer used.
 
-Build from the repository root:
+Enable driver mode to receive live key depth. Select a controller control and
+assign a keyboard key, then apply the changes. Gamepad output starts when both
+driver mode and the gamepad profile switch are enabled. Only the controller
+helper requests administrator rights. A failed controller start leaves the
+keyboard engine running; apply the configuration again to retry. The watcher
+does not repeatedly request elevation after a failure.
 
-```powershell
-cargo build -p easyrazer
-```
+Both sticks use the full signed XInput range. Opposite directions subtract;
+equal depths cancel. Triggers follow depth linearly from 0 to 255. Buttons,
+stick clicks, bumpers and the D-pad activate at depth 128. Assigned keys are
+suppressed in both keyboard layers, and Snap Tap groups containing them are
+suspended while gamepad output is enabled. These keys remain suppressed if the
+helper fails; disable the gamepad switch to restore their keyboard bindings.
 
-Quit any running EasyRazer instance, then launch normally:
+Switching profiles or assignments releases previous outputs. Leaving driver
+mode, disconnecting the keyboard or closing EasyRazer releases keyboard keys
+and closes that keyboard's virtual controller. After a temporary driver-mode
+interruption, apply the configuration again if the controller needs restarting.
+Live capture remains available in driver mode with the gamepad switch disabled.
+The app requests depth snapshots only while the editor is visible.
 
-```powershell
-.\target\debug\easyrazer.exe --gamepad-test
-```
+Input is submitted directly to HIDMaestro shared memory from the keyboard
+reader. The helper watches the app process so a crash also triggers cleanup.
+Normal exit closes the writer before waiting for helper cleanup.
 
-Only the helper requests administrator rights. Enable the app's existing
-driver-mode switch. The test mapping overrides these keys in both layers:
-
-| Keyboard | Gamepad |
-| --- | --- |
-| W/A/S/D | Left stick |
-| Q/E | LT/RT |
-| J/K/U/I | A/B/X/Y |
-
-Stick and trigger values follow the full reported depth linearly. Equal
-opposite directions cancel; face buttons activate at depth 128 of 255.
-Mapped keys do not type in driver mode, and Snap Tap groups containing them
-are suspended for the test. Other key assignments work normally.
-
-Stopping driver mode or losing the keyboard returns the gamepad to neutral.
-Closing EasyRazer closes the controller. Losing the helper stops driver mode;
-restart the app to retry. Starting without the flag restores normal behaviour.
-The flag is not added to Windows autostart.
-
-Input is published directly into HIDMaestro's shared memory from the
-keyboard callback. The helper passes only the input mapping and its two
-event handles into EasyRazer; no TCP connection, frame acknowledgements or
-periodic sender thread is involved. Local events control startup and stop.
-The helper also watches the application process so a crash triggers cleanup.
-Normal application exit closes the writer before waiting for helper cleanup.
-
-The pinned HIDMaestro XUSB driver can keep shared mappings after the
-controller disappears from XInput if another process holds cached XInput
-handles without polling again. This prevents the next creation until that
-process releases its handles. Normal shutdown, application crash and
-immediate recreation were checked with short-lived XInput observers.
-Compatibility with games is not verified.
+The pinned HIDMaestro XUSB driver can retain shared mappings after a controller
+disappears from XInput if another process holds cached XInput handles without
+polling again. A new controller may then fail to start until that process
+releases its handles. Compatibility with individual games is not verified.

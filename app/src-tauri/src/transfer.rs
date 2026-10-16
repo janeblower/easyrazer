@@ -36,6 +36,8 @@ pub struct Exported {
     pub rapid: BTreeMap<u8, Rapid>,
     pub snap_tap: SnapTap,
     #[serde(default)]
+    pub gamepad: crate::gamepad::Config,
+    #[serde(default)]
     pub continuous: bool,
     #[serde(default, with = "crate::stored::colors")]
     pub custom: Option<BTreeMap<u8, Rgb>>,
@@ -79,7 +81,7 @@ pub fn export(d: &DeviceData, profile: u32) -> Option<ProfileFile> {
         format: FORMAT,
         pid: format!("{:04X}", d.pid),
         model: devices::by_pid(d.pid).map(|s| s.name.clone()).unwrap_or_default(),
-        profile: Exported { name: p.name.clone(), data: p.data.clone(), rapid: p.rapid.clone(), snap_tap: p.snap_tap.clone(), continuous: p.continuous, custom: p.custom.clone() },
+        profile: Exported { name: p.name.clone(), data: p.data.clone(), rapid: p.rapid.clone(), snap_tap: p.snap_tap.clone(), gamepad: p.gamepad.clone(), continuous: p.continuous, custom: p.custom.clone() },
         macros,
     })
 }
@@ -127,7 +129,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
         }
         has
     };
-    let Exported { name, mut data, mut rapid, mut snap_tap, continuous, mut custom } = f.profile;
+    let Exported { name, mut data, mut rapid, mut snap_tap, mut gamepad, continuous, mut custom } = f.profile;
 
     let rescale = source != d.pid;
     let [lo, hi] = to.analog.range.map(|mm| to.analog.threshold(mm));
@@ -147,6 +149,10 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
             }
         }
     }
+    if gamepad.bindings.keys().any(|c| !crate::gamepad::CONTROLS.contains(&c.as_str())) {
+        return Err(Refused::Broken("unsupported gamepad control".into()));
+    }
+    gamepad.bindings.retain(|_, k| keep(*k));
     rapid.retain(|&k, _| keep(k));
     for g in &mut snap_tap.groups {
         g.keys.retain(|&k| keep(k));
@@ -161,7 +167,7 @@ pub fn import(d: &mut DeviceData, f: ProfileFile) -> Result<Imported, Refused> {
 
     let name = profiles::free_name(d, &name, |n| if n == 1 { String::new() } else { format!(" ({n})") });
     let id = d.new_profile_id();
-    d.profiles.push(Profile { id, name: name.clone(), slot: None, data, rapid, snap_tap, continuous, custom });
+    d.profiles.push(Profile { id, name: name.clone(), slot: None, data, rapid, snap_tap, gamepad, continuous, custom });
     d.macros = library;
     Ok(Imported { id, name, dropped: dropped.len() })
 }
@@ -191,6 +197,26 @@ mod tests {
         id
     }
     fn mac(name: &str) -> Macro { Macro { name: name.into(), events: Vec::new(), written: true } }
+
+    #[test]
+    fn gamepad_assignments_survive_export_and_drop_unavailable_keys() {
+        let mut source = DeviceData { pid: 0x0266, ..Default::default() };
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18), ("b".into(), 91)].into() };
+        source.profiles.push(Profile { id: 1, name: "Game".into(), gamepad: config.clone(), ..Default::default() });
+        let file = export(&source, 1).unwrap();
+        assert_eq!(file.profile.gamepad, config);
+        let text = serde_json::to_string(&file).unwrap();
+        let mut target = DeviceData { pid: 0x0282, ..Default::default() };
+        let imported = import(&mut target, parse(&text).unwrap()).unwrap();
+        let gamepad = &target.profile(imported.id).unwrap().gamepad;
+        assert!(gamepad.enabled);
+        assert_eq!(gamepad.bindings.get("a"), Some(&18));
+        let keys = layout::keys(devices::by_pid(target.pid).unwrap().layout);
+        assert!(gamepad.bindings.values().all(|key| keys.iter().any(|k| k.editable && k.key == *key)));
+        assert_eq!(imported.dropped, 1);
+        let old = text.replace(&format!(",\"gamepad\":{}", serde_json::to_string(&config).unwrap()), "");
+        assert_eq!(parse(&old).unwrap().profile.gamepad, crate::gamepad::Config::default());
+    }
 
     #[test]
     fn export_takes_the_profile_and_only_its_macros() {

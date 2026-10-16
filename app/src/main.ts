@@ -104,6 +104,8 @@ async function mockBackend() {
   const { emit } = await import("@tauri-apps/api/event");
   const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
   const devSettings = { dev_mode: false, dev_panel: null as unknown, dev_window: null as unknown };
+  const gamepads = new Map<string, { enabled: boolean; bindings: Record<string, number> }>();
+  let mockDriver = true;
   let seq = 0;
   const devLog: unknown[] = [];
   const entry = (cmd: string, args: number[], reply: number[] = [], live = true) => {
@@ -131,6 +133,17 @@ async function mockBackend() {
   entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4], false);
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
+    gamepad_config: ({ id }) => structuredClone(gamepads.get(String(id)) ?? { enabled: false, bindings: {} }),
+    set_gamepad_config: ({ id, config, profile }) => {
+      if (profile !== state.profile) throw new Error("Profile changed");
+      const next = config as { enabled: boolean; bindings: Record<string, number> };
+      gamepads.set(String(id), { enabled: next.enabled, bindings: { ...next.bindings } });
+    },
+    gamepad_input: ({ id }) => ({
+      depth: Array.from({ length: 256 }).fill(0),
+      running: !!gamepads.get(String(id))?.enabled && mockDriver,
+      error: null,
+    }),
     set_dev_mode: ({ on }) => {
       devSettings.dev_mode = on as boolean;
       devSettings.dev_panel ??= { open: true, dock: "right", size: 420 };
@@ -329,6 +342,7 @@ async function mockBackend() {
       if (cmd === "set_driver_mode") {
         // New objects: the window keeps the old ones and would not see a change made in place.
         const on = (args as { on: boolean }).on;
+        mockDriver = on;
         replies.status = { ...(replies.status as object), driver_mode: on };
         const view = replies.devices as { devices: { id: string }[] };
         replies.devices = { ...view, devices: view.devices.map((d) => (d.id === "MOCK" ? { ...d, driver_mode: on } : d)) };
