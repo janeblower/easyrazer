@@ -1,44 +1,44 @@
-use hidmaestro_client::{Buttons, State};
+use hidmaestro_client::{Buttons, State, Writer};
 use razer_core::binding::Action;
 use razer_core::hid::{self, Unit};
 use razer_core::rapid::Config;
-use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::{self, JoinHandle};
+use std::sync::{Mutex, OnceLock};
+#[cfg(test)]
 use std::time::{Duration, Instant};
+use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+use windows_sys::Win32::System::Threading::{INFINITE, WaitForSingleObject};
 
 mod ipc;
 mod process;
 
 const KEYS: [usize; 10] = [18, 31, 32, 33, 17, 19, 37, 38, 23, 24];
-const TIMEOUT: Duration = Duration::from_millis(500);
 
 struct Runtime {
     pid: u16,
     container: Option<String>,
-    state: Arc<Mutex<State>>,
-    alive: Arc<AtomicBool>,
+    writer: Mutex<Option<(Writer, State)>>,
+    alive: AtomicBool,
 }
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 pub struct Session {
-    stream: TcpStream,
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-    process: process::Process,
+    _process: process::Process,
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        let _ = self.stream.shutdown(Shutdown::Both);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(runtime) = RUNTIME.get() {
+            runtime.alive.store(false, Ordering::SeqCst);
+            let mut slot = runtime.writer.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((mut writer, _)) = slot.take()
+                && let Err(e) = writer.submit(&State::default())
+            {
+                eprintln!("gamepad neutral: {e}");
+            }
         }
-        self.process.wait();
     }
 }
 
@@ -48,45 +48,35 @@ pub fn start() -> Result<Session, String> {
     let [unit] = units.as_slice() else {
         return Err("--gamepad-test requires exactly one supported keyboard".into());
     };
-    let (mut stream, process) = process::launch()?;
-    let state = Arc::new(Mutex::new(State::default()));
-    let alive = Arc::new(AtomicBool::new(true));
+    let (writer, process) = process::launch()?;
+    let helper = match process.handle.try_clone() {
+        Ok(h) => h,
+        Err(e) => {
+            drop(writer);
+            return Err(e.to_string());
+        }
+    };
     RUNTIME
-        .set(Runtime { pid: unit.spec.pid, container: unit.container.clone(), state: state.clone(), alive: alive.clone() })
+        .set(Runtime {
+            pid: unit.spec.pid,
+            container: unit.container.clone(),
+            writer: Mutex::new(Some((writer, State::default()))),
+            alive: AtomicBool::new(true),
+        })
         .map_err(|_| "gamepad test already started")?;
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = stop.clone();
-    let socket = stream.try_clone().map_err(|e| e.to_string())?;
-    let task = thread::spawn(move || {
-        let result = (|| -> io::Result<()> {
-            let mut previous = None;
-            let mut sent = Instant::now();
-            while !flag.load(Ordering::SeqCst) {
-                let next = *state.lock().unwrap_or_else(|e| e.into_inner());
-                if previous != Some(next) || sent.elapsed() >= Duration::from_millis(100) {
-                    stream.write_all(&ipc::encode(next))?;
-                    let mut ack = [255];
-                    stream.read_exact(&mut ack)?;
-                    if ack != [0] {
-                        return Err(io::Error::other("invalid gamepad acknowledgement"));
-                    }
-                    previous = Some(next);
-                    sent = Instant::now();
-                }
-                thread::sleep(Duration::from_millis(4));
-            }
-            Ok(())
-        })();
-        alive.store(false, Ordering::SeqCst);
-        let _ = stream.shutdown(Shutdown::Both);
-        if let Err(e) = result
-            && !flag.load(Ordering::SeqCst)
+    std::thread::spawn(move || {
+        if unsafe { WaitForSingleObject(helper.as_raw_handle(), INFINITE) } == WAIT_OBJECT_0
+            && let Some(runtime) = RUNTIME.get()
+            && runtime.alive.swap(false, Ordering::SeqCst)
         {
-            eprintln!("gamepad helper: {e}");
+            if let Some((mut writer, _)) = runtime.writer.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = writer.submit(&State::default());
+            }
+            eprintln!("gamepad helper exited");
             crate::wake::wake();
         }
     });
-    Ok(Session { stream: socket, stop, thread: Some(task), process })
+    Ok(Session { _process: process })
 }
 
 pub fn enabled_for(unit: &Unit) -> bool {
@@ -107,7 +97,27 @@ pub fn configure(cfg: &mut Config) {
 
 pub fn feed(depth: &[u8; 256]) {
     if let Some(r) = RUNTIME.get() {
-        *r.state.lock().unwrap_or_else(|e| e.into_inner()) = from_depth(depth);
+        let mut slot = r.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if !r.alive.load(Ordering::SeqCst) {
+            return;
+        }
+        let state = from_depth(depth);
+        let Some((writer, previous)) = slot.as_mut() else {
+            return;
+        };
+        if state == *previous {
+            return;
+        }
+        match writer.submit(&state) {
+            Ok(()) => *previous = state,
+            Err(e) => {
+                let _ = writer.submit(&State::default());
+                r.alive.store(false, Ordering::SeqCst);
+                slot.take();
+                eprintln!("gamepad input: {e}");
+                crate::wake::wake();
+            }
+        }
     }
 }
 
@@ -130,7 +140,14 @@ fn from_depth(depth: &[u8; 256]) -> State {
             buttons = buttons | button;
         }
     }
-    State { buttons, left_x: axis(33, 31), left_y: axis(18, 32), left_trigger: depth[17], right_trigger: depth[19], ..State::default() }
+    State {
+        buttons,
+        left_x: axis(33, 31),
+        left_y: axis(18, 32),
+        left_trigger: depth[17],
+        right_trigger: depth[19],
+        ..State::default()
+    }
 }
 
 #[cfg(test)]
@@ -151,7 +168,10 @@ mod tests {
             macros: Default::default(),
             margin: 1,
             snap_on: true,
-            snap: vec![SnapGroup { keys: vec![18, 34], rule: SnapRule::Last }],
+            snap: vec![SnapGroup {
+                keys: vec![18, 34],
+                rule: SnapRule::Last,
+            }],
         };
         configure(&mut cfg);
         assert!(cfg.snap.is_empty());

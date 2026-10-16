@@ -37,7 +37,7 @@ fn main() {
         }
         return;
     }
-    let _gamepad = if args.iter().any(|a| a == "--gamepad-test") {
+    let mut gamepad = if args.iter().any(|a| a == "--gamepad-test") {
         match gamepad::start() {
             Ok(session) => Some(session),
             Err(e) => {
@@ -230,13 +230,14 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("tauri build")
-        .run(|app, e| match e {
+        .run(move |app, e| match e {
             // The last window closing leaves the app in the tray; only an explicit exit carries a code.
             tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
             tauri::RunEvent::Exit => {
                 for (_, d) in app.state::<commands::AppState>().boards.all() {
                     commands::lock(&d).shutdown();
                 }
+                drop(gamepad.take());
             }
             _ => {}
         });

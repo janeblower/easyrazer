@@ -1,141 +1,189 @@
-use hidmaestro_client::{Buttons, State};
-use std::io::{self, Read, Write};
+use crate::autostart::wide;
+use std::io;
+use std::mem::size_of;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::ptr;
+use std::sync::atomic::{Ordering, fence};
+use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
+use windows_sys::Win32::System::{Memory::*, Threading::*};
 
-const FRAME: usize = 14;
-
-pub(super) fn configure_stream(stream: &std::net::TcpStream) -> io::Result<()> {
-    // On Windows accepted sockets inherit the listener's nonblocking mode.
-    stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(super::TIMEOUT))?;
-    stream.set_write_timeout(Some(super::TIMEOUT))?;
-    stream.set_nodelay(true)
-}
-
-pub(super) fn encode(state: State) -> [u8; FRAME] {
-    let mut bytes = [0; FRAME];
-    bytes[..4].copy_from_slice(&state.buttons.bits().to_le_bytes());
-    for (i, axis) in [state.left_x, state.left_y, state.right_x, state.right_y].into_iter().enumerate() {
-        bytes[4 + i * 2..6 + i * 2].copy_from_slice(&axis.to_le_bytes());
+pub(super) fn owned(handle: HANDLE) -> io::Result<OwnedHandle> {
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        Err(io::Error::last_os_error())
+    } else {
+        // The caller transfers a newly opened handle to this owner.
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
-    bytes[12] = state.left_trigger;
-    bytes[13] = state.right_trigger;
-    bytes
 }
 
-pub(super) fn decode(bytes: [u8; FRAME]) -> io::Result<State> {
-    let bits = u32::from_le_bytes(bytes[..4].try_into().unwrap());
-    let buttons = Buttons::from_bits(bits)
-        .filter(|_| bits & 3 != 3 && bits & 12 != 12)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid gamepad buttons"))?;
-    let axis = |i| i16::from_le_bytes([bytes[i], bytes[i + 1]]);
-    Ok(State {
-        buttons,
-        left_x: axis(4),
-        left_y: axis(6),
-        right_x: axis(8),
-        right_y: axis(10),
-        left_trigger: bytes[12],
-        right_trigger: bytes[13],
-    })
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct Reply {
+    handles: [usize; 3],
+    length: u32,
+    error: [u8; 512],
 }
 
-pub(super) fn serve(mut stream: impl Read + Write, mut submit: impl FnMut(State) -> io::Result<()>) -> io::Result<()> {
-    loop {
-        let mut bytes = [0; FRAME];
-        if stream.read(&mut bytes[..1])? == 0 {
-            return Ok(());
+pub(super) struct Channel {
+    pub(super) name: String,
+    pub(super) ready: OwnedHandle,
+    pub(super) stop: OwnedHandle,
+    pub(super) attached: OwnedHandle,
+    view: MEMORY_MAPPED_VIEW_ADDRESS,
+    _mapping: OwnedHandle,
+}
+
+impl Channel {
+    pub(super) fn create() -> io::Result<Self> {
+        let mut token = [0u8; 32];
+        if unsafe { BCryptGenRandom(ptr::null_mut(), token.as_mut_ptr(), token.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } < 0 {
+            return Err(io::Error::other("cannot generate IPC token"));
         }
-        stream.read_exact(&mut bytes[1..])?;
-        submit(decode(bytes)?)?;
-        stream.write_all(&[0])?;
+        let secret: String = token.iter().map(|b| format!("{b:02x}")).collect();
+        Self::connect(&format!("Local\\EasyRazerGamepad-{}-{secret}", std::process::id()), true)
+    }
+
+    pub(super) fn open(name: &str) -> io::Result<Self> {
+        Self::connect(name, false)
+    }
+
+    fn connect(name: &str, create: bool) -> io::Result<Self> {
+        let mapping = if create {
+            let handle = owned(unsafe {
+                CreateFileMappingW(
+                    INVALID_HANDLE_VALUE,
+                    ptr::null(),
+                    PAGE_READWRITE,
+                    0,
+                    size_of::<Reply>() as u32,
+                    wide(name).as_ptr(),
+                )
+            })?;
+            if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control mapping already exists"));
+            }
+            handle
+        } else {
+            owned(unsafe { OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, 0, wide(name).as_ptr()) })?
+        };
+        let mut events = Vec::new();
+        for suffix in ["Ready", "Stop", "Attached"] {
+            let name = wide(&format!("{name}-{suffix}"));
+            let handle = if create {
+                let handle = owned(unsafe { CreateEventW(ptr::null(), 1, 0, name.as_ptr()) })?;
+                if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+                    return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control event already exists"));
+                }
+                handle
+            } else {
+                owned(unsafe { OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) })?
+            };
+            events.push(handle);
+        }
+        let view = unsafe { MapViewOfFile(mapping.as_raw_handle(), FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size_of::<Reply>()) };
+        if view.Value.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let attached = events.pop().unwrap();
+        let stop = events.pop().unwrap();
+        let ready = events.pop().unwrap();
+        Ok(Self {
+            name: name.into(),
+            ready,
+            stop,
+            attached,
+            view,
+            _mapping: mapping,
+        })
+    }
+
+    pub(super) fn reply(&self, handles: [usize; 3], error: Option<&str>) {
+        let mut reply = Reply {
+            handles,
+            length: 0,
+            error: [0; 512],
+        };
+        if let Some(error) = error {
+            let bytes = error.as_bytes();
+            let size = bytes.len().min(reply.error.len());
+            reply.error[..size].copy_from_slice(&bytes[..size]);
+            reply.length = size as u32;
+        }
+        // The helper is the only writer; the parent reads after Ready or process exit.
+        unsafe {
+            self.view.Value.cast::<Reply>().write_volatile(reply);
+        }
+        fence(Ordering::SeqCst);
+    }
+
+    pub(super) fn signal_ready(&self) -> io::Result<()> {
+        if unsafe { SetEvent(self.ready.as_raw_handle()) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(super) fn wait_ready(&self, process: HANDLE) -> io::Result<()> {
+        match unsafe { WaitForMultipleObjects(2, [self.ready.as_raw_handle(), process].as_ptr(), 0, 30_000) } {
+            WAIT_OBJECT_0 => Ok(()),
+            WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "helper startup")),
+            n if n == WAIT_OBJECT_0 + 1 => Err(io::Error::other("helper exited before becoming ready")),
+            _ => Err(io::Error::last_os_error()),
+        }
+    }
+
+    pub(super) fn result(&self) -> io::Result<[usize; 3]> {
+        fence(Ordering::SeqCst);
+        // Ready/process termination synchronizes the one writer with this reader.
+        let reply = unsafe { self.view.Value.cast::<Reply>().read_volatile() };
+        if reply.length as usize > reply.error.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid helper response"));
+        }
+        if reply.length != 0 {
+            return Err(io::Error::other(String::from_utf8_lossy(&reply.error[..reply.length as usize]).into_owned()));
+        }
+        Ok(reply.handles)
+    }
+}
+
+impl Drop for Channel {
+    fn drop(&mut self) {
+        // All accesses to this process's view have ended.
+        unsafe {
+            UnmapViewOfFile(self.view);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Shutdown, TcpListener, TcpStream};
-    use std::time::{Duration, Instant};
 
     #[test]
-    fn accepted_socket_waits_for_delayed_startup_response() {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut server, _) = listener.accept().unwrap();
-        configure_stream(&server).unwrap();
+    fn startup_errors_cross_the_control_channel() {
+        let channel = Channel::create().unwrap();
+        let name = channel.name.clone();
         let task = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            client.write_all(&[42]).unwrap();
+            let peer = Channel::open(&name).unwrap();
+            peer.reply([0; 3], Some("device setup failed"));
+            peer.signal_ready().unwrap();
         });
-        let mut reply = [0];
-        let result = server.read_exact(&mut reply);
+        let process = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, std::process::id()) }).unwrap();
+        channel.wait_ready(process.as_raw_handle()).unwrap();
         task.join().unwrap();
-        result.unwrap();
-        assert_eq!(reply, [42]);
+        assert_eq!(channel.result().unwrap_err().to_string(), "device setup failed");
     }
 
     #[test]
-    fn wire_preserves_axes_triggers_and_buttons() {
-        let state = State {
-            buttons: Buttons::A | Buttons::BACK,
-            left_x: -32768,
-            left_y: 32767,
-            right_x: -123,
-            right_y: 456,
-            left_trigger: 128,
-            right_trigger: 255,
-        };
-        assert_eq!(encode(state), [0x20, 0x10, 0, 0, 0, 128, 255, 127, 133, 255, 200, 1, 128, 255]);
-        assert_eq!(decode(encode(state)).unwrap(), state);
-    }
-
-    #[test]
-    fn invalid_buttons_never_reach_submit() {
-        for bits in [0x80000000u32, 3, 12] {
-            let mut frame = [0; FRAME];
-            frame[..4].copy_from_slice(&bits.to_le_bytes());
-            assert!(decode(frame).is_err());
-        }
-    }
-
-    #[test]
-    fn frames_are_acknowledged_and_eof_ends_session() {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        let task = std::thread::spawn(move || {
-            let mut seen = Vec::new();
-            serve(server, |s| {
-                seen.push(s);
-                Ok(())
-            })
-            .unwrap();
-            seen
-        });
-        client.write_all(&[0; FRAME]).unwrap();
-        let mut ack = [255];
-        client.read_exact(&mut ack).unwrap();
-        assert_eq!(ack, [0]);
-        client.shutdown(Shutdown::Both).unwrap();
-        assert_eq!(task.join().unwrap(), [State::default()]);
-    }
-
-    #[test]
-    fn stalled_parent_expires_without_submitting() {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        server.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
-        let started = Instant::now();
-        let error = serve(server, |_| panic!("no complete frame")).unwrap_err();
-        assert!(matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn partial_frame_is_rejected() {
-        assert_eq!(serve(&mut io::Cursor::new(vec![1]), |_| panic!("partial frame")).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    fn control_channel_transfers_handle_values() {
+        let channel = Channel::create().unwrap();
+        let peer = Channel::open(&channel.name).unwrap();
+        peer.reply([123, 456, 789], None);
+        peer.signal_ready().unwrap();
+        let process = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, std::process::id()) }).unwrap();
+        channel.wait_ready(process.as_raw_handle()).unwrap();
+        assert_eq!(channel.result().unwrap(), [123, 456, 789]);
     }
 }

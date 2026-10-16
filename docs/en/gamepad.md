@@ -38,9 +38,16 @@ Closing EasyRazer closes the controller. Losing the helper stops driver mode;
 restart the app to retry. Starting without the flag restores normal behaviour.
 The flag is not added to Windows autostart.
 
-Cleanup is not yet reliable: the HIDMaestro XUSB host can keep shared mappings
-after the controller disappears from XInput, preventing the next creation.
-This occurred with a persistent XInput observer and after exiting EasyRazer
-through the tray. Checks using short-lived observers cleaned up successfully.
-Resolving this lifecycle issue is required before regular use. Compatibility
-with games is not verified.
+Input is published directly into HIDMaestro's shared memory from the
+keyboard callback. The helper passes only the input mapping and its two
+event handles into EasyRazer; no TCP connection, frame acknowledgements or
+periodic sender thread is involved. Local events control startup and stop.
+The helper also watches the application process so a crash triggers cleanup.
+Normal application exit closes the writer before waiting for helper cleanup.
+
+The pinned HIDMaestro XUSB driver can keep shared mappings after the
+controller disappears from XInput if another process holds cached XInput
+handles without polling again. This prevents the next creation until that
+process releases its handles. Normal shutdown, application crash and
+immediate recreation were checked with short-lived XInput observers.
+Compatibility with games is not verified.
