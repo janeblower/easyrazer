@@ -45,17 +45,17 @@ pub fn install() -> Result<(), String> {
 }
 
 pub(super) fn deploy() -> Result<(), String> {
-    use std::io::Write;
+    run(include_str!("install.ps1"))
+}
+
+fn run(script: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
+    use std::process::Command;
     let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?;
-    let mut child = Command::new(std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
-        .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
+    let output = Command::new(std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .creation_flags(0x08000000)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|e| e.to_string())?;
-    child.stdin.take().unwrap().write_all(include_bytes!("install.ps1")).map_err(|e| e.to_string())?;
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+        .output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(format!("HIDMaestro installation failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
@@ -84,23 +84,15 @@ mod tests {
 
     #[test]
     fn installer_rejects_an_unverified_download_before_deployment() {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
         let dir = std::env::temp_dir().join(format!("easyrazer-install-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = format!(
-            "function Invoke-WebRequest {{ param([switch]$UseBasicParsing, [int]$TimeoutSec, [string]$Uri, [string]$OutFile) [IO.File]::WriteAllText($OutFile, 'bad download') }}\n{}\n",
+            "function Invoke-WebRequest {{ param([switch]$UseBasicParsing, [int]$TimeoutSec, [string]$Uri, [string]$OutFile) [IO.File]::WriteAllText($OutFile, 'bad download') }}\n{}",
             include_str!("install.ps1").replace("$env:ProgramFiles", "$env:EASYRAZER_INSTALL_TEST"),
         );
-        let mut child = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
-            .env("EASYRAZER_INSTALL_TEST", &dir)
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-            .spawn().unwrap();
-        child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("checksum mismatch"), "{}", String::from_utf8_lossy(&output.stderr));
+        let script = format!("$env:EASYRAZER_INSTALL_TEST = '{}'\n{script}", dir.to_string_lossy().replace('\'', "''"));
+        let error = run(&script).unwrap_err();
+        assert!(error.contains("checksum mismatch"), "{error}");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         std::fs::remove_dir(dir).unwrap();
     }
