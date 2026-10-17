@@ -18,11 +18,11 @@ const props = defineProps<{
   running: boolean;
   error: string | null;
   driverInstalled: boolean | null;
-  installing: boolean;
+  driverOperation: "install" | "uninstall" | null;
   installError: string | null;
 }>();
 const emit = defineEmits<{ update: [config: GamepadConfig]; install: [] }>();
-const available = computed(() => props.driver && props.driverInstalled === true && !props.installing);
+const available = computed(() => props.driver && props.driverInstalled === true && !props.driverOperation);
 const canEdit = computed(() => props.editable && available.value);
 const { t } = useI18n();
 const capture = ref<GamepadBinding | null>(null);
@@ -110,11 +110,13 @@ onUnmounted(() => {
 
 <template>
   <section class="gamepad-tab">
-    <div v-if="driverInstalled !== true || !driver || installing" class="gamepad-notice" role="status" :aria-busy="installing">
+    <div v-if="driverInstalled !== true || !driver || driverOperation" class="gamepad-notice" role="status" :aria-busy="!!driverOperation">
       <span>{{
         t(
-          installing
-            ? "gamepad.installing"
+          driverOperation
+            ? driverOperation === "uninstall"
+              ? "gamepad.uninstalling"
+              : "gamepad.installing"
             : driverInstalled === null
               ? "gamepad.checkingDriver"
               : !driverInstalled
@@ -122,8 +124,8 @@ onUnmounted(() => {
                 : "gamepad.driverRequired",
         )
       }}</span>
-      <button v-if="driverInstalled === false || installing" :disabled="installing" @click="emit('install')">
-        <span v-if="installing" class="install-spinner" aria-hidden="true" />
+      <button v-if="driverInstalled === false || driverOperation === 'install'" :disabled="!!driverOperation" @click="emit('install')">
+        <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
         <AppIcon v-else name="shield" />
         {{ t("gamepad.install") }}
       </button>

@@ -2,8 +2,23 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import type { AppSettings } from "../types";
+import type { AppSettings, GamepadDriverStatus } from "../types";
 import { messages, setLanguage } from "../i18n";
+import AppIcon from "./AppIcon.vue";
+import ModalDialog from "./ModalDialog.vue";
+
+defineProps<{
+  driverStatus: GamepadDriverStatus | null;
+  driverOperation: "install" | "uninstall" | null;
+  driverError: string | null;
+}>();
+const emit = defineEmits<{ install: []; uninstall: [] }>();
+const removingDriver = ref(false);
+
+function uninstallDriver() {
+  removingDriver.value = false;
+  emit("uninstall");
+}
 
 const s = ref<AppSettings | null>(null);
 const message = ref("");
@@ -61,37 +76,70 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section v-if="s" class="px-4 py-3 card">
-    <label class="field">
-      <span class="field-label min-w-[160px]">{{ $t("settings.language") }}</span>
-      <select :value="s.language ?? $i18n.locale" @change="pickLanguage">
-        <option v-for="(m, code) in messages" :key="code" :value="code">{{ m.language.name }}</option>
-      </select>
-    </label>
-    <label class="field">
-      <span class="field-label min-w-[160px]">{{ $t("settings.onClose") }}</span>
-      <select :value="s.close_action" @change="set('set_close_action', { action: ($event.target as HTMLSelectElement).value })">
-        <option value="ask">{{ $t("settings.ask") }}</option>
-        <option value="tray">{{ $t("settings.tray") }}</option>
-        <option value="exit">{{ $t("settings.exit") }}</option>
-      </select>
-    </label>
-    <label v-for="o in TOGGLES" :key="o.cmd" class="switch my-2.5">
-      <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
-      {{ $t(o.label) }}
-    </label>
-    <label v-if="s.dev_mode" class="field">
-      <span class="field-label min-w-[160px]">{{ $t("settings.devLogSize") }}</span>
-      <input
-        type="number"
-        min="1000"
-        max="50000"
-        step="1000"
-        class="w-24"
-        :value="s.dev_log_size"
-        @change="set('set_dev_log_size', { size: Number(($event.target as HTMLInputElement).value) })"
-      />
-    </label>
+  <section class="px-4 py-3 card">
+    <template v-if="s">
+      <label class="field">
+        <span class="field-label min-w-[160px]">{{ $t("settings.language") }}</span>
+        <select :value="s.language ?? $i18n.locale" @change="pickLanguage">
+          <option v-for="(m, code) in messages" :key="code" :value="code">{{ m.language.name }}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label min-w-[160px]">{{ $t("settings.onClose") }}</span>
+        <select :value="s.close_action" @change="set('set_close_action', { action: ($event.target as HTMLSelectElement).value })">
+          <option value="ask">{{ $t("settings.ask") }}</option>
+          <option value="tray">{{ $t("settings.tray") }}</option>
+          <option value="exit">{{ $t("settings.exit") }}</option>
+        </select>
+      </label>
+      <label v-for="o in TOGGLES" :key="o.cmd" class="switch my-2.5">
+        <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
+        {{ $t(o.label) }}
+      </label>
+      <label v-if="s.dev_mode" class="field">
+        <span class="field-label min-w-[160px]">{{ $t("settings.devLogSize") }}</span>
+        <input
+          type="number"
+          min="1000"
+          max="50000"
+          step="1000"
+          class="w-24"
+          :value="s.dev_log_size"
+          @change="set('set_dev_log_size', { size: Number(($event.target as HTMLInputElement).value) })"
+        />
+      </label>
+    </template>
+    <div class="field mt-4 flex-wrap">
+      <span class="field-label min-w-[160px]">HIDMaestro</span>
+      <span class="text-muted" role="status" :aria-busy="!!driverOperation">{{
+        $t(
+          driverOperation === "install"
+            ? "gamepad.installing"
+            : driverOperation === "uninstall"
+              ? "gamepad.uninstalling"
+              : driverStatus === null
+                ? "gamepad.checkingDriver"
+                : driverStatus.installed
+                  ? "gamepad.driverInstalled"
+                  : "gamepad.driverNotInstalled",
+        )
+      }}</span>
+      <button
+        :disabled="driverStatus === null || !!driverOperation"
+        @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
+      >
+        <AppIcon name="shield" />
+        {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
+      </button>
+    </div>
+    <p v-if="driverError" class="text-error m-0" role="alert">{{ driverError }}</p>
     <p v-if="message" class="text-error m-0">{{ message }}</p>
+    <ModalDialog v-if="removingDriver" :title="$t('gamepad.uninstallTitle')" @cancel="removingDriver = false">
+      <p>{{ $t("gamepad.uninstallText") }}</p>
+      <template #actions>
+        <button autofocus @click="removingDriver = false">{{ $t("profiles.cancel") }}</button>
+        <button class="primary" :disabled="!!driverOperation" @click="uninstallDriver">{{ $t("gamepad.uninstall") }}</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>

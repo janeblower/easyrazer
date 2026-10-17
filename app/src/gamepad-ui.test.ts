@@ -6,6 +6,36 @@ import { createI18n } from "vue-i18n";
 import { defaultGamepad } from "./gamepad";
 import en from "./locales/en.json";
 
+test("settings offers install or uninstall and prevents duplicate driver operations", async () => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+  try {
+    const { default: SettingsTab } = (await server.ssrLoadModule("/src/components/SettingsTab.vue")) as { default: Component };
+    const render = async (
+      driverStatus: { installed: boolean; ready: boolean } | null,
+      driverOperation: "install" | "uninstall" | null = null,
+    ) => {
+      const app = createSSRApp(SettingsTab, { driverStatus, driverOperation, driverError: null });
+      app.use(createI18n({ legacy: false, locale: "en", messages: { en } }));
+      return renderToString(app);
+    };
+    const missing = await render({ installed: false, ready: false });
+    expect(missing.includes("Install HIDMaestro")).toBe(true);
+    expect(missing.includes("Uninstall HIDMaestro")).toBe(false);
+    const installed = await render({ installed: true, ready: true });
+    expect(installed.includes("Uninstall HIDMaestro")).toBe(true);
+    const partial = await render({ installed: true, ready: false });
+    expect(partial.includes("Uninstall HIDMaestro")).toBe(true);
+    for (const operation of ["install", "uninstall"] as const) {
+      const busy = await render({ installed: true, ready: true }, operation);
+      expect(busy.includes('aria-busy="true"')).toBe(true);
+      expect(/<button[^>]*disabled/.test(busy)).toBe(true);
+    }
+    expect(/<button[^>]*disabled/.test(await render(null))).toBe(true);
+  } finally {
+    await server.close();
+  }
+});
+
 test("gamepad disables the model and editor until driver mode and both packages are available", async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
   try {
@@ -19,7 +49,7 @@ test("gamepad disables the model and editor until driver mode and both packages 
         editable: true,
         driver,
         driverInstalled,
-        installing,
+        driverOperation: installing ? "install" : null,
         installError: null,
         running: false,
         error: null,

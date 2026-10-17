@@ -12,6 +12,7 @@ import type {
   CloseAction,
   Status as DeviceStatus,
   DevicesView,
+  GamepadDriverStatus,
   Hypershift,
   ImportView,
   KeyMap,
@@ -86,8 +87,8 @@ const gamepadBase = ref<GamepadConfig>(defaultGamepad());
 const gamepadSelected = ref<GamepadControl | null>(null);
 const gamepadEdit = ref<GamepadConfig | null>(null);
 const gamepadReady = ref(false);
-const gamepadDriver = ref<boolean | null>(null);
-const gamepadInstalling = ref(false);
+const gamepadDriver = ref<GamepadDriverStatus | null>(null);
+const gamepadDriverOperation = ref<"install" | "uninstall" | null>(null);
 const gamepadInstallError = ref<string | null>(null);
 const gamepadInput = ref<GamepadInput>({ depth: [], running: false, error: null });
 const gamepadConfig = computed(() => gamepadEdit.value ?? gamepadBase.value);
@@ -138,7 +139,7 @@ const writable = computed(() => online.value && !status.value?.synapse && !busy.
 const editable = computed(() => !!status.value && !status.value.synapse && !busy.value);
 const shown = computed(() => devices.value?.devices.find((d) => d.id === keyboard.value) ?? null);
 const driver = computed(() => !!status.value?.driver_mode);
-const gamepadAvailable = computed(() => driver.value && gamepadDriver.value === true && !gamepadInstalling.value);
+const gamepadAvailable = computed(() => driver.value && gamepadDriver.value?.ready === true && !gamepadDriverOperation.value);
 const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
 // Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
 const rapidHere = computed(() => driver.value || fwRapid.value);
@@ -398,28 +399,33 @@ function editGamepad(config: GamepadConfig) {
   gamepadEdit.value = sameGamepad(config, gamepadBase.value) ? null : config;
 }
 
-watch([tab, section, visible], async () => {
-  if (tab.value !== "keys" || section.value !== "gamepad" || !visible.value || gamepadInstalling.value) return;
+async function checkGamepadDriver() {
   try {
-    gamepadDriver.value = await invoke<boolean>("gamepad_driver");
-    gamepadInstallError.value = null;
+    gamepadDriver.value = await invoke<GamepadDriverStatus>("gamepad_driver");
   } catch (error) {
     gamepadDriver.value = null;
-    gamepadInstallError.value = String(error);
+    gamepadInstallError.value ??= String(error);
   }
+}
+
+watch([tab, section, visible], async () => {
+  if ((tab.value !== "settings" && (tab.value !== "keys" || section.value !== "gamepad")) || !visible.value || gamepadDriverOperation.value)
+    return;
+  gamepadInstallError.value = null;
+  await checkGamepadDriver();
 });
 
-async function installGamepadDriver() {
-  if (gamepadInstalling.value) return;
-  gamepadInstalling.value = true;
+async function changeGamepadDriver(operation: "install" | "uninstall") {
+  if (gamepadDriverOperation.value) return;
+  gamepadDriverOperation.value = operation;
   gamepadInstallError.value = null;
   try {
-    await invoke("install_gamepad_driver");
-    gamepadDriver.value = await invoke<boolean>("gamepad_driver");
+    await invoke(operation === "install" ? "install_gamepad_driver" : "uninstall_gamepad_driver");
   } catch (error) {
     gamepadInstallError.value = String(error);
   } finally {
-    gamepadInstalling.value = false;
+    await checkGamepadDriver();
+    gamepadDriverOperation.value = null;
   }
 }
 
@@ -1120,11 +1126,11 @@ onUnmounted(() => {
               :driver="driver"
               :running="gamepadInput.running"
               :error="gamepadInput.error"
-              :driver-installed="gamepadDriver"
-              :installing="gamepadInstalling"
+              :driver-installed="gamepadDriver?.ready ?? null"
+              :driver-operation="gamepadDriverOperation"
               :install-error="gamepadInstallError"
               @update="editGamepad"
-              @install="installGamepadDriver"
+              @install="changeGamepadDriver('install')"
             />
             <ActionBar
               v-bind="actions"
@@ -1219,7 +1225,14 @@ onUnmounted(() => {
           </template>
         </div>
         <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
-        <SettingsTab v-else />
+        <SettingsTab
+          v-else
+          :driver-status="gamepadDriver"
+          :driver-operation="gamepadDriverOperation"
+          :driver-error="gamepadInstallError"
+          @install="changeGamepadDriver('install')"
+          @uninstall="changeGamepadDriver('uninstall')"
+        />
         <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
         <ConfirmWrite
           v-if="macrosToWrite.length > 0"

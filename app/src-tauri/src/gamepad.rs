@@ -230,8 +230,8 @@ pub fn helper(args: &[String]) -> Result<(), String> {
     process::helper(args).map_err(|e| e.to_string())
 }
 
-pub fn install_helper(args: &[String]) -> Result<(), String> {
-    process::install_helper(args)
+pub fn driver_helper(args: &[String], uninstall: bool) -> Result<(), String> {
+    process::driver_helper(args, uninstall)
 }
 
 #[cfg(test)]
