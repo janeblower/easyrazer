@@ -111,26 +111,29 @@ onUnmounted(() => {
 <template>
   <section class="gamepad-tab">
     <div v-if="driverInstalled !== true || !driver || driverOperation" class="gamepad-notice" role="status" :aria-busy="!!driverOperation">
-      <span>{{
-        t(
-          driverOperation
-            ? driverOperation === "uninstall"
-              ? "gamepad.uninstalling"
-              : "gamepad.installing"
-            : driverInstalled === null
-              ? "gamepad.checkingDriver"
-              : !driverInstalled
-                ? "gamepad.driverMissing"
-                : "gamepad.driverRequired",
-        )
-      }}</span>
-      <button v-if="driverInstalled === false || driverOperation === 'install'" :disabled="!!driverOperation" @click="emit('install')">
-        <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
-        <AppIcon v-else name="shield" />
-        {{ t("gamepad.install") }}
-      </button>
+      <div class="gamepad-warning">
+        <span class="gamepad-warning-icon" aria-hidden="true">!</span>
+        <p>{{
+          t(
+            driverOperation
+              ? driverOperation === "uninstall"
+                ? "gamepad.uninstalling"
+                : "gamepad.installing"
+              : driverInstalled === null
+                ? "gamepad.checkingDriver"
+                : !driverInstalled
+                  ? "gamepad.driverMissing"
+                  : "gamepad.driverRequired",
+          )
+        }}</p>
+        <button v-if="driverInstalled === false || driverOperation === 'install'" :disabled="!!driverOperation" class="primary" @click="emit('install')">
+          <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
+          <AppIcon v-else name="shield" />
+          {{ t("gamepad.install") }}
+        </button>
+        <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
+      </div>
     </div>
-    <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
     <div class="gamepad-content" :class="{ unavailable: !available }" :inert="!available">
       <header class="gamepad-heading">
         <div>
@@ -221,6 +224,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .gamepad-tab {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -237,17 +241,49 @@ onUnmounted(() => {
   pointer-events: none;
 }
 .gamepad-notice {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: 7px;
+  background: rgb(0 0 0 / 62%);
 }
-.gamepad-notice button {
+.gamepad-warning {
+  width: min(100%, 380px);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 45%);
+  text-align: center;
+}
+.gamepad-warning-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 12px;
+  border: 1px solid var(--warn);
+  border-radius: 50%;
+  color: var(--warn);
+  font-size: 18px;
+}
+.gamepad-warning p {
+  margin: 0 auto 16px;
+  max-width: 300px;
+}
+.gamepad-warning button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  flex-shrink: 0;
+}
+.gamepad-warning .gamepad-error {
+  margin-top: 12px;
+  margin-bottom: 0;
+  color: var(--error);
 }
 .install-spinner {
   width: 16px;
