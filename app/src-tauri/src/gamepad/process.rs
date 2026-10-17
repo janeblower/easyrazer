@@ -150,9 +150,21 @@ fn elevate(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle> {
 }
 
 pub(super) fn install() -> Result<(), String> {
+    driver_action("--gamepad-install")
+}
+
+pub(super) fn uninstall() -> Result<(), String> {
+    let _launch = LAUNCHING.try_lock().map_err(|_| "A gamepad helper is starting. Wait for startup to finish.".to_string())?;
+    if cleanup().map_err(|e| e.to_string())? {
+        return Err("The gamepad is still stopping. Retry after cleanup.".into());
+    }
+    driver_action("--gamepad-uninstall")
+}
+
+fn driver_action(action: &str) -> Result<(), String> {
     let run = || -> io::Result<()> {
         let channel = Channel::create()?;
-        let args = format!("--gamepad-install {} {}", std::process::id(), channel.name);
+        let args = format!("{action} {} {}", std::process::id(), channel.name);
         let process = elevate(&std::env::current_exe()?, &args)?;
         if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
             return Err(io::Error::last_os_error());
@@ -163,10 +175,10 @@ pub(super) fn install() -> Result<(), String> {
     run().map_err(|e| e.to_string())
 }
 
-pub fn install_helper(args: &[String]) -> Result<(), String> {
+pub fn driver_helper(args: &[String], uninstall: bool) -> Result<(), String> {
     let (_, name) = endpoint(args).map_err(|e| e.to_string())?;
     let channel = Channel::open(name).map_err(|e| e.to_string())?;
-    let result = super::drivers::deploy();
+    let result = if uninstall { super::drivers::remove() } else { super::drivers::deploy() };
     channel.reply([0; 3], result.as_ref().err().map(String::as_str));
     result
 }

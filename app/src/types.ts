@@ -174,6 +174,11 @@ export interface LightingState {
 
 export type CloseAction = "ask" | "tray" | "exit";
 
+export interface GamepadDriverStatus {
+  installed: boolean;
+  ready: boolean;
+}
+
 export interface AppSettings {
   autostart: boolean;
   close_action: CloseAction;

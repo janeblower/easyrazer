@@ -135,10 +135,14 @@ async function mockBackend() {
   entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4], false);
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
-    gamepad_driver: () => mockGamepadInstalled,
+    gamepad_driver: () => ({ installed: mockGamepadInstalled, ready: mockGamepadInstalled }),
     install_gamepad_driver: async () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       mockGamepadInstalled = true;
+    },
+    uninstall_gamepad_driver: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      mockGamepadInstalled = false;
     },
     gamepad_config: ({ id }) => structuredClone(gamepads.get(String(id)) ?? defaultGamepad()),
     set_gamepad_config: ({ id, config, profile }) => {
