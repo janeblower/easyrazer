@@ -18,6 +18,7 @@ const FN_POWER: u8 = 0x09;
 pub(crate) const FN_SERVICE: u8 = 0x11;
 /// Service code of the app's Snap Tap switch; like `NEXT_PROFILE_CODE`, the firmware types nothing for it.
 pub const SNAP_TAP_CODE: u8 = 0x21;
+pub const GAMEPAD_TOGGLE_CODE: u8 = 0x22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -61,6 +62,7 @@ pub enum System {
     BrightnessUp,
     Sleep,
     GameMode,
+    GamepadToggle,
     /// Fn+F9: the firmware only blinks the M indicator.
     MacroLed,
     NextProfile,
@@ -68,7 +70,7 @@ pub enum System {
 }
 
 /// Synapse's factory Hypershift codes on V2, plus the app's Snap Tap switch.
-const SYSTEM: [(System, u8, u8); 7] = [
+const SYSTEM: [(System, u8, u8); 8] = [
     (System::BrightnessDown, FN_SERVICE, 0x09),
     (System::BrightnessUp, FN_SERVICE, 0x08),
     (System::Sleep, FN_POWER, 0x82),
@@ -76,10 +78,11 @@ const SYSTEM: [(System, u8, u8); 7] = [
     (System::MacroLed, FN_SERVICE, 0x04),
     (System::NextProfile, FN_PROFILE, 0x04),
     (System::SnapTap, FN_SERVICE, SNAP_TAP_CODE),
+    (System::GamepadToggle, FN_SERVICE, GAMEPAD_TOGGLE_CODE),
 ];
 
 /// The app reacts to these itself, so at most one key of the layer carries each.
-pub const UNIQUE: [System; 2] = [System::NextProfile, System::SnapTap];
+pub const UNIQUE: [System; 3] = [System::NextProfile, System::SnapTap, System::GamepadToggle];
 
 /// The first of `UNIQUE` that more than one of `actions` holds.
 pub fn clash(actions: impl IntoIterator<Item = Action>) -> Option<System> {

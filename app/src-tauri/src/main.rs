@@ -280,11 +280,10 @@ fn sink(h: AppHandle, id: String) -> Sink {
                     commands::lock(&d).set_led(LED_MACRO, false, false);
                 }
                 Output::GameMode(on) => {
-                    let result = {
-                        let mut device = commands::lock(&d);
-                        device.set_led(LED_GAME, on, false);
-                        device.toggle_gamepad()
-                    };
+                    commands::lock(&d).set_led(LED_GAME, on, false);
+                }
+                Output::ToggleGamepad => {
+                    let result = commands::lock(&d).toggle_gamepad();
                     match result {
                         Ok((profile, enabled)) => { let _ = h.emit("gamepad-enabled", (&id, profile, enabled)); }
                         Err(e) => {

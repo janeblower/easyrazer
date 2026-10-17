@@ -60,7 +60,7 @@ export type Media = "play" | "prev" | "next" | "stop" | "mute" | "volume_up" | "
 // `key` is a fwID; `mods` is the HID modifier byte, bit 0 left Ctrl to bit 3 left Win.
 export type MacroMode = "times" | "hold" | "toggle";
 
-export type System = "brightness_down" | "brightness_up" | "sleep" | "game_mode" | "macro_led" | "next_profile" | "snap_tap";
+export type System = "brightness_down" | "brightness_up" | "sleep" | "game_mode" | "macro_led" | "next_profile" | "snap_tap" | "gamepad_toggle";
 
 export type Action =
   | { type: "disabled" }

@@ -164,7 +164,8 @@
       "game_mode": "Игровой режим",
       "macro_led": "Индикатор M",
       "next_profile": "Следующий профиль",
-      "snap_tap": "Snap Tap вкл/выкл"
+      "snap_tap": "Snap Tap вкл/выкл",
+      "gamepad_toggle": "Геймпад вкл/выкл"
     },
     "space": "Пробел",
     "left": "Левый {k}",

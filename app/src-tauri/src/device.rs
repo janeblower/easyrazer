@@ -344,6 +344,7 @@ impl Device {
         let progress = |n, total, a: Option<&KeyAssignment>| progress(n, total, a.map(|a| (a.key, mm(&d.analog, a.threshold_low))));
         profiles::sync_slots(t, d, data, &keys, startup, &fallback, progress).map_err(|e| e.to_string())?;
         data.bind_snap_tap_once();
+        data.bind_gamepad_toggle_once();
         self.startup = Some(startup);
         self.synced = true;
         self.save()

@@ -20,6 +20,7 @@ pub const NEXT_PROFILE_CODE: u8 = 0x20;
 pub const MENU: u8 = 129;
 /// fwID of the left Shift key, where the Snap Tap switch goes by default.
 pub const LEFT_SHIFT: u8 = 44;
+pub const G: u8 = 35;
 
 pub(crate) const LIST: Command = Command::new(0x05, 0x81);
 pub(crate) const CREATE: Command = Command::new(0x05, 0x02);
@@ -156,6 +157,18 @@ impl Snapshot {
         let plain = Some(binding::factory(LEFT_SHIFT));
         if let (Some(r), Some((fn_id, fn_data))) = (self.hypershift.get_mut(&LEFT_SHIFT), binding::encode(snap))
             && binding::decode(r.fn_id, &r.fn_data) == plain
+        {
+            (r.fn_id, r.fn_data) = (fn_id, fn_data);
+        }
+    }
+
+    pub fn bind_gamepad_toggle(&mut self) {
+        let toggle = Action::System { action: System::GamepadToggle };
+        if self.hypershift.values().any(|r| binding::decode(r.fn_id, &r.fn_data) == Some(toggle)) {
+            return;
+        }
+        if let (Some(r), Some((fn_id, fn_data))) = (self.hypershift.get_mut(&G), binding::encode(toggle))
+            && binding::decode(r.fn_id, &r.fn_data) == Some(binding::factory(G))
         {
             (r.fn_id, r.fn_data) = (fn_id, fn_data);
         }

@@ -143,6 +143,7 @@ pub enum Output {
     MacroLed,
     /// Game mode turned on or off; it blocks the Win key.
     GameMode(bool),
+    ToggleGamepad,
     /// Snap Tap turned on or off.
     SnapTap(bool),
     /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
@@ -407,6 +408,7 @@ impl Engine {
                             self.game = !self.game;
                             Output::GameMode(self.game)
                         }
+                        System::GamepadToggle => Output::ToggleGamepad,
                         System::SnapTap => {
                             self.cfg.snap_on = !self.cfg.snap_on;
                             Output::SnapTap(self.cfg.snap_on)

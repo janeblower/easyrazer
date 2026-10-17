@@ -164,7 +164,8 @@
       "game_mode": "Game mode",
       "macro_led": "M indicator",
       "next_profile": "Next profile",
-      "snap_tap": "Snap Tap on/off"
+      "snap_tap": "Snap Tap on/off",
+      "gamepad_toggle": "Gamepad on/off"
     },
     "space": "Space",
     "left": "Left {k}",

@@ -134,6 +134,7 @@ pub struct DeviceData {
     pub macros: BTreeMap<u16, Macro>,
     /// The profiles from before the Snap Tap switch was a binding have it on Fn+LShift.
     pub snap_tap_bound: bool,
+    pub gamepad_toggle_bound: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -225,6 +226,7 @@ fn migrate(mut s: Settings, text: &str) -> Option<Settings> {
         next_profile_id: v1.next_profile_id,
         macros: v1.macros,
         snap_tap_bound: v1.snap_tap_bound,
+        gamepad_toggle_bound: false,
     };
     for (pid, d) in v1.other_models.into_iter().chain([(v1.model.unwrap_or(LEGACY_MODEL), top)]) {
         if d.profiles.is_empty() && d.macros.is_empty() && d.slots.is_empty() {
@@ -243,7 +245,7 @@ fn backup(p: &Path, s: &Settings, text: &str) {
     }
 }
 
-static NO_DATA: DeviceData = DeviceData { pid: 0, name: None, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false };
+static NO_DATA: DeviceData = DeviceData { pid: 0, name: None, driver_mode: false, profiles: Vec::new(), loaded: None, slots: BTreeMap::new(), next_profile_id: 0, macros: BTreeMap::new(), snap_tap_bound: false, gamepad_toggle_bound: false };
 
 /// The app's settings, shared by every keyboard and the app-wide commands.
 pub type Shared = Arc<Mutex<Settings>>;
@@ -289,6 +291,16 @@ impl DeviceData {
             p.data.bind_snap_tap();
         }
         self.snap_tap_bound = true;
+    }
+
+    pub fn bind_gamepad_toggle_once(&mut self) {
+        if self.gamepad_toggle_bound {
+            return;
+        }
+        for p in &mut self.profiles {
+            p.data.bind_gamepad_toggle();
+        }
+        self.gamepad_toggle_bound = true;
     }
 
     pub fn profile(&self, id: u32) -> Option<&Profile> {
