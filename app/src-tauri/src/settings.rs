@@ -68,6 +68,7 @@ pub struct Profile {
     pub rapid: BTreeMap<u8, Rapid>,
     /// Works only in driver mode.
     pub snap_tap: SnapTap,
+    pub gamepad: crate::gamepad::Config,
     /// Continuous Rapid Trigger of a firmware that runs it, one switch for the whole profile;
     /// the host engine reads `Rapid::continuous` per key instead.
     pub continuous: bool,
@@ -142,6 +143,8 @@ pub struct Settings {
     pub devices: BTreeMap<String, DeviceData>,
     /// By PID: data saved before it was kept per keyboard, until a keyboard of that model claims it.
     pub legacy: BTreeMap<u16, DeviceData>,
+    #[serde(default)]
+    pub gamepad_defaults: bool,
     /// Ask before writing the keyboard's flash.
     pub confirm_write: bool,
     #[serde(deserialize_with = "lenient")]
@@ -168,7 +171,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None, last_device: None }
+        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), gamepad_defaults: true, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None, last_device: None }
     }
 }
 
@@ -198,6 +201,16 @@ struct V1 {
 /// Moves data of the old layout in `text` to `legacy`; a file already in the new layout is left as it is.
 /// `None` when the old data is damaged.
 fn migrate(mut s: Settings, text: &str) -> Option<Settings> {
+    if !s.gamepad_defaults {
+        for d in s.devices.values_mut().chain(s.legacy.values_mut()) {
+            for p in &mut d.profiles {
+                if p.gamepad.bindings.is_empty() {
+                    p.gamepad.bindings = crate::gamepad::Config::default().bindings;
+                }
+            }
+        }
+        s.gamepad_defaults = true;
+    }
     if !s.devices.is_empty() || !s.legacy.is_empty() {
         return Some(s);
     }
@@ -376,13 +389,34 @@ mod tests {
     use razer_core::profiles::RawKey;
     use razer_core::rapid::SnapRule;
 
+    #[test]
+    fn empty_gamepad_layouts_get_defaults_once_and_custom_layouts_stay() {
+        let mut settings = Settings::default();
+        let mut empty = Profile { id: 1, ..Default::default() };
+        empty.gamepad.enabled = true;
+        empty.gamepad.bindings.clear();
+        let mut custom = Profile { id: 2, ..Default::default() };
+        custom.gamepad.bindings = [("left_up".into(), 37)].into();
+        settings.devices.insert("K".into(), DeviceData { profiles: vec![empty, custom], ..Default::default() });
+        let mut old = serde_json::to_value(&settings).unwrap();
+        old.as_object_mut().unwrap().remove("gamepad_defaults");
+        let mut upgraded = migrate(serde_json::from_value(old.clone()).unwrap(), &old.to_string()).unwrap();
+        assert_eq!(upgraded.devices["K"].profiles[0].gamepad.bindings.len(), 6);
+        assert!(upgraded.devices["K"].profiles[0].gamepad.enabled);
+        assert_eq!(upgraded.devices["K"].profiles[1].gamepad.bindings, [("left_up".into(), 37)].into());
+        upgraded.devices.get_mut("K").unwrap().profiles[0].gamepad.bindings.clear();
+        let text = serde_json::to_string(&upgraded).unwrap();
+        let loaded = migrate(serde_json::from_str(&text).unwrap(), &text).unwrap();
+        assert!(loaded.devices["K"].profiles[0].gamepad.bindings.is_empty());
+    }
+
     fn snap(keys: &[u8]) -> Snapshot {
         let raw = |k| RawKey { thr_low: 0, thr_high: 0, fn_id: 2, fn_data: vec![0, k] };
         Snapshot { normal: keys.iter().map(|&k| (k, raw(k))).collect(), hypershift: keys.iter().map(|&k| (k, raw(k))).collect(), look: None }
     }
 
     fn profile(id: u32, slot: Option<u8>) -> Profile {
-        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), continuous: false, custom: None }
+        Profile { id, name: format!("p{id}"), slot, data: snap(&[31, 32]), rapid: BTreeMap::new(), snap_tap: SnapTap::default(), gamepad: Default::default(), continuous: false, custom: None }
     }
 
     const OLD: &str = r#"{"model":614,"profiles":[{"id":1,"name":"p1","slot":1,"data":{"normal":{},"hypershift":{},"look":null}}],
@@ -531,7 +565,7 @@ mod tests {
     #[test]
     fn broken_or_empty_file_gives_defaults() {
         for text in ["", "{", "[]", "{}", "{\"applied\": 5}"] {
-            assert_eq!(parse(text), Settings::default(), "{text:?}");
+            assert_eq!(migrate(parse(text), text).unwrap_or_default(), Settings::default(), "{text:?}");
         }
         assert!(Settings::default().confirm_write);
     }
@@ -561,6 +595,7 @@ mod tests {
             )]
             .into(),
             legacy: [(0x02A6, DeviceData { pid: 0x02A6, profiles: vec![profile(2, None)], ..Default::default() })].into(),
+            gamepad_defaults: true,
             confirm_write: false,
             close_action: CloseAction::Tray,
             watch_synapse: false,
@@ -629,7 +664,7 @@ mod tests {
         let snap = Snapshot { normal: layer(), hypershift: layer(), look: None };
         let rapid = (1..=103).map(|k| (k, Rapid { enabled: true, press: 1.0, release: 1.0, continuous: false })).collect();
         let custom = Some((1..=103).map(|k| (k, [255, 64, 128])).collect());
-        let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), continuous: false, custom };
+        let p = Profile { id: 1, name: "Игры".into(), slot: Some(1), data: snap.clone(), rapid, snap_tap: SnapTap::default(), gamepad: Default::default(), continuous: false, custom };
         let d = DeviceData { pid: 0x0266, profiles: vec![p], slots: BTreeMap::from([(1, snap)]), ..Default::default() };
         let s = Settings { devices: BTreeMap::from([("K".into(), d)]), ..Default::default() };
         let text = crate::stored::to_text(&s).unwrap();

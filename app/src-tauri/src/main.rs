@@ -30,6 +30,13 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--gamepad-install") {
+        if let Err(e) = gamepad::install_helper(&args[1..]) {
+            eprintln!("HIDMaestro installation: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.first().is_some_and(|a| a == "--gamepad-helper") {
         if let Err(e) = gamepad::helper(&args[1..]) {
             eprintln!("gamepad helper: {e}");
@@ -37,17 +44,6 @@ fn main() {
         }
         return;
     }
-    let mut gamepad = if args.iter().any(|a| a == "--gamepad-test") {
-        match gamepad::start() {
-            Ok(session) => Some(session),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // Only the main thread takes the process down; elsewhere panics are caught and the engine restarts.
@@ -174,6 +170,8 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::gamepad_config, commands::set_gamepad_config, commands::gamepad_input,
+            commands::gamepad_driver, commands::install_gamepad_driver,
             commands::status,
             commands::devices,
             commands::rename_device,
@@ -237,7 +235,6 @@ fn main() {
                 for (_, d) in app.state::<commands::AppState>().boards.all() {
                     commands::lock(&d).shutdown();
                 }
-                drop(gamepad.take());
             }
             _ => {}
         });
@@ -282,7 +279,20 @@ fn sink(h: AppHandle, id: String) -> Sink {
                     std::thread::sleep(Duration::from_secs(1));
                     commands::lock(&d).set_led(LED_MACRO, false, false);
                 }
-                Output::GameMode(on) => commands::lock(&d).set_led(LED_GAME, on, false),
+                Output::GameMode(on) => {
+                    let result = {
+                        let mut device = commands::lock(&d);
+                        device.set_led(LED_GAME, on, false);
+                        device.toggle_gamepad()
+                    };
+                    match result {
+                        Ok((profile, enabled)) => { let _ = h.emit("gamepad-enabled", (&id, profile, enabled)); }
+                        Err(e) => {
+                            let model = commands::lock(&d).name();
+                            let _ = h.emit("app-error", format!("{model}: {e}"));
+                        }
+                    }
+                }
                 Output::SnapTap(on) => {
                     let r = commands::lock(&d).set_snap_tap(on);
                     if let Err(e) = r {

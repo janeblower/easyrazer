@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hidapi::HidApi;
@@ -148,6 +148,8 @@ pub struct Device {
     engine: Option<EngineHandle>,
     /// Injected keys cannot reach the focused window, so the firmware types meanwhile.
     blocked: bool,
+    gamepad_attempted: Option<(u32, crate::gamepad::Config)>,
+    gamepad: Arc<Mutex<crate::gamepad::Runtime>>,
     /// What profile 0 holds; `None` once the firmware reloaded it from the startup slot.
     ram: Option<Snapshot>,
     /// The slot the keyboard starts with, as last read or set.
@@ -182,6 +184,8 @@ impl Device {
             restore_error: None,
             engine: None,
             blocked: false,
+            gamepad_attempted: None,
+            gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())),
             ram: None,
             startup: None,
             synced: false,
@@ -501,6 +505,41 @@ impl Device {
 
     pub fn rapid(&self) -> BTreeMap<u8, Rapid> {
         self.data().loaded_profile().map(|p| p.rapid.clone()).unwrap_or_default()
+    }
+
+    pub fn gamepad_config(&self) -> crate::gamepad::Config {
+        self.data().loaded_profile().map(|p| p.gamepad.clone()).unwrap_or_default()
+    }
+
+    pub fn gamepad_input(&self) -> crate::gamepad::Input {
+        self.engine.as_ref().map(|e| e.gamepad_input()).unwrap_or_default()
+    }
+
+    pub fn toggle_gamepad(&mut self) -> Result<(u32, bool), String> {
+        let profile = self.loaded().ok_or("No active profile")?;
+        let mut config = self.gamepad_config();
+        config.enabled = !config.enabled;
+        let enabled = config.enabled;
+        self.set_gamepad_config(profile, config)?;
+        Ok((profile, enabled))
+    }
+
+    pub fn set_gamepad_config(&mut self, profile: u32, config: crate::gamepad::Config) -> Result<(), String> {
+        if self.loaded() != Some(profile) {
+            return Err("The active profile changed. Reload the gamepad editor.".into());
+        }
+        let spec = self.last_spec.or_else(|| devices::by_pid(self.data().pid)).ok_or_else(|| self.msg("backend.noKeyboard"))?;
+        config.validate(spec.layout)?;
+        let previous = self.gamepad_config();
+        self.data_mut()?.loaded_mut().ok_or("No active profile")?.gamepad = config;
+        if let Err(e) = self.save() {
+            self.data_mut()?.loaded_mut().unwrap().gamepad = previous;
+            self.publish();
+            return Err(e);
+        }
+        self.gamepad_attempted = None;
+        self.sync_engine();
+        Ok(())
     }
 
     pub fn snap_tap(&self) -> SnapTap {
@@ -997,6 +1036,7 @@ impl Device {
         if on {
             self.writable()?;
         }
+        self.gamepad_attempted = None;
         self.data_mut()?.driver_mode = on;
         self.sync_engine();
         if on && self.engine.is_none() {
@@ -1028,14 +1068,17 @@ impl Device {
         let thresholds = p.data.normal.iter().map(|(&k, r)| (k, r.thr_low)).collect();
         let mut cfg = engine_config(self.scale(), &thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.data().macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
+        let (profile, gamepad) = (p.id, p.gamepad.clone());
+        let launch = self.gamepad_attempted.as_ref() != Some(&(profile, gamepad.clone()));
+        if gamepad.enabled { self.gamepad_attempted = Some((profile, gamepad.clone())); }
         if let Some(e) = &self.engine {
-            e.set_config(cfg);
+            e.set_config(cfg, profile, gamepad, launch);
             return;
         }
         let Some(sink) = self.sink.clone() else { return };
         let (t, _) = self.control.as_ref().unwrap();
         // Readers first: if they cannot open, the keyboard never leaves hardware mode.
-        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink)
+        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink, profile, gamepad, launch, self.gamepad.clone())
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
             Ok(h) => {
@@ -1056,6 +1099,9 @@ impl Device {
 
     /// Stops the engine and hands typing back to the firmware, unless Synapse owns the keyboard now.
     pub fn stop_engine(&mut self) {
+        if !self.blocked || self.synapse || !self.data().driver_mode || !self.may_write() {
+            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
+        }
         let Some(engine) = self.engine.take() else { return };
         // Held keys go up for good: the firmware presses a key only when it crosses the press point,
         // so one held across the switch stays up until pressed again. The readers take up to a read
@@ -1374,6 +1420,44 @@ mod tests {
     }
 
     #[test]
+    fn gamepad_shortcut_toggles_the_saved_state_and_keeps_bindings() {
+        let shared: Shared = Default::default();
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into(), ..Default::default() };
+        let data = DeviceData { pid: 0x0266, loaded: Some(1), profiles: vec![Profile { id: 1, gamepad: config.clone(), ..Default::default() }], ..Default::default() };
+        settings::lock(&shared).devices.insert("K".into(), data);
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.offline("K");
+        assert_eq!(d.toggle_gamepad().unwrap(), (1, false));
+        assert!(!settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad.enabled);
+        assert_eq!(d.toggle_gamepad().unwrap(), (1, true));
+        assert_eq!(d.gamepad_config(), config);
+        assert_eq!(settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad, config);
+    }
+
+    #[test]
+    fn offline_gamepad_edits_validate_and_preserve_the_loaded_profile() {
+        let shared: Shared = Default::default();
+        let mut data = DeviceData { pid: 0x0266, loaded: Some(1), ..Default::default() };
+        data.profiles.push(Profile { id: 1, ..Default::default() });
+        settings::lock(&shared).devices.insert("K".into(), data);
+        let mut d = Device::new(shared.clone()).unwrap();
+        d.offline("K");
+        let config = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 18)].into(), ..Default::default() };
+        assert!(d.set_gamepad_config(2, config.clone()).is_err());
+        assert_eq!(d.gamepad_config(), crate::gamepad::Config::default());
+        d.set_gamepad_config(1, config.clone()).unwrap();
+        assert_eq!(settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad, config);
+        let bad = crate::gamepad::Config { enabled: true, bindings: [("a".into(), 255)].into(), ..Default::default() };
+        assert!(d.set_gamepad_config(1, bad).is_err());
+        assert_eq!(d.gamepad_config(), config);
+        std::fs::remove_dir_all(settings::dir().unwrap()).unwrap();
+        std::fs::write(settings::dir().unwrap(), "").unwrap();
+        assert!(d.set_gamepad_config(1, Default::default()).is_err());
+        assert_eq!(d.gamepad_config(), config);
+        assert_eq!(settings::lock(&shared).devices["K"].profile(1).unwrap().gamepad, config);
+    }
+
+    #[test]
     fn a_failed_rename_leaves_the_shared_copy_as_it_was() {
         let shared: Shared = Default::default();
         let mut d = Device::new(shared.clone()).unwrap();
@@ -1455,7 +1539,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }

@@ -554,3 +554,31 @@ mod tests {
         let _ = lock(&device).data();
     }
 }
+
+#[tauri::command]
+pub async fn gamepad_config(state: State<'_, AppState>, id: String) -> Result<crate::gamepad::Config, String> {
+    let dev = state.device(&id)?;
+    Ok(lock(&dev).gamepad_config())
+}
+
+#[tauri::command]
+pub async fn set_gamepad_config(state: State<'_, AppState>, id: String, profile: u32, config: crate::gamepad::Config) -> Result<(), String> {
+    let dev = state.device(&id)?;
+    lock(&dev).set_gamepad_config(profile, config)
+}
+
+#[tauri::command]
+pub async fn gamepad_input(state: State<'_, AppState>, id: String) -> Result<crate::gamepad::Input, String> {
+    let dev = state.device(&id)?;
+    Ok(lock(&dev).gamepad_input())
+}
+
+#[tauri::command]
+pub async fn gamepad_driver() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(crate::gamepad::drivers::installed).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn install_gamepad_driver() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(crate::gamepad::drivers::install).await.map_err(|e| e.to_string())?
+}

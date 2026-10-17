@@ -482,10 +482,10 @@ impl Engine {
         self.repeat.map(|(_, at)| at).into_iter().chain(self.plays.iter().map(|p| p.at)).min()
     }
 
-    /// Lifts every key the host holds down, for when the engine stops or loses the keyboard.
-    pub fn release_all(&mut self) -> Vec<Output> {
+    /// Releases injected outputs before changing bindings.
+    pub fn release_outputs(&mut self) -> Vec<Output> {
         let mut out = Vec::new();
-        for a in self.keys.iter().filter_map(|k| k.sent) {
+        for a in self.keys.iter_mut().filter_map(|k| k.sent.take()) {
             release(a, &mut out);
         }
         for p in self.plays.drain(..) {
@@ -495,12 +495,18 @@ impl Engine {
                 o => o,
             }));
         }
+        self.repeat = None;
+        out
+    }
+
+    /// Lifts every key the host holds down, for when the engine stops or loses the keyboard.
+    pub fn release_all(&mut self) -> Vec<Output> {
+        let mut out = self.release_outputs();
         self.keys = [KeyState::default(); 256];
         self.held.clear();
         for o in &mut self.order {
             o.clear();
         }
-        self.repeat = None;
         // The next engine starts with nothing shown, so the UI must hear the release from this one.
         if self.shown != (0, false) {
             self.shown = (0, false);
@@ -810,6 +816,24 @@ mod tests {
         e.feed_depth(&depth(&[]), t);
         assert_eq!(fn_f10(&mut e), [Output::GameMode(false)]);
         assert_eq!(e.feed_depth(&depth(&[(LEFT_WIN, 150)]), t), [key(LEFT_WIN, true)]);
+    }
+
+    #[test]
+    fn releasing_outputs_preserves_held_fn_and_press_edges() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        assert_eq!(e.feed_depth(&depth(&[(F10, 150)]), t), [Output::GameMode(true)]);
+        e.release_outputs();
+        assert!(e.feed_depth(&depth(&[(F10, 150)]), t).is_empty());
+        e.feed_depth(&depth(&[]), t);
+        assert_eq!(e.feed_depth(&depth(&[(F10, 150)]), t), [Output::GameMode(false)]);
+        e.feed_razer(&[]);
+        e.feed_depth(&depth(&[]), t);
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+        assert_eq!(e.release_outputs(), [key(A, false)]);
+        assert!(e.feed_depth(&depth(&[(A, 150)]), t).is_empty());
+        assert!(e.feed_depth(&depth(&[]), t).is_empty());
+        assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
     }
 
     #[test]

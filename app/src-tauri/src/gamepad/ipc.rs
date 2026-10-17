@@ -34,6 +34,9 @@ pub(super) struct Channel {
     _mapping: OwnedHandle,
 }
 
+// The mapping stays valid across thread moves; its owner serializes access.
+unsafe impl Send for Channel {}
+
 impl Channel {
     pub(super) fn create() -> io::Result<Self> {
         let mut token = [0u8; 32];

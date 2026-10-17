@@ -1,0 +1,409 @@
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import type { KeyView } from "../types";
+import type { GamepadBinding, GamepadConfig, GamepadControl } from "../gamepad";
+import { ANALOG_BINDINGS, capturedKey } from "../gamepad";
+import { keyName } from "../bindings";
+import GamepadModel from "./GamepadModel.vue";
+import AppIcon from "./AppIcon.vue";
+
+const selected = defineModel<GamepadControl | null>("selected", { required: true });
+const props = defineProps<{
+  config: GamepadConfig;
+  depth: number[];
+  layout: KeyView[];
+  editable: boolean;
+  driver: boolean;
+  running: boolean;
+  error: string | null;
+  driverInstalled: boolean | null;
+  installing: boolean;
+  installError: string | null;
+}>();
+const emit = defineEmits<{ update: [config: GamepadConfig]; install: [] }>();
+const available = computed(() => props.driver && props.driverInstalled === true && !props.installing);
+const canEdit = computed(() => props.editable && available.value);
+const { t } = useI18n();
+const capture = ref<GamepadBinding | null>(null);
+let previous: number[] = [];
+const keys = computed(() => props.layout.filter((key) => key.editable));
+const rows = computed<GamepadBinding[]>(() => {
+  if (!selected.value) return [];
+  const side = selected.value.startsWith("left") ? "left" : selected.value.startsWith("right") ? "right" : null;
+  return side
+    ? ["up", "down", "left", "right", "click"].map((direction) => `${side}_${direction}` as GamepadBinding)
+    : [selected.value as GamepadBinding];
+});
+const title = computed(() =>
+  selected.value?.startsWith("left")
+    ? t("gamepad.leftStick")
+    : selected.value?.startsWith("right")
+      ? t("gamepad.rightStick")
+      : t(`gamepad.${selected.value}`),
+);
+function setMaximum(binding: GamepadBinding, event: Event) {
+  if (!canEdit.value) return;
+  emit("update", {
+    ...props.config,
+    max_depth: { ...props.config.max_depth, [binding]: Number((event.target as HTMLInputElement).value) },
+  });
+}
+const rowLabel = (binding: GamepadBinding) => t(`gamepad.${binding.replace(/^(?:left|right)_/, "")}`);
+function bindingName(binding: GamepadBinding) {
+  const key = keys.value.find((entry) => entry.key === props.config.bindings[binding]);
+  return key ? keyName(key, t) : t("gamepad.capture");
+}
+
+function assign(binding: GamepadBinding, key: number | undefined) {
+  if (!canEdit.value || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
+  const bindings = { ...props.config.bindings };
+  if (key === undefined) delete bindings[binding];
+  else bindings[binding] = key;
+  capture.value = null;
+  emit("update", { ...props.config, bindings });
+}
+
+function beginCapture(binding: GamepadBinding) {
+  if (!canEdit.value) return;
+  previous = [...props.depth];
+  capture.value = capture.value === binding ? null : binding;
+}
+
+function cancelCapture() {
+  capture.value = null;
+}
+
+function escape(event: KeyboardEvent) {
+  if (event.key === "Escape" && (capture.value || selected.value)) {
+    event.preventDefault();
+    capture.value = null;
+    selected.value = null;
+  }
+}
+
+watch(
+  () => props.depth,
+  (depth) => {
+    if (!capture.value) return;
+    const key = capturedKey(
+      previous,
+      depth,
+      keys.value.map((entry) => entry.key),
+    );
+    previous = [...depth];
+    if (key !== null) assign(capture.value, key);
+  },
+);
+watch([() => props.config, () => props.layout, canEdit, selected], () => {
+  capture.value = null;
+});
+onMounted(() => {
+  window.addEventListener("keydown", escape);
+  window.addEventListener("blur", cancelCapture);
+});
+onUnmounted(() => {
+  window.removeEventListener("keydown", escape);
+  window.removeEventListener("blur", cancelCapture);
+});
+</script>
+
+<template>
+  <section class="gamepad-tab">
+    <div v-if="driverInstalled !== true || !driver || installing" class="gamepad-notice" role="status" :aria-busy="installing">
+      <span>{{
+        t(
+          installing
+            ? "gamepad.installing"
+            : driverInstalled === null
+              ? "gamepad.checkingDriver"
+              : !driverInstalled
+                ? "gamepad.driverMissing"
+                : "gamepad.driverRequired",
+        )
+      }}</span>
+      <button v-if="driverInstalled === false || installing" :disabled="installing" @click="emit('install')">
+        <span v-if="installing" class="install-spinner" aria-hidden="true" />
+        <AppIcon v-else name="shield" />
+        {{ t("gamepad.install") }}
+      </button>
+    </div>
+    <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
+    <div class="gamepad-content" :class="{ unavailable: !available }" :inert="!available">
+      <header class="gamepad-heading">
+        <div>
+          <h2>{{ t("gamepad.title") }}</h2>
+          <p class="hint">{{ t("gamepad.hint") }}</p>
+        </div>
+        <label class="switch"
+          ><input
+            type="checkbox"
+            :checked="config.enabled"
+            :disabled="!canEdit"
+            @change="emit('update', { ...config, enabled: ($event.target as HTMLInputElement).checked })"
+          />{{ t("gamepad.enabled") }}</label
+        >
+      </header>
+      <p v-if="error" class="gamepad-error" role="alert">{{ error }}</p>
+      <div class="gamepad-workspace">
+        <div class="gamepad-stage">
+          <GamepadModel :config="config" :depth="available ? depth : []" :selected="selected" @select="available && (selected = $event)" />
+        </div>
+        <aside class="gamepad-editor">
+          <template v-if="selected">
+            <h3>{{ title }}</h3>
+            <p class="hint">{{ t("gamepad.assignHint") }}</p>
+            <div v-for="binding in rows" :key="binding" class="assignment">
+              <label :for="`gamepad-${binding}`">{{ rows.length === 1 ? t("gamepad.keyboardKey") : rowLabel(binding) }}</label>
+              <div class="assignment-input">
+                <button
+                  :id="`gamepad-${binding}`"
+                  class="record-key"
+                  :disabled="!canEdit"
+                  :class="{ capturing: capture === binding }"
+                  :aria-pressed="capture === binding"
+                  :title="t(!driver ? 'gamepad.driverRequired' : 'gamepad.capture')"
+                  @click="beginCapture(binding)"
+                >
+                  {{ capture === binding ? t("gamepad.capturing") : bindingName(binding) }}
+                </button>
+                <button
+                  class="icon-btn"
+                  :disabled="!canEdit || config.bindings[binding] === undefined"
+                  :title="t('gamepad.clear')"
+                  :aria-label="t('gamepad.clear')"
+                  @click="assign(binding, undefined)"
+                >
+                  <AppIcon name="remove" />
+                </button>
+              </div>
+              <label v-if="ANALOG_BINDINGS.includes(binding)" class="maximum-depth">
+                <span
+                  >{{ t("gamepad.maxDepth") }} <output>{{ config.max_depth?.[binding] ?? 100 }}%</output></span
+                >
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  step="1"
+                  :value="config.max_depth?.[binding] ?? 100"
+                  :disabled="!canEdit"
+                  :aria-label="`${rowLabel(binding)}: ${t('gamepad.maxDepth')}`"
+                  @input="setMaximum(binding, $event)"
+                />
+              </label>
+            </div>
+          </template>
+          <p v-else class="hint">{{ t("gamepad.selectHint") }}</p>
+          <div class="input-help">
+            <h3>{{ t("gamepad.inputTitle") }}</h3>
+            <p class="hint">{{ t("gamepad.inputHint") }}</p>
+            <p class="hint">{{ t("gamepad.selectedHint") }}</p>
+            <p class="input-status" :class="{ running }" role="status">
+              <span />{{ t(!driver ? "gamepad.driverRequired" : running ? "gamepad.running" : "gamepad.stopped") }}
+            </p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.gamepad-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin: 4px 0 12px;
+  flex-shrink: 0;
+}
+.gamepad-tab {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.gamepad-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.unavailable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.gamepad-notice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.gamepad-notice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.install-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: install-spin 0.8s linear infinite;
+}
+@keyframes install-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-spinner {
+    animation: none;
+  }
+}
+h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+h3 {
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+p {
+  margin: 0 0 20px;
+}
+.gamepad-heading p {
+  margin: 0;
+}
+.gamepad-heading .switch {
+  flex-shrink: 0;
+}
+.gamepad-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 20px;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+}
+.gamepad-stage,
+.gamepad-editor {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.gamepad-stage {
+  padding: 12px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gamepad-editor {
+  padding: 18px;
+}
+.assignment {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.assignment-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.maximum-depth {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.maximum-depth span {
+  display: flex;
+  justify-content: space-between;
+}
+.maximum-depth input {
+  width: 100%;
+  margin: 0;
+}
+.gamepad-editor:has(.maximum-depth) .assignment {
+  margin: 6px 0;
+}
+.gamepad-editor:has(.maximum-depth) .input-help {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.gamepad-editor:has(.maximum-depth) p {
+  margin-bottom: 6px;
+}
+.record-key {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assignment-input .capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.input-help {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.input-help p {
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.input-status {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.input-status span {
+  height: 6px;
+  width: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.input-status.running span {
+  background: var(--accent);
+}
+.gamepad-error {
+  color: var(--error);
+}
+@media (max-width: 850px) {
+  .gamepad-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+  }
+  .gamepad-stage {
+    padding: 4px;
+  }
+}
+@media (max-width: 450px) {
+  .gamepad-heading {
+    align-items: start;
+  }
+  .gamepad-heading .switch {
+    align-items: start;
+  }
+  .gamepad-editor {
+    padding: 20px 16px;
+  }
+}
+</style>

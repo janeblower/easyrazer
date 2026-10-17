@@ -4,6 +4,7 @@ use hidmaestro_client::{Controller, Writer};
 use std::io;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::ptr::null_mut;
+use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{DUPLICATE_CLOSE_SOURCE, DuplicateHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Memory::{FILE_MAP_READ, FILE_MAP_WRITE};
 use windows_sys::Win32::System::Threading::*;
@@ -11,50 +12,108 @@ use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, 
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 pub(super) struct Process {
-    pub(super) handle: OwnedHandle,
+    inner: Option<Endpoint>,
+}
+
+struct Endpoint {
+    handle: OwnedHandle,
     channel: Channel,
 }
 
+// Retain IPC until exit without waiting under the device or keyboard-engine locks.
+static STOPPING: Mutex<Vec<Endpoint>> = Mutex::new(Vec::new());
+static LAUNCHING: Mutex<()> = Mutex::new(());
+
 impl Drop for Process {
     fn drop(&mut self) {
-        if let Err(e) = self.close() {
-            eprintln!("gamepad cleanup: {e}");
+        if let Some(endpoint) = self.inner.take() {
+            if unsafe { SetEvent(endpoint.channel.stop.as_raw_handle()) } == 0 {
+                eprintln!("gamepad stop: {}", io::Error::last_os_error());
+            }
+            STOPPING.lock().unwrap_or_else(|e| e.into_inner()).push(endpoint);
         }
     }
 }
 
 impl Process {
+    pub(super) fn handle(&self) -> HANDLE {
+        self.inner.as_ref().unwrap().handle.as_raw_handle()
+    }
+
+    fn channel(&self) -> &Channel {
+        &self.inner.as_ref().unwrap().channel
+    }
+
+    #[cfg(test)]
     fn close(&self) -> io::Result<()> {
-        if unsafe { SetEvent(self.channel.stop.as_raw_handle()) } == 0 {
+        if unsafe { SetEvent(self.channel().stop.as_raw_handle()) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        match unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 120_000) } {
-            WAIT_OBJECT_0 => {
-                self.channel.result()?;
-                let mut code = 0;
-                if unsafe { GetExitCodeProcess(self.handle.as_raw_handle(), &mut code) } == 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                if code != 0 {
-                    return Err(io::Error::other(format!("helper exited with code {code}")));
-                }
-                Ok(())
-            }
+        match unsafe { WaitForSingleObject(self.handle(), 120_000) } {
+            WAIT_OBJECT_0 => self.inner.as_ref().unwrap().result(),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "gamepad helper cleanup")),
             _ => Err(io::Error::last_os_error()),
         }
     }
 }
 
-pub(super) fn launch() -> Result<(Writer, Process), String> {
-    (|| launch_inner(&std::env::current_exe()?))().map_err(|e| format!("gamepad helper: {e}"))
+impl Endpoint {
+    fn result(&self) -> io::Result<()> {
+        self.channel.result()?;
+        let mut code = 0;
+        if unsafe { GetExitCodeProcess(self.handle.as_raw_handle(), &mut code) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if code != 0 {
+            return Err(io::Error::other(format!("helper exited with code {code}")));
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn cleanup() -> io::Result<bool> {
+    let mut stopping = STOPPING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut error = None;
+    let mut i = 0;
+    while i < stopping.len() {
+        match unsafe { WaitForSingleObject(stopping[i].handle.as_raw_handle(), 0) } {
+            WAIT_OBJECT_0 => {
+                if let Err(e) = stopping.swap_remove(i).result() { error.get_or_insert(e); }
+            }
+            WAIT_TIMEOUT => i += 1,
+            _ => {
+                error.get_or_insert_with(io::Error::last_os_error);
+                i += 1;
+            }
+        }
+    }
+    if let Some(e) = error { Err(e) } else { Ok(!stopping.is_empty()) }
+}
+
+pub(super) fn launch() -> std::sync::mpsc::Receiver<Result<(Writer, Process), String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = (|| {
+            let _launch = LAUNCHING.try_lock().map_err(|_| "A gamepad helper is already starting. Apply again after startup finishes.".to_string())?;
+            if !super::drivers::installed()? {
+                return Err("Install HIDMaestro v1.12.0 from the Gamepad tab first.".into());
+            }
+            (|| launch_inner(&std::env::current_exe()?))().map_err(|e| format!("gamepad helper: {e}"))
+        })();
+        let _ = tx.send(result);
+        crate::wake::wake();
+    });
+    rx
 }
 
 fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
+    if cleanup()? {
+        return Err(io::Error::new(io::ErrorKind::WouldBlock, "the previous gamepad helper is still stopping; apply again after cleanup"));
+    }
     let process = spawn(exe)?;
-    process.channel.wait_ready(process.handle.as_raw_handle())?;
-    let raw = process.channel.result()?;
-    if unsafe { SetEvent(process.channel.attached.as_raw_handle()) } == 0 {
+    process.channel().wait_ready(process.handle())?;
+    let raw = process.channel().result()?;
+    if unsafe { SetEvent(process.channel().attached.as_raw_handle()) } == 0 {
         return Err(io::Error::last_os_error());
     }
     let [a, b, c] = raw.map(|h| owned(h as HANDLE));
@@ -65,10 +124,16 @@ fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
 
 fn spawn(exe: &std::path::Path) -> io::Result<Process> {
     let channel = Channel::create()?;
+    let args = format!("--gamepad-helper {} {}", std::process::id(), channel.name);
+    let handle = elevate(exe, &args)?;
+    Ok(Process { inner: Some(Endpoint { handle, channel }) })
+}
+
+fn elevate(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle> {
     use std::os::windows::ffi::OsStrExt;
     let exe: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
     let verb = wide("runas");
-    let args = wide(&format!("--gamepad-helper {} {}", std::process::id(), channel.name));
+    let args = wide(args);
     let mut info = SHELLEXECUTEINFOW {
         cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS,
@@ -81,10 +146,29 @@ fn spawn(exe: &std::path::Path) -> io::Result<Process> {
     if unsafe { ShellExecuteExW(&mut info) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(Process {
-        handle: owned(info.hProcess)?,
-        channel,
-    })
+    owned(info.hProcess)
+}
+
+pub(super) fn install() -> Result<(), String> {
+    let run = || -> io::Result<()> {
+        let channel = Channel::create()?;
+        let args = format!("--gamepad-install {} {}", std::process::id(), channel.name);
+        let process = elevate(&std::env::current_exe()?, &args)?;
+        if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
+            return Err(io::Error::last_os_error());
+        }
+        Endpoint { handle: process, channel }.result()?;
+        Ok(())
+    };
+    run().map_err(|e| e.to_string())
+}
+
+pub fn install_helper(args: &[String]) -> Result<(), String> {
+    let (_, name) = endpoint(args).map_err(|e| e.to_string())?;
+    let channel = Channel::open(name).map_err(|e| e.to_string())?;
+    let result = super::drivers::deploy();
+    channel.reply([0; 3], result.as_ref().err().map(String::as_str));
+    result
 }
 
 fn endpoint(args: &[String]) -> io::Result<(u32, &str)> {
@@ -185,6 +269,60 @@ pub(super) fn helper(args: &[String]) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn another_start_returns_without_requesting_elevation() {
+        let _launch = LAUNCHING.lock().unwrap();
+        let pending = launch();
+        let result = pending.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert!(matches!(result, Err(e) if e.contains("already starting")));
+    }
+
+    #[test]
+    fn slow_cleanup_does_not_block_the_caller() {
+        if let Some(name) = std::env::var_os("EASYRAZER_SLOW_CLEANUP") {
+            let channel = Channel::open(&name.to_string_lossy()).unwrap();
+            channel.signal_ready().unwrap();
+            assert_eq!(unsafe { WaitForSingleObject(channel.stop.as_raw_handle(), 5000) }, WAIT_OBJECT_0);
+            assert!(unsafe { windows_sys::Win32::System::Memory::OpenFileMappingW(FILE_MAP_READ, 0, wide(&format!("{}-Input", channel.name)).as_ptr()) }.is_null(), "writer must close before Stop");
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            channel.reply([0; 3], None);
+            return;
+        }
+        let channel = Channel::create().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "gamepad::process::tests::slow_cleanup_does_not_block_the_caller", "--nocapture"])
+            .env("EASYRAZER_SLOW_CLEANUP", &channel.name)
+            .stdout(std::process::Stdio::null())
+            .spawn().unwrap();
+        let handle = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, child.id()) }).unwrap();
+        channel.wait_ready(handle.as_raw_handle()).unwrap();
+        let mapping = owned(unsafe {
+            windows_sys::Win32::System::Memory::CreateFileMappingW(
+                windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE, null_mut(),
+                windows_sys::Win32::System::Memory::PAGE_READWRITE, 0, 362,
+                wide(&format!("{}-Input", channel.name)).as_ptr(),
+            )
+        }).unwrap();
+        let input = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
+        let companion = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
+        let writer = unsafe { Writer::from_handles([mapping, input, companion]) }.unwrap();
+        let mut runtime = super::super::Runtime::new();
+        runtime.config.enabled = true;
+        runtime.session = Some(super::super::Session {
+            writer, previous: hidmaestro_client::State::default(),
+            process: Process { inner: Some(Endpoint { handle, channel }) },
+        });
+        let start = std::time::Instant::now();
+        runtime.configure(1, super::super::Config::default(), false);
+        let elapsed = start.elapsed();
+        assert!(!runtime.input().running);
+        assert!(cleanup().unwrap());
+        assert_eq!(launch_inner(std::path::Path::new("must-not-launch.exe")).err().unwrap().kind(), io::ErrorKind::WouldBlock);
+        assert!(child.wait().unwrap().success());
+        assert!(!cleanup().unwrap());
+        assert!(elapsed < std::time::Duration::from_millis(100), "cleanup blocked for {elapsed:?}");
+    }
+
     fn app_exe() -> std::path::PathBuf {
         std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("easyrazer.exe")
     }
@@ -193,7 +331,7 @@ mod tests {
     #[ignore = "explicit hardware test cancels startup before importing handles; build easyrazer first"]
     fn cancelled_attachment_revokes_remote_handles() {
         let process = spawn(&app_exe()).unwrap();
-        process.channel.wait_ready(process.handle.as_raw_handle()).unwrap();
+        process.channel().wait_ready(process.handle()).unwrap();
         process.close().unwrap();
         let (writer, process) = launch_inner(&app_exe()).unwrap();
         drop(writer);
@@ -254,7 +392,7 @@ mod tests {
         use std::io::BufRead;
         if std::env::var_os("EASYRAZER_PARENT_CHILD").is_some() {
             let (_writer, process) = launch_inner(&app_exe()).unwrap();
-            println!("HELPER_READY={}", unsafe { GetProcessId(process.handle.as_raw_handle()) });
+            println!("HELPER_READY={}", unsafe { GetProcessId(process.handle()) });
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
