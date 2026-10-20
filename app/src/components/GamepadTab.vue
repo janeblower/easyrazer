@@ -117,20 +117,27 @@ onUnmounted(() => {
     <div v-if="driverInstalled !== true || !driver || driverOperation" class="gamepad-notice" role="status" :aria-busy="!!driverOperation">
       <div class="gamepad-warning">
         <span class="gamepad-warning-icon" aria-hidden="true">!</span>
-        <p>{{
-          t(
-            driverOperation
-              ? driverOperation === "uninstall"
-                ? "gamepad.uninstalling"
-                : "gamepad.installing"
-              : driverInstalled === null
-                ? "gamepad.checkingDriver"
-                : !driverInstalled
-                  ? "gamepad.driverMissing"
-                  : "gamepad.driverRequired",
-          )
-        }}</p>
-        <button v-if="driverInstalled === false || driverOperation === 'install'" :disabled="!!driverOperation" class="primary" @click="emit('install')">
+        <p>
+          {{
+            t(
+              driverOperation
+                ? driverOperation === "uninstall"
+                  ? "gamepad.uninstalling"
+                  : "gamepad.installing"
+                : driverInstalled === null
+                  ? "gamepad.checkingDriver"
+                  : !driverInstalled
+                    ? "gamepad.driverMissing"
+                    : "gamepad.driverRequired",
+            )
+          }}
+        </p>
+        <button
+          v-if="driverInstalled === false || driverOperation === 'install'"
+          :disabled="!!driverOperation"
+          class="primary"
+          @click="emit('install')"
+        >
           <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
           <AppIcon v-else name="shield" />
           {{ t("gamepad.install") }}
