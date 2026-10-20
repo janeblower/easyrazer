@@ -1094,6 +1094,9 @@ impl Device {
                 self.restore();
             }
             Err(e) => {
+                // A helper launched for this engine has nobody to feed it; the retry starts it again.
+                self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
+                self.gamepad_attempted = None;
                 self.restore_error = Some(i18n::tf(&self.lang(), "backend.engine", &[("error", &e)]));
                 wake::retry();
             }
