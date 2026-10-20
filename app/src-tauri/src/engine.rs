@@ -121,7 +121,7 @@ impl EngineHandle {
                 }
                 let out = {
                     let mut e = lock(&engine);
-                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).suspend();
+                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
                     e.release_all()
                 };
                 emit(&out, &sink);
@@ -132,11 +132,12 @@ impl EngineHandle {
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
+    /// The gamepad only goes neutral: the next engine reuses it without another UAC prompt.
     pub fn halt(&self) {
         let out = {
             let mut e = lock(&self.engine);
             self.stop.store(true, Ordering::SeqCst);
-            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).suspend();
+            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
             e.release_all()
         };
         emit(&out, &self.sink);

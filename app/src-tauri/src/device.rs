@@ -217,6 +217,7 @@ impl Device {
 
     fn detach(&mut self) {
         self.engine = None;
+        self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
         self.menu = None;
         self.ram = None;
         self.synced = false;
@@ -708,6 +709,7 @@ impl Device {
     /// Before the app exits: Fn+Menu goes back to the loaded profile's own binding.
     pub fn shutdown(&mut self) {
         self.stop_engine();
+        self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
         if !self.hw_menu() || self.synapse {
             return;
         }
@@ -1100,7 +1102,7 @@ impl Device {
 
     /// Stops the engine and hands typing back to the firmware, unless Synapse owns the keyboard now.
     pub fn stop_engine(&mut self) {
-        if !self.blocked || self.synapse || !self.data().driver_mode || !self.may_write() {
+        if !self.blocked || !self.gamepad_config().enabled || self.synapse || !self.data().driver_mode || !self.may_write() {
             self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
         }
         let Some(engine) = self.engine.take() else { return };
