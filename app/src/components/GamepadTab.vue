@@ -58,10 +58,13 @@ function bindingName(binding: GamepadBinding) {
 function assign(binding: GamepadBinding, key: number | undefined) {
   if (!canEdit.value || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
   const bindings = { ...props.config.bindings };
-  if (key === undefined) delete bindings[binding];
-  else bindings[binding] = key;
+  const maxDepth = { ...props.config.max_depth };
+  if (key === undefined) {
+    delete bindings[binding];
+    delete maxDepth[binding];
+  } else bindings[binding] = key;
   capture.value = null;
-  emit("update", { ...props.config, bindings });
+  emit("update", { ...props.config, bindings, max_depth: maxDepth });
 }
 
 function beginCapture(binding: GamepadBinding) {
