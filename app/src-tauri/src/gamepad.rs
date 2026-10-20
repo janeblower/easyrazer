@@ -71,7 +71,7 @@ impl Config {
         cfg.snap.retain(|g| !g.keys.iter().any(|k| self.bindings.values().any(|v| v == k)));
     }
 
-    fn from_depth(&self, depth: &[u8; 256]) -> State {
+    fn output(&self, depth: &[u8; 256]) -> State {
         let value = |id: &str| {
             let raw = self.bindings.get(id).map_or(0, |&k| u32::from(depth[k as usize]));
             let percent = if ANALOG_CONTROLS.contains(&id) { self.max_depth.get(id).copied().unwrap_or(100).clamp(1, 100) } else { 100 };
@@ -187,7 +187,7 @@ impl Runtime {
     pub fn feed(&mut self, depth: &[u8; 256]) {
         self.depth = *depth;
         self.check();
-        let state = self.config.from_depth(depth);
+        let state = self.config.output(depth);
         if let Some(s) = &mut self.session {
             if state == s.previous { return; }
             match s.writer.submit(&state) {
@@ -267,13 +267,13 @@ mod editor_tests {
         depth[18] = 128;
         depth[17] = 128;
         depth[19] = 128;
-        let half = config.from_depth(&depth);
+        let half = config.output(&depth);
         assert_eq!((half.left_y, half.left_trigger, half.right_trigger), (16447, 128, 128));
         config.max_depth = [("left_up".into(), 50), ("lt".into(), 50)].into();
-        let full = config.from_depth(&depth);
+        let full = config.output(&depth);
         assert_eq!((full.left_y, full.left_trigger, full.right_trigger), (32767, 255, 128));
         depth[17] = 255;
-        assert_eq!(config.from_depth(&depth).left_trigger, 255);
+        assert_eq!(config.output(&depth).left_trigger, 255);
         assert!(config.validate_depth().is_ok());
         for (id, maximum) in [("lt", 0), ("lt", 101), ("a", 50), ("unknown", 50)] {
             config.max_depth = [(id.into(), maximum)].into();
@@ -281,7 +281,7 @@ mod editor_tests {
         }
         let old: Config = serde_json::from_str(r#"{"enabled":true,"bindings":{"lt":17}}"#).unwrap();
         assert!(old.max_depth.is_empty());
-        assert_eq!(old.from_depth(&depth).left_trigger, 255);
+        assert_eq!(old.output(&depth).left_trigger, 255);
     }
 
     #[test]
@@ -322,9 +322,9 @@ mod editor_tests {
             let cfg = Config { enabled: true, bindings: [(id.into(), 18)].into(), ..Default::default() };
             let mut depth = [0; 256];
             depth[18] = 127;
-            assert_eq!(cfg.from_depth(&depth).buttons, Buttons::default(), "{id}");
+            assert_eq!(cfg.output(&depth).buttons, Buttons::default(), "{id}");
             depth[18] = 128;
-            assert_ne!(cfg.from_depth(&depth).buttons, Buttons::default(), "{id}");
+            assert_ne!(cfg.output(&depth).buttons, Buttons::default(), "{id}");
         }
     }
 
@@ -382,11 +382,11 @@ mod editor_tests {
         depth[31] = 255;
         depth[17] = 123;
         depth[37] = 127;
-        let s = cfg.from_depth(&depth);
+        let s = cfg.output(&depth);
         assert_eq!((s.right_x, s.right_y, s.left_trigger, s.buttons), (-32768, 32767, 123, Buttons::default()));
         depth[33] = 255;
         depth[37] = 128;
-        let s = cfg.from_depth(&depth);
+        let s = cfg.output(&depth);
         assert_eq!((s.right_x, s.buttons), (0, Buttons::A));
     }
 }
