@@ -162,6 +162,7 @@ impl Snapshot {
         }
     }
 
+    /// Binds the gamepad switch to Fn+G unless a key of the layer has it already.
     pub fn bind_gamepad_toggle(&mut self) {
         let toggle = Action::System { action: System::GamepadToggle };
         if self.hypershift.values().any(|r| binding::decode(r.fn_id, &r.fn_data) == Some(toggle)) {
@@ -399,6 +400,30 @@ mod tests {
         let before = custom.clone();
         custom.bind_snap_tap();
         assert_eq!(custom, before, "a custom Fn+LShift binding stays");
+    }
+
+    #[test]
+    fn gamepad_toggle_goes_to_g_unless_bound() {
+        let kb = FakeKeyboard::new(&[A, G]);
+        let mut s = read_snapshot(&kb, spec(), 0, &[A, G], |_, _| {}).unwrap();
+        let (fn_id, fn_data) = binding::encode(binding::factory(G)).unwrap();
+        let r = s.hypershift.get_mut(&G).unwrap();
+        (r.fn_id, r.fn_data) = (fn_id, fn_data);
+        let plain = s.clone();
+        s.bind_gamepad_toggle();
+        let toggle = Some(Action::System { action: System::GamepadToggle });
+        assert_eq!(binding::decode(s.hypershift[&G].fn_id, &s.hypershift[&G].fn_data), toggle);
+        let mut moved = s.clone();
+        moved.hypershift.insert(A, s.hypershift[&G].clone());
+        moved.hypershift.insert(G, plain.hypershift[&G].clone());
+        let before = moved.clone();
+        moved.bind_gamepad_toggle();
+        assert_eq!(moved, before, "a moved switch stays where it is");
+        let mut custom = plain;
+        custom.hypershift.get_mut(&G).unwrap().fn_id = 0x00;
+        let before = custom.clone();
+        custom.bind_gamepad_toggle();
+        assert_eq!(custom, before, "a custom Fn+G binding stays");
     }
 
     #[test]

@@ -688,6 +688,17 @@ mod tests {
     }
 
     #[test]
+    fn gamepad_switch_asks_the_app_on_every_press() {
+        let (mut e, t) = (engine(), Instant::now());
+        e.cfg.fn_bind[S as usize] = Some(Action::System { action: System::GamepadToggle });
+        e.feed_razer(&[RAZER_FN]);
+        for _ in 0..2 {
+            assert_eq!(e.feed_depth(&depth(&[(S, 150)]), t), [Output::ToggleGamepad]);
+            assert_eq!(e.feed_depth(&depth(&[]), t), []);
+        }
+    }
+
+    #[test]
     fn a_group_key_pressed_with_fn_leaves_the_group_alone() {
         let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
         e.cfg.fn_bind[A as usize] = Some(Action::Key { key: S, mods: 0 });
