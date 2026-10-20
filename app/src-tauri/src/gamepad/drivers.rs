@@ -133,6 +133,8 @@ fn run(script: &str) -> Result<(), String> {
     let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?;
     let output = Command::new(std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        // PowerShell 7's module path hides Windows PowerShell's own modules, Get-FileHash among them.
+        .env_remove("PSModulePath")
         .creation_flags(0x08000000)
         .output().map_err(|e| e.to_string())?;
     if !output.status.success() {
