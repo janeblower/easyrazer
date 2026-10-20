@@ -1,5 +1,5 @@
 use hidmaestro_client::{Buttons, State, Writer};
-use razer_core::binding::Action;
+use razer_core::binding::{Action, UNIQUE};
 use razer_core::layout::{self, Board};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -63,7 +63,10 @@ impl Config {
         if !self.enabled { return; }
         for &key in self.bindings.values() {
             cfg.bind[key as usize] = Some(Action::Disabled);
-            cfg.fn_bind[key as usize] = Some(Action::Disabled);
+            // The app's own switches stay: a gamepad on G must not lose Fn+G.
+            if !matches!(cfg.fn_bind[key as usize], Some(Action::System { action }) if UNIQUE.contains(&action)) {
+                cfg.fn_bind[key as usize] = Some(Action::Disabled);
+            }
         }
         cfg.snap.retain(|g| !g.keys.iter().any(|k| self.bindings.values().any(|v| v == k)));
     }
@@ -343,6 +346,22 @@ mod editor_tests {
         depth[18] = 255;
         depth[34] = 255;
         assert_eq!(Engine::new(cfg).feed_depth(&depth, Instant::now()), [Output::Key { key: 34, down: true }]);
+    }
+
+    #[test]
+    fn mapped_keys_keep_the_app_switches_on_fn() {
+        use razer_core::binding::System;
+        let mut cfg = razer_core::rapid::Config {
+            act: [128; 256], fn_act: [128; 256], rapid: [None; 256],
+            bind: [None; 256], fn_bind: [None; 256],
+            repeat_delay: std::time::Duration::from_millis(500), repeat_interval: std::time::Duration::from_millis(30),
+            macros: Default::default(), margin: 1, snap_on: true, snap: Vec::new(),
+        };
+        let toggle = Some(Action::System { action: System::GamepadToggle });
+        let game = Some(Action::System { action: System::GameMode });
+        (cfg.fn_bind[18], cfg.fn_bind[19]) = (toggle, game);
+        Config { enabled: true, bindings: [("a".into(), 18), ("b".into(), 19)].into(), ..Default::default() }.configure(&mut cfg);
+        assert_eq!((cfg.bind[18], cfg.fn_bind[18], cfg.fn_bind[19]), (Some(Action::Disabled), toggle, Some(Action::Disabled)));
     }
 
     #[test]
