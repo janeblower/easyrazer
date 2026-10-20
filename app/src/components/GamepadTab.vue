@@ -74,11 +74,12 @@ function cancelCapture() {
   capture.value = null;
 }
 
+// The app clears the selection itself; a capture takes the first Esc, so this
+// listens in the capture phase, ahead of the app's listener added earlier.
 function escape(event: KeyboardEvent) {
-  if (event.key === "Escape" && (capture.value || selected.value)) {
+  if (event.key === "Escape" && capture.value) {
     event.preventDefault();
     capture.value = null;
-    selected.value = null;
   }
 }
 
@@ -99,11 +100,11 @@ watch([() => props.config, () => props.layout, canEdit, selected], () => {
   capture.value = null;
 });
 onMounted(() => {
-  window.addEventListener("keydown", escape);
+  window.addEventListener("keydown", escape, true);
   window.addEventListener("blur", cancelCapture);
 });
 onUnmounted(() => {
-  window.removeEventListener("keydown", escape);
+  window.removeEventListener("keydown", escape, true);
   window.removeEventListener("blur", cancelCapture);
 });
 </script>

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { call, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
+import { call, escapesSelection, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
 import { messages } from "./i18n";
 import type { DeviceEntry } from "./types";
 
@@ -61,4 +61,16 @@ test("a status reads again on a reconnect or a disconnect, and reverts only for 
   expect(statusAction({ device: true, profile: 3 }, 3, loadKey({ device: false, profile: 3 }))).toEqual({ revert: false, load: true });
   expect(statusAction({ device: true, profile: 4 }, 3, key)).toEqual({ revert: true, load: true });
   expect(statusAction({ device: true, profile: null }, 3, key)).toEqual({ revert: false, load: true });
+});
+
+test("Esc clears selections everywhere but in text fields and handled events", () => {
+  const esc = (target: object | null, defaultPrevented = false) =>
+    escapesSelection({ key: "Escape", defaultPrevented, target: target as EventTarget | null });
+  expect(esc(null)).toBe(true);
+  expect(esc({ tagName: "INPUT", type: "range" })).toBe(true);
+  expect(esc({ tagName: "INPUT", type: "text" })).toBe(false);
+  expect(esc({ tagName: "TEXTAREA" })).toBe(false);
+  expect(esc({ tagName: "DIV", isContentEditable: true })).toBe(false);
+  expect(esc(null, true)).toBe(false);
+  expect(escapesSelection({ key: "Enter", defaultPrevented: false, target: null })).toBe(false);
 });

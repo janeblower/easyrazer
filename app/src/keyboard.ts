@@ -39,3 +39,11 @@ export function call<T>(cmd: string, args: Record<string, unknown> = {}, id = ke
 export function ours(id: string | null): boolean {
   return id === keyboard.value;
 }
+
+/** Esc clears selections, unless it edits a text field or a component took it already. */
+export function escapesSelection(event: Pick<KeyboardEvent, "key" | "defaultPrevented" | "target">): boolean {
+  if (event.key !== "Escape" || event.defaultPrevented) return false;
+  const target = event.target as { tagName?: string; type?: string; isContentEditable?: boolean } | null;
+  const text = target?.tagName === "INPUT" && !["checkbox", "radio", "range", "button"].includes(target.type ?? "");
+  return !(text || target?.tagName === "TEXTAREA" || target?.isContentEditable);
+}

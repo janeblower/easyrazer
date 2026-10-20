@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import type { KeyMap, KeyView, Rgb, System } from "../types";
+import { escapesSelection } from "../keyboard";
 import AppIcon from "./AppIcon.vue";
 
 interface Band {
@@ -80,7 +81,7 @@ const size = computed(() => ({
 }));
 
 function escapeSelection(event: KeyboardEvent) {
-  if (event.key !== "Escape") return;
+  if (!escapesSelection(event)) return;
   selection.value = new Set();
   band.value = null;
   start = null;
