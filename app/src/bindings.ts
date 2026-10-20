@@ -14,7 +14,16 @@ export function common<V>(values: V[]): V | null {
 
 export const factory = (key: number): Action => ({ type: "key", key, mods: 0 });
 
-export const SYSTEM: System[] = ["brightness_down", "brightness_up", "sleep", "game_mode", "macro_led", "next_profile", "snap_tap", "gamepad_toggle"];
+export const SYSTEM: System[] = [
+  "brightness_down",
+  "brightness_up",
+  "sleep",
+  "game_mode",
+  "macro_led",
+  "next_profile",
+  "snap_tap",
+  "gamepad_toggle",
+];
 // The app reacts to these itself, so one key at most carries each.
 export const UNIQUE: System[] = ["next_profile", "snap_tap", "gamepad_toggle"];
 // Synapse's factory Hypershift layer on V2, plus the app's Snap Tap switch on LShift.

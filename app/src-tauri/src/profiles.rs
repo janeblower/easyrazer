@@ -47,6 +47,7 @@ pub fn sync_slots(
             let id = s.new_profile_id();
             let mut data = s.slots[&k].clone();
             data.bind_snap_tap();
+            data.bind_gamepad_toggle();
             s.profiles.push(Profile { id, name, slot: Some(k), data, rapid: BTreeMap::new(), snap_tap: SnapTap::default(), gamepad: Default::default(), continuous: false, custom: None });
         }
     }

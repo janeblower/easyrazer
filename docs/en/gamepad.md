@@ -13,25 +13,32 @@ downloads the pinned upstream **v1.12.0** x64 release, verifies its SHA-256,
 and installs both driver packages, version **1.12.0.2302**, in the background.
 An animated indicator stays visible during download and installation; errors
 leave the install button available to retry. Installation uses the upstream
-signing tools and trusts the HIDMaestro code-signing certificate in Windows'
-local-machine Root and TrustedPublisher stores. It does not change Secure Boot
-or test-signing settings. Launch EasyRazer normally; the experimental
+signing tools: it creates a HIDMaestro code-signing certificate, trusts it in
+Windows' local-machine Root and TrustedPublisher stores and deletes its private
+key once the drivers are signed. Uninstalling HIDMaestro in Settings removes the
+certificate from these stores. It does not change Secure Boot or test-signing
+settings. Launch EasyRazer normally; the experimental
 `--gamepad-test` flag is no longer used.
 
 Enable driver mode to receive live key depth. Select a controller control and
 assign a keyboard key, then apply the changes. Gamepad output starts when both
 driver mode and the gamepad profile switch are enabled. Only the controller
-helper requests administrator rights. A failed controller start leaves the
-keyboard engine running; apply the configuration again to retry. The watcher
-does not repeatedly request elevation after a failure.
+helper requests administrator rights, and Windows asks each time it starts:
+when EasyRazer starts with the gamepad enabled in the active profile (autostart
+included) and each time Apply or Fn+G turns the gamepad on. A failed controller
+start leaves the keyboard engine running; apply the configuration again to
+retry. The watcher does not repeatedly request elevation
+after a failure.
 
-The default Fn+F10 game-mode binding also toggles the gamepad in the active
-profile immediately, without pressing Apply. Its Win-key blocking behavior remains.
+Fn+G toggles the gamepad in the active profile immediately, without pressing
+Apply. EasyRazer binds it in every profile once; like Snap Tap's Fn+LShift, it
+can be moved to another key of the Hypershift layer.
 
 Both sticks use the full signed XInput range. Opposite directions subtract;
 equal depths cancel. Triggers follow depth linearly from 0 to 255. Buttons,
 stick clicks, bumpers and the D-pad activate at depth 128. Assigned keys are
-suppressed in both keyboard layers, and Snap Tap groups containing them are
+suppressed in both keyboard layers, except for EasyRazer's own Fn switches
+(next profile, Snap Tap, gamepad), and Snap Tap groups containing them are
 suspended while gamepad output is enabled. These keys remain suppressed if the
 helper fails; disable the gamepad switch to restore their keyboard bindings.
 
@@ -44,8 +51,10 @@ Esc also clears key selections in the other tabs.
 
 Switching profiles or assignments releases previous outputs. Leaving driver
 mode, disconnecting the keyboard or closing EasyRazer releases keyboard keys
-and closes that keyboard's virtual controller. After a temporary driver-mode
-interruption, apply the configuration again if the controller needs restarting.
+and closes that keyboard's virtual controller. While the focused window does not
+accept injected keys, such as an app running as administrator, the controller
+holds neutral and resumes when focus returns. After the keyboard reconnects or
+Synapse closes, apply the configuration again to restart the controller.
 Live capture remains available in driver mode with the gamepad switch disabled.
 The app requests depth snapshots only while the editor is visible.
 

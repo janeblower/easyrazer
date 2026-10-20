@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import { call, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
+import { call, escapesSelection, keyboard, loadKey, ours, pick, statusAction } from "./keyboard";
 import type {
   Action,
   Actuation,
@@ -922,7 +922,7 @@ let firstKeyboard: Promise<void> | null = null;
 const onVisibility = () => (visible.value = !document.hidden);
 
 function escapeSelection(event: KeyboardEvent) {
-  if (event.key !== "Escape") return;
+  if (!escapesSelection(event)) return;
   selection.value = new Set();
   gamepadSelected.value = null;
 }

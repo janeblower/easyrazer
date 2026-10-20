@@ -102,13 +102,14 @@ impl Drop for MenuListener {
 impl EngineHandle {
     /// Opens the report collections and starts reading; the keyboard only reports once in driver mode.
     pub fn start(api: &HidApi, unit: &Unit, mut cfg: Config, sink: Sink, profile: u32, gamepad_config: crate::gamepad::Config, launch: bool, gamepad: Arc<Mutex<crate::gamepad::Runtime>>) -> Result<Self, String> {
+        let report = &unit.spec.analog.depth;
+        let depth = open(api, unit, &report.collection)?;
+        let razer = open(api, unit, "col04")?;
+        // After the readers: a helper started for an engine that never runs would get no input.
         let mut runtime = gamepad.lock().unwrap_or_else(|e| e.into_inner());
         runtime.configure(profile, gamepad_config, launch);
         runtime.config.configure(&mut cfg);
         drop(runtime);
-        let report = &unit.spec.analog.depth;
-        let depth = open(api, unit, &report.collection)?;
-        let razer = open(api, unit, "col04")?;
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
@@ -121,7 +122,7 @@ impl EngineHandle {
                 }
                 let out = {
                     let mut e = lock(&engine);
-                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).suspend();
+                    gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
                     e.release_all()
                 };
                 emit(&out, &sink);
@@ -132,11 +133,12 @@ impl EngineHandle {
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
+    /// The gamepad only goes neutral: the next engine reuses it without another UAC prompt.
     pub fn halt(&self) {
         let out = {
             let mut e = lock(&self.engine);
             self.stop.store(true, Ordering::SeqCst);
-            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).suspend();
+            self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).neutral();
             e.release_all()
         };
         emit(&out, &self.sink);

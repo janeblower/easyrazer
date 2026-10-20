@@ -603,6 +603,7 @@ mod tests {
                     next_profile_id: 1,
                     macros: [(0x8000, Macro { name: "ab".into(), events: vec![Event::Key { key: 31, down: true }, Event::Delay { ms: 20 }], written: true })].into(),
                     snap_tap_bound: true,
+                    gamepad_toggle_bound: true,
                 },
             )]
             .into(),

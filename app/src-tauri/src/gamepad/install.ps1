@@ -3,6 +3,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $stage = Join-Path $env:ProgramFiles ('EasyRazer.DriverInstall.' + [Guid]::NewGuid().ToString('N'))
+$cert = $null
 
 function Invoke-Tool([string] $file, [string[]] $arguments) {
     $output = & $file @arguments 2>&1
@@ -35,12 +36,7 @@ try {
         $target = [IO.File]::Create((Join-Path $stage $file))
         try { $source.CopyTo($target) } finally { $target.Dispose(); $source.Dispose() }
     }
-    $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
-        $_.Subject -eq 'CN=HIDMaestroTestCert' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(1)
-    } | Select-Object -First 1
-    if (-not $cert) {
-        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=HIDMaestroTestCert' -CertStoreLocation Cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(10)
-    }
+    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=HIDMaestroTestCert' -CertStoreLocation Cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(10)
     foreach ($name in @('Root', 'TrustedPublisher')) {
         $store = New-Object Security.Cryptography.X509Certificates.X509Store($name, 'LocalMachine')
         $store.Open('ReadWrite')
@@ -62,6 +58,8 @@ try {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 } finally {
+    # Nothing is signed after this run, so the trusted key is not kept around.
+    if ($cert) { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($cert.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $stage) {
         Get-ChildItem -LiteralPath $stage -File | Remove-Item -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $stage -ErrorAction SilentlyContinue

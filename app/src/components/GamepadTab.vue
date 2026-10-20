@@ -58,10 +58,13 @@ function bindingName(binding: GamepadBinding) {
 function assign(binding: GamepadBinding, key: number | undefined) {
   if (!canEdit.value || (key !== undefined && !keys.value.some((entry) => entry.key === key))) return;
   const bindings = { ...props.config.bindings };
-  if (key === undefined) delete bindings[binding];
-  else bindings[binding] = key;
+  const maxDepth = { ...props.config.max_depth };
+  if (key === undefined) {
+    delete bindings[binding];
+    delete maxDepth[binding];
+  } else bindings[binding] = key;
   capture.value = null;
-  emit("update", { ...props.config, bindings });
+  emit("update", { ...props.config, bindings, max_depth: maxDepth });
 }
 
 function beginCapture(binding: GamepadBinding) {
@@ -74,11 +77,12 @@ function cancelCapture() {
   capture.value = null;
 }
 
+// The app clears the selection itself; a capture takes the first Esc, so this
+// listens in the capture phase, ahead of the app's listener added earlier.
 function escape(event: KeyboardEvent) {
-  if (event.key === "Escape" && (capture.value || selected.value)) {
+  if (event.key === "Escape" && capture.value) {
     event.preventDefault();
     capture.value = null;
-    selected.value = null;
   }
 }
 
@@ -99,11 +103,11 @@ watch([() => props.config, () => props.layout, canEdit, selected], () => {
   capture.value = null;
 });
 onMounted(() => {
-  window.addEventListener("keydown", escape);
+  window.addEventListener("keydown", escape, true);
   window.addEventListener("blur", cancelCapture);
 });
 onUnmounted(() => {
-  window.removeEventListener("keydown", escape);
+  window.removeEventListener("keydown", escape, true);
   window.removeEventListener("blur", cancelCapture);
 });
 </script>
@@ -113,20 +117,27 @@ onUnmounted(() => {
     <div v-if="driverInstalled !== true || !driver || driverOperation" class="gamepad-notice" role="status" :aria-busy="!!driverOperation">
       <div class="gamepad-warning">
         <span class="gamepad-warning-icon" aria-hidden="true">!</span>
-        <p>{{
-          t(
-            driverOperation
-              ? driverOperation === "uninstall"
-                ? "gamepad.uninstalling"
-                : "gamepad.installing"
-              : driverInstalled === null
-                ? "gamepad.checkingDriver"
-                : !driverInstalled
-                  ? "gamepad.driverMissing"
-                  : "gamepad.driverRequired",
-          )
-        }}</p>
-        <button v-if="driverInstalled === false || driverOperation === 'install'" :disabled="!!driverOperation" class="primary" @click="emit('install')">
+        <p>
+          {{
+            t(
+              driverOperation
+                ? driverOperation === "uninstall"
+                  ? "gamepad.uninstalling"
+                  : "gamepad.installing"
+                : driverInstalled === null
+                  ? "gamepad.checkingDriver"
+                  : !driverInstalled
+                    ? "gamepad.driverMissing"
+                    : "gamepad.driverRequired",
+            )
+          }}
+        </p>
+        <button
+          v-if="driverInstalled === false || driverOperation === 'install'"
+          :disabled="!!driverOperation"
+          class="primary"
+          @click="emit('install')"
+        >
           <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
           <AppIcon v-else name="shield" />
           {{ t("gamepad.install") }}
