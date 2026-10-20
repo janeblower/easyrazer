@@ -118,13 +118,23 @@ pub(super) fn remove() -> Result<(), String> {
         }
         reboot |= needed != 0;
     }
+    run(UNTRUST).map_err(|e| format!("HIDMaestro certificate removal: {e}"))?;
     drop(owner);
     if reboot { return Err("Restart Windows to finish uninstalling HIDMaestro".into()); }
     Ok(())
 }
 
+/// The installer's signing certificate is trusted only while its drivers are installed.
+const UNTRUST: &str = r#"$ErrorActionPreference = 'Stop'
+foreach ($name in @('My', 'Root', 'TrustedPublisher')) {
+    Get-ChildItem "Cert:\LocalMachine\$name" | Where-Object Subject -eq 'CN=HIDMaestroTestCert' | ForEach-Object {
+        # Root and TrustedPublisher copies may still point at the key deleted with the My one.
+        if ($name -eq 'My') { Remove-Item -LiteralPath $_.PSPath -DeleteKey } else { Remove-Item -LiteralPath $_.PSPath }
+    }
+}"#;
+
 pub(super) fn deploy() -> Result<(), String> {
-    run(include_str!("install.ps1"))
+    run(include_str!("install.ps1")).map_err(|e| format!("HIDMaestro installation failed: {e}"))
 }
 
 fn run(script: &str) -> Result<(), String> {
@@ -138,7 +148,7 @@ fn run(script: &str) -> Result<(), String> {
         .creation_flags(0x08000000)
         .output().map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(format!("HIDMaestro installation failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(())
 }
