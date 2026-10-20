@@ -14,11 +14,13 @@ fn packages(directory: &Path) -> io::Result<(Vec<PathBuf>, bool)> {
     let (mut main, mut xusb) = (false, false);
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(directory)? {
-        let path = entry?.path();
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
         let name = path.file_name().unwrap().to_string_lossy().to_ascii_lowercase();
         if !name.strip_prefix("oem").and_then(|n| n.strip_suffix(".inf"))
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) { continue; }
-        let bytes = std::fs::read(&path)?;
+        // Another vendor's locked or broken INF says nothing about these packages.
+        let Ok(bytes) = std::fs::read(&path) else { continue };
         let content = if bytes.starts_with(&[0xff, 0xfe]) {
             String::from_utf16_lossy(&bytes[2..].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect::<Vec<_>>())
         } else {
@@ -176,6 +178,17 @@ mod tests {
         let detected = packages(&dir).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
         assert!(detected.0.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_entry_does_not_hide_the_packages() {
+        let dir = std::env::temp_dir().join(format!("easyrazer-unreadable-check-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("oem0.inf")).unwrap();
+        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer=10/13/2026,1.12.0.2302\nCatalogFile=hidmaestro.cat").unwrap();
+        std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/13/2026,1.12.0.2302\nCatalogFile=hidmaestro_xusb.cat").unwrap();
+        let detected = packages(&dir);
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(detected.unwrap().1);
     }
 
     #[test]
