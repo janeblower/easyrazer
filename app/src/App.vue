@@ -230,6 +230,10 @@ const rapidKeys = computed(
     ),
 );
 const rapidEdited = computed(() => new Set(Object.keys(rapidEdits.value).map(Number)));
+const keyAt = (k: number) => {
+  const r = rapidOf(k);
+  return { value: valueOf(k) ?? null, rapid: { mode: modeOf(r), press: r.press, release: r.release } };
+};
 
 function setRapid(change: (r: Rapid) => Rapid) {
   const next = { ...rapidEdits.value };
@@ -1183,6 +1187,7 @@ onUnmounted(() => {
                   :hs-split="hsSplit"
                   :driver="driver"
                   :analog="status?.analog ?? null"
+                  :key-at="keyAt"
                   @set="setValue"
                   @rapid="
                     (m) => setRapid((r) => ({ ...r, enabled: m !== 'off', continuous: m === 'off' || fwHw ? r.continuous : m === 'crt' }))
