@@ -118,7 +118,7 @@ fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
     }
     let [a, b, c] = raw.map(|h| owned(h as HANDLE));
     // The helper duplicated these handles into this process and stopped its writer.
-    let writer = unsafe { Writer::from_handles([a?, b?, c?]) }?;
+    let writer = Writer::from_handles([a?, b?, c?])?;
     Ok((writer, process))
 }
 
@@ -239,7 +239,7 @@ pub(super) fn helper(args: &[String]) -> io::Result<()> {
         let session = (|| {
             // The parent drops its writer before Stop; a crashed parent closes all
             // handles before its process signals. Both precede controller cleanup.
-            let writer = unsafe { controller.take_writer() }?;
+            let writer = controller.take_writer()?;
             let handles = duplicate_writer(&writer, parent.as_raw_handle())?;
             drop(writer);
             channel.reply(handles, None);
@@ -317,7 +317,7 @@ mod tests {
         }).unwrap();
         let input = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
         let companion = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
-        let writer = unsafe { Writer::from_handles([mapping, input, companion]) }.unwrap();
+        let writer = Writer::from_handles([mapping, input, companion]).unwrap();
         let mut runtime = super::super::Runtime::new();
         runtime.config.enabled = true;
         runtime.session = Some(super::super::Session {
@@ -467,13 +467,11 @@ mod tests {
         let input = owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) }).unwrap();
         let companion = owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) }).unwrap();
         let events = [input.try_clone().unwrap(), companion.try_clone().unwrap()];
-        // This anonymous mapping is private to the test and has only one writer.
-        let writer = unsafe { Writer::from_handles([mapping, input, companion]) }.unwrap();
+        let writer = Writer::from_handles([mapping, input, companion]).unwrap();
         let handles = duplicate_writer(&writer, unsafe { GetCurrentProcess() }).unwrap();
         drop(writer);
         let handles = handles.map(|h| owned(h as HANDLE).unwrap());
-        // Ownership was transferred above and the original writer has stopped.
-        let mut writer = unsafe { Writer::from_handles(handles) }.unwrap();
+        let mut writer = Writer::from_handles(handles).unwrap();
         writer.submit(&hidmaestro_client::State::default()).unwrap();
         for event in events {
             assert_eq!(unsafe { WaitForSingleObject(event.as_raw_handle(), 0) }, WAIT_OBJECT_0);

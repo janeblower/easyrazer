@@ -1463,7 +1463,7 @@ dependencies = [
 [[package]]
 name = "hidmaestro-client"
 version = "0.1.0"
-source = "git+https://github.com/janeblower/hidmaestro-client-rust?rev=eef83037be961f1dfc3636bf0c32bd35e82519ca#eef83037be961f1dfc3636bf0c32bd35e82519ca"
+source = "git+https://github.com/janeblower/hidmaestro-client-rust?rev=0d04f1496d59b94d1b5189d8b6523941126fdbcd#0d04f1496d59b94d1b5189d8b6523941126fdbcd"
 dependencies = [
  "windows-sys 0.61.2",
 ]
