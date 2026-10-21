@@ -214,6 +214,7 @@ fn main() {
             commands::import_profile,
             commands::hide_window,
             commands::quit,
+            commands::open_repo,
             dev::set_dev_mode,
             dev::set_dev_panel,
             dev::set_dev_window,

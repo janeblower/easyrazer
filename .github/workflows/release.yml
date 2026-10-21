@@ -19,6 +19,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
 
       - run: bun install --frozen-lockfile
         working-directory: app
@@ -38,11 +41,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mv target/release/easyrazer.exe EasyRazer.exe
+          cp app/dist/LICENSES.txt LICENSES.txt
           if [ "$GITHUB_REF_TYPE" = tag ]; then
-            gh release create "$GITHUB_REF_NAME" EasyRazer.exe --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$GITHUB_REF_NAME" EasyRazer.exe LICENSES.txt --title "$GITHUB_REF_NAME" --generate-notes
           else
             # Recreated on every merge so the pre-release stays at the top of the list.
             gh release delete nightly --cleanup-tag --yes || true
-            gh release create nightly EasyRazer.exe --prerelease --target "$GITHUB_SHA" \
+            gh release create nightly EasyRazer.exe LICENSES.txt --prerelease --target "$GITHUB_SHA" \
               --title "Nightly ${GITHUB_SHA::7}" --generate-notes
           fi

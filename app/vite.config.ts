@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import unocss from "unocss/vite";
+import { licenses } from "./notices";
 
 const git = (args: string) =>
   execSync(`git ${args}`, { stdio: ["ignore", "pipe", "ignore"] })
@@ -18,7 +19,7 @@ function version() {
 }
 
 export default defineConfig({
-  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "selectedcontent" } } }), unocss()],
+  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "selectedcontent" } } }), unocss(), licenses()],
   clearScreen: false,
   server: { port: 5173, strictPort: true },
   define: { __APP_VERSION__: JSON.stringify(version()) },

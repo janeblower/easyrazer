@@ -42,6 +42,7 @@ import SettingsTab from "./components/SettingsTab.vue";
 import ProfileMenu from "./components/ProfileMenu.vue";
 import DeviceMenu from "./components/DeviceMenu.vue";
 import ModalDialog from "./components/ModalDialog.vue";
+import AboutDialog from "./components/AboutDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
 import { useConfirmWrite } from "./confirmWrite";
@@ -111,6 +112,7 @@ const closing = ref(false);
 const closeRemember = ref(false);
 const hiding = ref(false); // asked before dropping edits with the window
 const offering = ref(false);
+const about = ref(false);
 const macrosToWrite = ref<number[]>([]); // asked before applying bindings to them
 const devices = ref<DevicesView | null>(null);
 let loadedProfile: number | null = null; // profile the baseline was read from
@@ -1298,7 +1300,14 @@ onUnmounted(() => {
             <button class="primary" autofocus @click="onOffer(true)">{{ $t("dialogs.autostart.yes") }}</button>
           </template>
         </ModalDialog>
-        <footer class="text-xs text-muted">{{ version }} · {{ $t("footer") }}</footer>
+        <AboutDialog v-if="about && !closing" :version="version" @close="about = false" />
+        <footer class="text-xs text-muted">
+          {{ version }} ·
+          <button class="text-xs text-muted p-0 border-0 bg-transparent underline h-auto hover:text-text" @click="about = true">
+            {{ $t("about.title") }}
+          </button>
+          · {{ $t("footer") }}
+        </footer>
       </main>
     </div>
     <DevPanel

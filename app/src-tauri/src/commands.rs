@@ -441,6 +441,18 @@ pub fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Opens the project page; the URL is fixed so the UI cannot open other targets.
+#[tauri::command]
+pub fn open_repo() -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let verb = autostart::wide("open");
+    let url = autostart::wide("https://github.com/janeblower/easyrazer");
+    let code = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), url.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+    // ShellExecuteW reports failure as a value of 32 or less.
+    if code as usize > 32 { Ok(()) } else { Err(std::io::Error::last_os_error().to_string()) }
+}
+
 #[tauri::command]
 pub async fn profiles(state: State<'_, AppState>, id: String) -> Result<ProfilesView, String> {
     if let Some(d) = state.boards.get(&id) {
