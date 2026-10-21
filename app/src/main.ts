@@ -278,7 +278,7 @@ async function mockBackend() {
       dynamic_lighting: false,
       custom: null,
     },
-    app_settings: { autostart_offered: true, language: null },
+    app_settings: { autostart_offered: true, language: null, close_action: "ask" },
     macros: {
       macros: {
         1: {
