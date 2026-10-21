@@ -96,7 +96,7 @@ pub(super) fn launch() -> std::sync::mpsc::Receiver<Result<(Writer, Process), St
         let result = (|| {
             let _launch = LAUNCHING.try_lock().map_err(|_| "A gamepad helper is already starting. Apply again after startup finishes.".to_string())?;
             if !super::drivers::installed()? {
-                return Err("Install HIDMaestro v1.12.0 from the Gamepad tab first.".into());
+                return Err("Install HIDMaestro v2.0.0 from the Gamepad tab first.".into());
             }
             (|| launch_inner(&std::env::current_exe()?))().map_err(|e| format!("gamepad helper: {e}"))
         })();

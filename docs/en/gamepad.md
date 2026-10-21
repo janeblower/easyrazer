@@ -9,8 +9,8 @@ once; custom assignments and later clearing of assignments are preserved.
 The editor, including the controller preview, is inactive in hardware mode
 and until both HIDMaestro driver packages are installed. Click **Install
 HIDMaestro** in the tab and approve Windows' administrator prompt. EasyRazer
-downloads the pinned upstream **v1.12.0** x64 release, verifies its SHA-256,
-and installs both driver packages, version **1.12.0.2302**, in the background.
+downloads the pinned upstream **v2.0.0** x64 release, verifies its SHA-256,
+and installs both driver packages, version **2.0.0.2201**, in the background.
 An animated indicator stays visible during download and installation; errors
 leave the install button available to retry. Installation uses the upstream
 signing tools: it creates a HIDMaestro code-signing certificate, trusts it in

@@ -13,8 +13,8 @@ function Invoke-Tool([string] $file, [string[]] $arguments) {
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
     $zip = Join-Path $stage 'HIDMaestro.zip'
-    Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri 'https://github.com/hifihedgehog/HIDMaestro/releases/download/v1.12.0/HIDMaestro-v1.12.0.zip' -OutFile $zip
-    if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne 'CF03347A0BC88BFB198A606C0FF8375BC4A9420FA80C07EF336186986D79B244') {
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri 'https://github.com/hifihedgehog/HIDMaestro/releases/download/v2.0.0/HIDMaestro-v2.0.0.zip' -OutFile $zip
+    if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne '9678CA1E7D2B689AF99D353677403F644F9948BD0553598C953F80E4333A8479') {
         throw 'HIDMaestro release checksum mismatch'
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem

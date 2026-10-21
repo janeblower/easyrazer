@@ -76,7 +76,7 @@
   "keys": { "actuation": "Actuation", "bindings": "Bindings", "macros": "Macros", "gamepad": "Gamepad" },
   "gamepad": {
     "checkingDriver": "Checking HIDMaestro…",
-    "driverMissing": "HIDMaestro v1.12.0 is required to use the gamepad.",
+    "driverMissing": "HIDMaestro v2.0.0 is required to use the gamepad.",
     "install": "Install HIDMaestro",
     "installing": "Downloading and installing HIDMaestro…",
     "driverInstalled": "Installed",

@@ -45,7 +45,7 @@ fn packages(directory: &Path) -> io::Result<(Vec<PathBuf>, bool)> {
                 };
             }
             if key == "driverver" {
-                pinned = value.replace([' ', '\t'], "") == "10/13/2026,1.12.0.2302";
+                pinned = value.replace([' ', '\t'], "") == "10/19/2026,2.0.0.2201";
             }
         }
         if let Some(companion) = component {
@@ -185,7 +185,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("easyrazer-comment-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for (file, dll) in [("oem1.inf", "hidmaestro.dll"), ("oem2.inf", "hmxinput.dll")] {
-            std::fs::write(dir.join(file), format!("DriverVer=10/13/2026,1.12.0.2302\n; hidmaestro {dll}\nCatalogFile=another.cat")).unwrap();
+            std::fs::write(dir.join(file), format!("DriverVer=10/19/2026,2.0.0.2201\n; hidmaestro {dll}\nCatalogFile=another.cat")).unwrap();
         }
         let detected = packages(&dir).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
@@ -196,8 +196,8 @@ mod tests {
     fn an_unreadable_entry_does_not_hide_the_packages() {
         let dir = std::env::temp_dir().join(format!("easyrazer-unreadable-check-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("oem0.inf")).unwrap();
-        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer=10/13/2026,1.12.0.2302\nCatalogFile=hidmaestro.cat").unwrap();
-        std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/13/2026,1.12.0.2302\nCatalogFile=hidmaestro_xusb.cat").unwrap();
+        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer=10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro.cat").unwrap();
+        std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro_xusb.cat").unwrap();
         let detected = packages(&dir);
         std::fs::remove_dir_all(dir).unwrap();
         assert!(detected.unwrap().1);
@@ -208,14 +208,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("easyrazer-driver-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!packages(&dir).unwrap().1);
-        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer = 10/13/2026,1.12.0.2302\nCatalogFile=hidmaestro.cat").unwrap();
+        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer = 10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro.cat").unwrap();
         assert!(!packages(&dir).unwrap().1);
         std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/13/2026,1.11.0.0\nCatalogFile=hidmaestro_xusb.cat").unwrap();
         let (paths, ready) = packages(&dir).unwrap();
         assert_eq!(paths.len(), 2);
         assert!(!ready);
         let mut bytes = vec![0xff, 0xfe];
-        bytes.extend("[Version]\nDriverVer = 10/13/2026,1.12.0.2302\r\nCatalogFile = hidmaestro_xusb.cat".encode_utf16().flat_map(u16::to_le_bytes));
+        bytes.extend("[Version]\nDriverVer = 10/19/2026,2.0.0.2201\r\nCatalogFile = hidmaestro_xusb.cat".encode_utf16().flat_map(u16::to_le_bytes));
         std::fs::write(dir.join("oem2.inf"), bytes).unwrap();
         assert!(packages(&dir).unwrap().1);
         std::fs::remove_dir_all(dir).unwrap();
