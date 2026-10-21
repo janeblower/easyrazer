@@ -119,20 +119,32 @@ onUnmounted(() => {
         />
       </label>
     </template>
-    <div class="field mt-4 flex-wrap">
-      <span class="field-label min-w-[160px]">HIDMaestro</span>
-      <span class="text-muted" role="status" :aria-busy="!!driverOperation">{{ driverState }}</span>
-      <button v-if="outdated" class="primary" :disabled="!!driverOperation" @click="emit('install')">
-        <AppIcon name="shield" />
-        {{ $t("gamepad.update") }}
-      </button>
-      <button
-        :disabled="driverStatus === null || !!driverOperation"
-        @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
-      >
-        <AppIcon name="shield" />
-        {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
-      </button>
+    <div class="mt-8">
+      <div class="flex gap-2 items-center">
+        HIDMaestro
+        <span
+          class="driver-dot"
+          :class="{ on: driverStatus?.installed, busy: !!driverOperation }"
+          :title="driverState"
+          role="status"
+          :aria-busy="!!driverOperation"
+        >
+          <span class="sr-only">{{ driverState }}</span>
+        </span>
+      </div>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button v-if="outdated" class="primary" :disabled="!!driverOperation" @click="emit('install')">
+          <AppIcon name="shield" />
+          {{ $t("gamepad.update") }}
+        </button>
+        <button
+          :disabled="driverStatus === null || !!driverOperation"
+          @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
+        >
+          <AppIcon name="shield" />
+          {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
+        </button>
+      </div>
     </div>
     <p v-if="driverError" class="text-error m-0" role="alert">{{ driverError }}</p>
     <p v-if="message" class="text-error m-0">{{ message }}</p>
@@ -145,3 +157,32 @@ onUnmounted(() => {
     </ModalDialog>
   </section>
 </template>
+
+<style scoped>
+.driver-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5a5a5a;
+}
+.driver-dot.on,
+.driver-dot.busy {
+  background: var(--accent);
+}
+.driver-dot.on {
+  box-shadow: 0 0 6px rgb(68 214 44 / 60%);
+}
+.driver-dot.busy {
+  animation: driver-pulse 1s ease-in-out infinite;
+}
+@keyframes driver-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .driver-dot.busy {
+    animation: none;
+  }
+}
+</style>
