@@ -357,14 +357,15 @@ const lightingLog = computed(() =>
     <p v-if="!draft" class="msg">{{ $t("lighting.connect") }}</p>
     <div v-else-if="ui" class="flex gap-3" :class="{ 'pointer-events-none opacity-40': blocked }">
       <ul class="m-0 p-2.5 list-none card w-[210px]">
-        <li
-          v-for="g in groups"
-          :key="g.group"
-          :class="[`fx g-${g.group}`, { on: currentGroup === g }]"
-          class="mb-1 px-2.5 py-2 border-2 rounded-md border-solid bg-key cursor-pointer relative overflow-hidden"
-          @click="!blocked && pickGroup(g)"
-        >
-          <span>{{ g.label }}</span>
+        <li v-for="g in groups" :key="g.group" class="mb-1">
+          <button
+            :class="[`fx g-${g.group}`, { on: currentGroup === g }]"
+            class="px-2.5 py-2 text-left border-2 rounded-md border-solid bg-key w-full relative overflow-hidden"
+            :aria-pressed="currentGroup === g"
+            @click="!blocked && pickGroup(g)"
+          >
+            <span>{{ g.label }}</span>
+          </button>
         </li>
       </ul>
       <div class="px-4 py-3 card flex-1 min-w-0">
@@ -422,17 +423,21 @@ const lightingLog = computed(() =>
         </div>
         <div v-if="speedInfo" class="field">
           <span class="field-label">{{ $t("lighting.speed") }}</span>
-          <span class="hint">{{ $t("lighting.slow") }}</span>
-          <input
-            v-model.number="speedSlider"
-            class="w-60"
-            type="range"
-            :min="speedInfo.speed![0]"
-            :max="speedInfo.speed![1]"
-            step="1"
-            :disabled="blocked"
-          />
-          <span class="hint">{{ $t("lighting.fast") }}</span>
+          <span class="flex flex-col w-60">
+            <input
+              v-model.number="speedSlider"
+              class="m-0"
+              type="range"
+              :min="speedInfo.speed![0]"
+              :max="speedInfo.speed![1]"
+              step="1"
+              :disabled="blocked"
+            />
+            <span class="hint flex justify-between">
+              <span>{{ $t("lighting.slow") }}</span>
+              <span>{{ $t("lighting.fast") }}</span>
+            </span>
+          </span>
         </div>
         <template v-if="isCustom">
           <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" fit />
@@ -448,7 +453,7 @@ const lightingLog = computed(() =>
         <p v-if="ui.group === 'off'" class="msg">{{ $t("lighting.isOff") }}</p>
         <div v-else class="field">
           <span class="field-label">{{ $t("lighting.brightness") }}</span>
-          <input v-model.number="percent" class="w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
+          <input v-model.number="percent" class="m-0 w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
           <span>{{ percent }}%</span>
         </div>
       </div>
@@ -486,6 +491,7 @@ const lightingLog = computed(() =>
 .fx > span {
   position: relative;
   z-index: 1;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 70%);
 }
 .fx::before,
 .fx::after {

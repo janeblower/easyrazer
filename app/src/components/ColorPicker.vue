@@ -33,7 +33,7 @@ const toggleNone = () => (model.value = model.value ? null : last.value);
   <span class="inline-flex gap-1.5 items-center">
     <!-- The datalist gives the picker its swatches. -->
     <input
-      class="p-0 border-line rounded-md h-[30px] w-9 cursor-pointer"
+      class="p-0 border-line rounded-md h-8 w-9 cursor-pointer"
       :class="{ 'opacity-35': !model }"
       type="color"
       :list="id"
@@ -47,8 +47,8 @@ const toggleNone = () => (model.value = model.value ? null : last.value);
       <option v-for="c in PRESETS" :key="c" :value="c" />
     </datalist>
     <button
-      class="text-xs px-2 py-1"
-      :class="{ 'border-error bg-error text-white': !model }"
+      class="text-xs px-2.5 py-0 h-8"
+      :class="{ 'border-accent text-accent': !model }"
       :disabled="disabled"
       :aria-pressed="!model"
       @click="toggleNone"
