@@ -127,7 +127,9 @@ function ringStyle(k: KeyView) {
     width: `${k.w * U}px`,
     height: `${k.h * U}px`,
     borderWidth: `${RING * U}px`,
-    borderColor: c ? `rgb(${c.join(" ")})` : "var(--line)",
+    borderColor: "var(--line)",
+    // The color runs along the frame's inner edge, like the strip on a painted key.
+    boxShadow: c ? `inset 0 0 0 4px rgb(${c.join(" ")})` : undefined,
   };
 }
 
@@ -144,14 +146,15 @@ function keyClass(k: KeyView) {
   const selected = selection.value.has(k.key);
   const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
   const look = props.colors
-    ? ["cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
+    ? ["bg-key cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
     : k.editable && isRead(k.key)
       ? "bg-key cursor-pointer"
       : "bg-key-off text-muted cursor-default";
   return [border, look, k.shape === "round" ? "rounded-full !items-center !justify-center" : "rounded-md"];
 }
 
-// Painted keys keep their label readable on light and dark colors.
+// A painted key stays a dark cap with its color as a strip along the bottom: filled caps glared in
+// the dark theme. A shrunk map keeps its labels at a readable size.
 function keyStyle(k: KeyView) {
   const bar = props.snap[k.key];
   const box = {
@@ -162,9 +165,12 @@ function keyStyle(k: KeyView) {
     boxShadow: bar ? `inset 0 3px 0 ${bar}` : undefined,
   };
   if (!props.colors) return box;
-  const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
-  const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
-  return { ...box, background: `rgb(${r} ${g} ${b})`, color: light ? "#111" : "#eee" };
+  const c = props.colors[k.key];
+  return {
+    ...box,
+    boxShadow: c ? `inset 0 -5px 0 rgb(${c.join(" ")})` : undefined,
+    fontSize: `${scale.value < 1 ? 11 / scale.value : 12}px`,
+  };
 }
 
 function valueClass(key: number) {
@@ -247,7 +253,7 @@ function up(e: PointerEvent) {
         :title="title(k.key)"
       >
         <span v-if="inline && values[k.key] != null" class="text-xs truncate" :class="labelClass(k.key)">{{ values[k.key] }}</span>
-        <span v-else class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span v-else :class="{ 'text-xs': !colors }">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
           <span
             v-if="rapid.has(k.key)"
