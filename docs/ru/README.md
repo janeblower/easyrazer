@@ -129,7 +129,9 @@ EasyRazer отдаёт ввод прошивке. У линейки V2 Analog а
 
 ## Сборка
 
-Нужны Rust (MSVC), Bun и MSVC Build Tools.
+Нужны Rust (MSVC), Bun, MSVC Build Tools и cargo-about
+(`cargo install cargo-about --locked --features cli`): он собирает лицензии
+крейтов для окна «О программе».
 
 ```
 cd app

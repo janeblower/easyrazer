@@ -128,7 +128,9 @@ driver mode. The V3 line has no such limit: 0.1–4.0 mm in both modes.
 
 ## Building from source
 
-Requires Rust (MSVC), Bun and MSVC Build Tools.
+Requires Rust (MSVC), Bun, MSVC Build Tools and cargo-about
+(`cargo install cargo-about --locked --features cli`), which lists the
+crates' licenses for the About window.
 
 ```
 cd app

@@ -6,7 +6,16 @@
     "driver": "Driver",
     "hint": "HW: the keyboard types by itself.\nDriver: EasyRazer types for it; the keyboard types only while the app runs.\n\nDriver mode only:\n• Rapid Trigger\n• Snap Tap\n• Live key depth\n• Macros not written to the keyboard"
   },
-  "footer": "EasyRazer is an unofficial project, not affiliated with Razer Inc.",
+  "about": {
+    "title": "About",
+    "description": "A lightweight Razer Synapse replacement for Razer analog keyboards on Windows.",
+    "unofficial": "Unofficial project, not affiliated with or endorsed by Razer Inc. Razer is a trademark of Razer Inc.",
+    "license": "EasyRazer is licensed under the {gpl} version 3 or later, with absolutely no warranty.",
+    "thirdParty": "Third-party components",
+    "notice": "Notice",
+    "source": "Source code is available on {github}.",
+    "close": "Close"
+  },
   "common": {
     "selectAll": "Select all",
     "clearSelection": "Clear selection",
