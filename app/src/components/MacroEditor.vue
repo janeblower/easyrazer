@@ -193,37 +193,38 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         <span class="field-label">{{ $t("macros.name") }}</span>
         <input v-model="draft.name" class="flex-1" maxlength="40" />
       </div>
-      <ol class="m-0 pl-6 flex flex-col gap-1 max-h-[320px] overflow-y-auto">
-        <li v-for="(e, i) in draft.events" :key="i">
-          <span class="flex gap-2 items-center">
-            <template v-if="e.type === 'delay'">
-              {{ $t("macros.delay") }}
-              <input v-model.number="e.ms" type="number" min="0" max="600000" class="w-[80px]" />
+      <ol class="m-0 p-0 list-none flex flex-col gap-1 max-h-[320px] overflow-y-auto">
+        <li v-for="(e, i) in draft.events" :key="i" class="step">
+          <span class="text-xs text-muted text-right">{{ i + 1 }}</span>
+          <template v-if="e.type === 'delay'">
+            <span class="px-2">{{ $t("macros.delay") }}</span>
+            <span class="flex gap-2 items-center">
+              <input v-model.number="e.ms" type="number" min="0" max="600000" class="w-[90px]" />
               {{ $t("macros.ms") }}
-            </template>
-            <template v-else>
-              <select :value="String(e.down)" @change="e.down = value($event) === 'true'">
-                <option value="true">{{ $t("macros.down") }}</option>
-                <option value="false">{{ $t("macros.up") }}</option>
-              </select>
-              <select v-if="e.type === 'key'" v-model.number="e.key">
-                <option v-for="k in keys" :key="k.key" :value="k.key">{{ k.name }}</option>
-              </select>
-              <select v-else :value="e.button" @change="e.button = value($event) as Mouse">
-                <option v-for="b in MOUSE" :key="b" :value="b">{{ $t(`bindings.mouse.${b}`) }}</option>
-              </select>
-            </template>
-            <span class="ml-auto flex gap-1">
-              <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">
-                <AppIcon name="up" />
-              </button>
-              <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
-                <AppIcon name="down" />
-              </button>
-              <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">
-                <AppIcon name="remove" />
-              </button>
             </span>
+          </template>
+          <template v-else>
+            <select :value="String(e.down)" @change="e.down = value($event) === 'true'">
+              <option value="true">{{ $t("macros.down") }}</option>
+              <option value="false">{{ $t("macros.up") }}</option>
+            </select>
+            <select v-if="e.type === 'key'" v-model.number="e.key">
+              <option v-for="k in keys" :key="k.key" :value="k.key">{{ k.name }}</option>
+            </select>
+            <select v-else :value="e.button" @change="e.button = value($event) as Mouse">
+              <option v-for="b in MOUSE" :key="b" :value="b">{{ $t(`bindings.mouse.${b}`) }}</option>
+            </select>
+          </template>
+          <span class="step-actions flex gap-1">
+            <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">
+              <AppIcon name="up" />
+            </button>
+            <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
+              <AppIcon name="down" />
+            </button>
+            <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">
+              <AppIcon name="remove" />
+            </button>
           </span>
         </li>
       </ol>
@@ -265,3 +266,22 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
     <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
   </div>
 </template>
+
+<style scoped>
+/* Fixed columns keep a pause in line with the key steps; the row's buttons sit right after it. */
+.step {
+  display: grid;
+  grid-template-columns: 24px 130px 180px auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: start;
+}
+.step-actions {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.step:hover .step-actions,
+.step:focus-within .step-actions {
+  opacity: 1;
+}
+</style>
