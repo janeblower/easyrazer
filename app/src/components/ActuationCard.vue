@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ours } from "../keyboard";
 import type { Analog, RapidMode } from "../types";
+import AppIcon from "./AppIcon.vue";
 
 interface RapidView {
   mode: RapidMode | null;
@@ -42,7 +43,7 @@ const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value)
 const rtHere = computed(() => props.driver || !!props.analog?.firmware_rapid);
 const rtOn = computed(() => rtHere.value && props.rapid.mode != null && props.rapid.mode !== "off");
 const modes = computed<RapidMode[]>(() => (props.crt == null ? ["off", "rt", "crt"] : ["off", "rt"]));
-const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
+const label = (v: number | null) => (v == null ? t("actuation.mixed") : v.toFixed(1));
 
 const V2: Analog = { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false };
 const scale = computed(() => props.analog ?? V2);
@@ -83,6 +84,11 @@ const mid = (min: number, max: number, v: number | null | undefined, fallback: n
 const NONE = { "--from": "0px", "--to": "0px" };
 const span = (from: number, to: number) => ({ "--from": at(from), "--to": at(to) });
 const fill = computed(() => (props.driver && lead.value[0] ? span(0, Math.min(1, Math.max(0, frac(depthMm(lead.value[0]))))) : NONE));
+// With nothing selected the scale has no thumb and reads the lead key's depth instead.
+const live = computed(() => (props.driver && lead.value[0] ? depthMm(lead.value[0]).toFixed(1) : ""));
+const hwHint = computed(() =>
+  hwMarks.value.length > 0 ? t("actuation.hwLimits", { min: hwMarks.value[0], max: hwMarks.value.at(-1) }) : undefined,
+);
 // Next move of the key: up to release once it is down, down to press otherwise.
 const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "up" : "down") : null));
 // Press grows down from the top and meets the thumb as the key goes down; release grows up
@@ -118,20 +124,35 @@ const rtSliders = computed(() => {
   <div class="flex gap-6 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
       <span class="text-sm flex h-6 items-center">{{ $t("actuation.title") }}, {{ $t("actuation.unit") }}</span>
+      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="{ 'seg-on': hsSplit === on }"
+          :aria-pressed="hsSplit === on"
+          :disabled="!count"
+          @click="emit('hsSplit', on)"
+        >
+          {{ on ? "Hypershift" : $t("actuation.shared") }}
+        </button>
+      </span>
       <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
       <div class="flex w-[144px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
         <div class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
-          <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
+          <!-- Room on both sides for the arrow and the marks, so the scale stays centred. -->
           <div class="mx-7 relative">
             <input
-              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              class="depth h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="MIN"
               :max="MAX"
               :step="step"
               :value="shown"
               :disabled="!count"
+              :title="hwHint"
               :style="fill"
               @input="emit('set', mm($event))"
             />
@@ -145,55 +166,40 @@ const rtSliders = computed(() => {
             >
               <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
             </svg>
-            <template v-if="hwMarks.length > 0">
-              <div
-                v-for="m in hwMarks"
-                :key="m"
-                class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
-                :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
-                :style="{ top: markTop(m) }"
-              >
-                <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
-              </div>
-            </template>
-            <span class="thumb-value" :style="{ top: at(frac(shown)) }">{{ label(value) }}</span>
+            <div
+              v-for="m in hwMarks"
+              :key="m"
+              class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
+              :class="clamped(m) ? 'bg-warn' : 'bg-muted'"
+              :style="{ top: markTop(m) }"
+            />
           </div>
           <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
+          <span class="readout">{{ count ? label(value) : live }}</span>
           <span class="text-xs text-muted" :class="{ invisible: !hsSplit }">{{ $t("actuation.normal") }}</span>
         </div>
         <div v-if="hsSplit" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
           <div class="mx-7 relative">
             <input
-              class="depth depth-hs h-[200px] block [writing-mode:vertical-lr]"
+              class="depth depth-hs h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="MIN"
               :max="MAX"
               :step="step"
               :value="hsShown"
               :disabled="!count"
+              :title="hwHint"
               :style="fill"
               @input="emit('hs', mm($event))"
             />
-            <span class="thumb-value" :style="{ top: at(frac(hsShown)) }">{{ label(hs) }}</span>
           </div>
           <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
+          <span class="readout">{{ count ? label(hs) : live }}</span>
           <span class="text-xs text-hs">Hypershift</span>
         </div>
       </div>
-      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
-        <button
-          v-for="on in [false, true]"
-          :key="String(on)"
-          class="text-xs px-2 py-0 seg-btn"
-          :class="hsSplit === on && (on ? 'border-hs bg-hs text-ink' : 'seg-on')"
-          :aria-pressed="hsSplit === on"
-          :disabled="!count"
-          @click="emit('hsSplit', on)"
-        >
-          {{ on ? "Hypershift" : $t("actuation.shared") }}
-        </button>
-      </span>
     </div>
     <svg class="h-[200px] self-center" viewBox="0 0 120 200" aria-hidden="true">
       <g class="press chev">
@@ -215,6 +221,7 @@ const rtSliders = computed(() => {
       <path d="M34 172H86" style="stroke: var(--error)" stroke-width="3" stroke-linecap="round" />
     </svg>
     <div class="flex flex-col gap-1 items-center">
+      <span class="text-sm flex h-6 items-center">{{ $t("rapid.title") }}, {{ $t("actuation.unit") }}</span>
       <div class="flex gap-2 h-6">
         <span class="inline-flex h-6" role="group" :title="$t('rapid.title')">
           <button
@@ -246,7 +253,8 @@ const rtSliders = computed(() => {
           <span class="text-xs text-muted">0.1</span>
           <div class="mx-7 relative">
             <input
-              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              class="depth h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="RT_MIN"
               :max="RT_MAX"
@@ -256,13 +264,13 @@ const rtSliders = computed(() => {
               :style="s.fill"
               @input="s.kind === 'press' ? emit('press', mm($event)) : emit('release', mm($event))"
             />
-            <span class="thumb-value" :style="{ top: at((s.shown - RT_MIN) / (RT_MAX - RT_MIN)) }">{{ label(s.value) }}</span>
           </div>
           <span class="text-xs text-muted">1.0</span>
+          <span class="readout">{{ count && rtOn ? label(s.value) : "" }}</span>
           <span class="text-xs text-muted" :class="{ invisible: !split }">{{ $t(`rapid.${s.kind}`) }}</span>
         </div>
       </div>
-      <span v-if="!rtHere" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
+      <span v-if="!rtHere" class="text-xs text-muted flex gap-1.5 h-6 items-center"><AppIcon name="ban" />{{ $t("rapid.hwOnly") }}</span>
       <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
         <button
           v-for="on in [false, true]"
@@ -312,16 +320,19 @@ const rtSliders = computed(() => {
   border-radius: 50%;
   background: var(--text);
 }
-.thumb-value {
-  position: absolute;
-  left: calc(100% + 6px);
-  translate: 0 -50%;
-  font-size: 12px;
+.readout {
+  height: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  pointer-events: none;
 }
 .depth:disabled::-webkit-slider-thumb {
   background: var(--muted);
+}
+/* Unselected, the scale only shows live depth: a resting thumb would read as a value. */
+.depth.idle::-webkit-slider-thumb {
+  visibility: hidden;
 }
 .chev {
   fill: none;

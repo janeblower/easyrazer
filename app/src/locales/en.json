@@ -36,6 +36,7 @@
     "hsSplit": "Separate for Hypershift",
     "normal": "normal",
     "mixed": "mixed",
+    "hwLimits": "In HW mode the firmware keeps the point within {min}–{max} mm",
     "unconfirmed": "Not confirmed: the keyboard has {v} mm",
     "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
     "applied": "Applied until the keyboard is unplugged",
@@ -56,7 +57,7 @@
     "rtHint": "Rapid Trigger: works below the press point",
     "crtHint": "Continuous Rapid Trigger: works along the whole travel until the key is fully up",
     "crtProfileHint": "Continuous Rapid Trigger for every key with RT: the firmware has one switch for the whole profile",
-    "hwOnly": "(not available in HW mode)"
+    "hwOnly": "Driver mode only"
   },
   "snap": {
     "title": "Snap Tap",
