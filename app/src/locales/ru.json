@@ -77,6 +77,9 @@
   "gamepad": {
     "checkingDriver": "Проверка HIDMaestro…",
     "driverMissing": "Для геймпада требуется HIDMaestro v2.0.0.",
+    "driverOutdated": "Установлен HIDMaestro {version}, для геймпада нужна версия 2.0.0 или новее.",
+    "driverOutdatedShort": "Устарел ({version})",
+    "update": "Обновить HIDMaestro",
     "install": "Установить HIDMaestro",
     "installing": "Скачивание и установка HIDMaestro…",
     "driverInstalled": "Установлен",

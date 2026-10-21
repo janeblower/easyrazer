@@ -178,6 +178,7 @@ export type CloseAction = "ask" | "tray" | "exit";
 export interface GamepadDriverStatus {
   installed: boolean;
   ready: boolean;
+  version: string | null;
 }
 
 export interface AppSettings {
