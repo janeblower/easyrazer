@@ -65,6 +65,25 @@ select {
   cursor: default;
 }
 
+/* The chosen segment is marked, not filled: a solid fill is kept for Apply. As weak as `button`,
+   so a segment's own text colour still wins. */
+button:where(.seg-btn) {
+  color: var(--muted);
+}
+
+button:where(.seg-btn:hover:not(:disabled)),
+.seg-on {
+  color: var(--text);
+}
+
+.seg-on {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.seg-on.seg-hs {
+  box-shadow: inset 0 -2px 0 var(--hs);
+}
+
 button.primary:not(:disabled) {
   background: var(--accent);
   color: var(--ink);

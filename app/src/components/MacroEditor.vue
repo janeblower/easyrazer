@@ -180,7 +180,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         v-for="m in list"
         :key="m.id"
         class="text-left truncate"
-        :class="{ 'seg-on': selected === m.id }"
+        :class="{ 'border-accent': selected === m.id }"
         :title="m.written ? '' : $t('macros.notWritten')"
         @click="open(m.id)"
       >
@@ -229,7 +229,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
       </ol>
       <p v-if="draft.events.length === 0" class="hint m-0">{{ $t("macros.empty") }}</p>
       <div class="flex flex-wrap gap-2 items-center">
-        <button :class="{ 'seg-on': recording }" @click="recording ? stopRecording() : startRecording()">
+        <button :class="{ 'border-error text-error': recording }" @click="recording ? stopRecording() : startRecording()">
           {{ $t(recording ? "macros.stop" : "macros.record") }}
         </button>
         <label class="flex gap-1 items-center"><input v-model="withDelays" type="checkbox" /> {{ $t("macros.withDelays") }}</label>

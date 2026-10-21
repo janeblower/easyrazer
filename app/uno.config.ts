@@ -38,7 +38,6 @@ export default defineConfig({
     field: "my-2.5 flex items-center gap-2.5",
     "field-label": "min-w-[100px] text-muted",
     "seg-btn": "rounded-none first:rounded-l-md last:rounded-r-md",
-    "seg-on": "border-accent bg-accent text-ink",
     "icon-btn": "inline-flex h-8 w-[34px] items-center justify-center p-0",
     "write-btn": "icon-btn text-write border-write-line bg-transparent",
     "dev-btn": "bg-transparent border-0 rounded px-1.5 py-0.5 text-muted hover:bg-key hover:text-text",

@@ -103,7 +103,7 @@ function setMod(bit: number, on: boolean) {
           v-for="ty in types"
           :key="ty"
           class="icon-btn seg-btn"
-          :class="keyId != null && type === ty ? (hypershift ? 'border-hs bg-hs text-ink' : 'seg-on') : ''"
+          :class="keyId != null && type === ty ? ['seg-on', { 'seg-hs': hypershift }] : ''"
           :disabled="keyId == null || (ty === 'macro' && macroList.length === 0)"
           :title="ty === 'macro' && macroList.length === 0 ? $t('bindings.noMacros') : $t(`bindings.types.${ty}`)"
           :aria-label="$t(`bindings.types.${ty}`)"
