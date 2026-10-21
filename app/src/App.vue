@@ -45,6 +45,7 @@ import ModalDialog from "./components/ModalDialog.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
+import EmptyState from "./components/EmptyState.vue";
 import { useConfirmWrite } from "./confirmWrite";
 import { type Place, applyAll, hasUnapplied, revertAll, sections, summarize, useSection, writeAll } from "./changes";
 import { setLanguage, systemLanguage } from "./i18n";
@@ -1201,7 +1202,14 @@ onUnmounted(() => {
               :single="section === 'bindings'"
               :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
             />
-            <div class="gap-4 grid grid-cols-2" :class="{ 'opacity-60': !online }" :inert="!online">
+            <EmptyState
+              v-if="section === 'bindings' && bindKey == null"
+              class="card"
+              icon="keyboard"
+              :title="$t('bindings.pickTitle')"
+              :text="$t('bindings.pickText')"
+            />
+            <div v-else class="gap-4 grid grid-cols-2" :class="{ 'opacity-60': !online }" :inert="!online">
               <div class="px-4 py-3 card flex flex-col gap-3">
                 <ActuationCard
                   v-if="section === 'actuation'"

@@ -8,6 +8,7 @@ import { dev } from "../dev";
 import { hex } from "../devConsole";
 import { useSection } from "../changes";
 import DevBlock from "./DevBlock.vue";
+import EmptyState from "./EmptyState.vue";
 import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
@@ -93,6 +94,11 @@ function open(id: number | null) {
   message.value = "";
 }
 
+function recordNew() {
+  open(null);
+  startRecording();
+}
+
 function move(i: number, by: number) {
   const ev = draft.value?.events;
   if (!ev || i + by < 0 || i + by >= ev.length) return;
@@ -174,17 +180,26 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
 </script>
 
 <template>
-  <div class="px-4 py-3 card flex gap-4 items-start">
+  <EmptyState v-if="list.length === 0 && !draft" class="card" icon="macro" :title="$t('macros.noneTitle')" :text="$t('macros.noneText')">
+    <span class="mt-1 flex gap-2">
+      <button class="primary" @click="recordNew">{{ $t("macros.recordNew") }}</button>
+      <button @click="open(null)">{{ $t("macros.createEmpty") }}</button>
+    </span>
+    <span v-if="state?.free != null" class="hint">{{ $t("macros.free", { n: state.free }) }}</span>
+  </EmptyState>
+  <div v-else class="px-4 py-3 card flex gap-4 items-start">
     <div class="flex flex-col gap-1 w-[180px]">
       <button
         v-for="m in list"
         :key="m.id"
-        class="text-left truncate"
+        class="text-left flex gap-1.5 items-baseline"
         :class="{ 'border-accent': selected === m.id }"
         :title="m.written ? '' : $t('macros.notWritten')"
         @click="open(m.id)"
       >
-        {{ m.id }}. {{ m.name }}<span v-if="!m.written" class="text-edited"> ●</span>
+        <span class="truncate">{{ m.id }}. {{ m.name }}</span
+        ><span v-if="!m.written" class="text-edited">●</span>
+        <span class="text-xs text-muted ml-auto truncate">{{ bound.get(m.id)?.join(", ") }}</span>
       </button>
       <button @click="open(null)">{{ $t("macros.new") }}</button>
     </div>
@@ -263,7 +278,7 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         <div>{{ hex(bytes ?? []) }}</div>
       </DevBlock>
     </div>
-    <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
+    <EmptyState v-else class="flex-1" icon="macro" :title="$t('macros.pickTitle')" :text="$t('macros.pickText')" />
   </div>
 </template>
 
