@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import type { AppSettings, GamepadDriverStatus } from "../types";
@@ -7,13 +8,22 @@ import { messages, setLanguage } from "../i18n";
 import AppIcon from "./AppIcon.vue";
 import ModalDialog from "./ModalDialog.vue";
 
-defineProps<{
+const props = defineProps<{
   driverStatus: GamepadDriverStatus | null;
   driverOperation: "install" | "uninstall" | null;
   driverError: string | null;
 }>();
 const emit = defineEmits<{ install: []; uninstall: [] }>();
 const removingDriver = ref(false);
+const { t } = useI18n();
+// Both packages are installed, but older than the client needs.
+const outdated = computed(() => (props.driverStatus?.ready === false ? props.driverStatus.version : null));
+const driverState = computed(() => {
+  if (props.driverOperation) return t(props.driverOperation === "install" ? "gamepad.installing" : "gamepad.uninstalling");
+  if (props.driverStatus === null) return t("gamepad.checkingDriver");
+  if (outdated.value) return t("gamepad.driverOutdatedShort", { version: outdated.value });
+  return t(props.driverStatus.installed ? "gamepad.driverInstalled" : "gamepad.driverNotInstalled");
+});
 
 function uninstallDriver() {
   removingDriver.value = false;
@@ -111,19 +121,11 @@ onUnmounted(() => {
     </template>
     <div class="field mt-4 flex-wrap">
       <span class="field-label min-w-[160px]">HIDMaestro</span>
-      <span class="text-muted" role="status" :aria-busy="!!driverOperation">{{
-        $t(
-          driverOperation === "install"
-            ? "gamepad.installing"
-            : driverOperation === "uninstall"
-              ? "gamepad.uninstalling"
-              : driverStatus === null
-                ? "gamepad.checkingDriver"
-                : driverStatus.installed
-                  ? "gamepad.driverInstalled"
-                  : "gamepad.driverNotInstalled",
-        )
-      }}</span>
+      <span class="text-muted" role="status" :aria-busy="!!driverOperation">{{ driverState }}</span>
+      <button v-if="outdated" class="primary" :disabled="!!driverOperation" @click="emit('install')">
+        <AppIcon name="shield" />
+        {{ $t("gamepad.update") }}
+      </button>
       <button
         :disabled="driverStatus === null || !!driverOperation"
         @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"

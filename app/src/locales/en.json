@@ -77,6 +77,9 @@
   "gamepad": {
     "checkingDriver": "Checking HIDMaestro…",
     "driverMissing": "HIDMaestro v2.0.0 is required to use the gamepad.",
+    "driverOutdated": "HIDMaestro {version} is installed; the gamepad needs 2.0.0 or later.",
+    "driverOutdatedShort": "Outdated ({version})",
+    "update": "Update HIDMaestro",
     "install": "Install HIDMaestro",
     "installing": "Downloading and installing HIDMaestro…",
     "driverInstalled": "Installed",

@@ -18,13 +18,21 @@ const props = defineProps<{
   running: boolean;
   error: string | null;
   driverInstalled: boolean | null;
+  /** The installed driver's version when it is older than the one the app needs. */
+  driverOutdated: string | null;
   driverOperation: "install" | "uninstall" | null;
   installError: string | null;
 }>();
 const emit = defineEmits<{ update: [config: GamepadConfig]; install: [] }>();
 const available = computed(() => props.driver && props.driverInstalled === true && !props.driverOperation);
-const canEdit = computed(() => props.editable && available.value);
 const { t } = useI18n();
+const notice = computed(() => {
+  if (props.driverOperation) return t(props.driverOperation === "uninstall" ? "gamepad.uninstalling" : "gamepad.installing");
+  if (props.driverInstalled === null) return t("gamepad.checkingDriver");
+  if (props.driverOutdated) return t("gamepad.driverOutdated", { version: props.driverOutdated });
+  return t(props.driverInstalled ? "gamepad.driverRequired" : "gamepad.driverMissing");
+});
+const canEdit = computed(() => props.editable && available.value);
 const capture = ref<GamepadBinding | null>(null);
 let previous: number[] = [];
 const keys = computed(() => props.layout.filter((key) => key.editable));
@@ -117,21 +125,7 @@ onUnmounted(() => {
     <div v-if="driverInstalled !== true || !driver || driverOperation" class="gamepad-notice" role="status" :aria-busy="!!driverOperation">
       <div class="gamepad-warning">
         <span class="gamepad-warning-icon" aria-hidden="true">!</span>
-        <p>
-          {{
-            t(
-              driverOperation
-                ? driverOperation === "uninstall"
-                  ? "gamepad.uninstalling"
-                  : "gamepad.installing"
-                : driverInstalled === null
-                  ? "gamepad.checkingDriver"
-                  : !driverInstalled
-                    ? "gamepad.driverMissing"
-                    : "gamepad.driverRequired",
-            )
-          }}
-        </p>
+        <p>{{ notice }}</p>
         <button
           v-if="driverInstalled === false || driverOperation === 'install'"
           :disabled="!!driverOperation"
@@ -140,7 +134,7 @@ onUnmounted(() => {
         >
           <span v-if="driverOperation" class="install-spinner" aria-hidden="true" />
           <AppIcon v-else name="shield" />
-          {{ t("gamepad.install") }}
+          {{ t(driverOutdated ? "gamepad.update" : "gamepad.install") }}
         </button>
         <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
       </div>

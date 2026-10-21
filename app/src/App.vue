@@ -401,6 +401,9 @@ function editGamepad(config: GamepadConfig) {
   gamepadEdit.value = sameGamepad(config, gamepadBase.value) ? null : config;
 }
 
+// Both packages are installed, but older than the client needs.
+const driverOutdated = computed(() => (gamepadDriver.value?.ready === false ? gamepadDriver.value.version : null));
+
 async function checkGamepadDriver() {
   try {
     gamepadDriver.value = await invoke<GamepadDriverStatus>("gamepad_driver");
@@ -1129,6 +1132,7 @@ onUnmounted(() => {
               :running="gamepadInput.running"
               :error="gamepadInput.error"
               :driver-installed="gamepadDriver?.ready ?? null"
+              :driver-outdated="driverOutdated"
               :driver-operation="gamepadDriverOperation"
               :install-error="gamepadInstallError"
               @update="editGamepad"

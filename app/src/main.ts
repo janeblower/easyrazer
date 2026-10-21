@@ -107,7 +107,8 @@ async function mockBackend() {
   const devSettings = { dev_mode: false, dev_panel: null as unknown, dev_window: null as unknown };
   const gamepads = new Map<string, GamepadConfig>();
   let mockDriver = true;
-  let mockGamepadInstalled = new URLSearchParams(location.search).get("hidmaestro") !== "missing";
+  // ?hidmaestro=missing or ?hidmaestro=outdated starts without a usable driver.
+  let mockGamepadDriver = new URLSearchParams(location.search).get("hidmaestro") ?? "ready";
   let seq = 0;
   const devLog: unknown[] = [];
   const entry = (cmd: string, args: number[], reply: number[] = [], live = true) => {
@@ -135,14 +136,18 @@ async function mockBackend() {
   entry("02:92", [0, 30, 0], [0, 30, 0, 128, 112, 2, 2, 0, 4], false);
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
-    gamepad_driver: () => ({ installed: mockGamepadInstalled, ready: mockGamepadInstalled }),
+    gamepad_driver: () => ({
+      installed: mockGamepadDriver !== "missing",
+      ready: mockGamepadDriver === "ready",
+      version: mockGamepadDriver === "missing" ? null : mockGamepadDriver === "outdated" ? "1.12.0.2302" : "2.0.0.2201",
+    }),
     install_gamepad_driver: async () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      mockGamepadInstalled = true;
+      mockGamepadDriver = "ready";
     },
     uninstall_gamepad_driver: async () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      mockGamepadInstalled = false;
+      mockGamepadDriver = "missing";
     },
     gamepad_config: ({ id }) => structuredClone(gamepads.get(String(id)) ?? defaultGamepad()),
     set_gamepad_config: ({ id, config, profile }) => {
