@@ -34,7 +34,7 @@ pub fn show(app: &AppHandle) {
             let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == "main") else { return };
             let Ok(w) = WebviewWindowBuilder::from_config(app, cfg).and_then(|b| b.build()) else { return };
             if let Ok(hwnd) = w.hwnd() {
-                crate::no_alt_menu(hwnd.0);
+                crate::sys::no_alt_menu(hwnd.0);
             }
             w
         }

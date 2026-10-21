@@ -12,17 +12,16 @@ use razer_core::binding::Mouse;
 use razer_core::profiles;
 use razer_core::analog::DepthReport;
 use razer_core::rapid::{self, Config, Engine, Media, Output};
-use windows_sys::Win32::System::Power::SetSuspendState;
-use windows_sys::Win32::System::Shutdown::LockWorkStation;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
     VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_PAUSE, VK_VOLUME_DOWN,
     VK_LWIN, VK_RWIN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{WHEEL_DELTA, XBUTTON1, XBUTTON2};
-use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW};
+
+use crate::sys;
 
 use crate::wheel::Wheel;
 
@@ -222,9 +221,9 @@ fn emit(out: &[Output], sink: &Sink) {
     // One call per report: a call costs about 0.5 ms however many events it carries.
     send(&inputs);
     // Windows ignores an injected Win+L; the L still goes out, or the Win release opens Start.
-    let win = || [VK_LWIN, VK_RWIN].iter().any(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0);
+    let win = || [VK_LWIN, VK_RWIN].into_iter().any(sys::key_down);
     if out.iter().any(|o| matches!(o, Output::Key { key: L, down: true })) && win() {
-        unsafe { LockWorkStation() };
+        sys::lock_workstation();
     }
     for &o in out {
         if !matches!(o, Output::Key { .. } | Output::Mouse { .. } | Output::Media(_)) {
@@ -234,9 +233,7 @@ fn emit(out: &[Output], sink: &Sink) {
 }
 
 fn send(inputs: &[INPUT]) {
-    if !inputs.is_empty() {
-        unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
-    }
+    sys::send_input(inputs);
 }
 
 fn mouse_input(button: Mouse, down: bool) -> Option<INPUT> {
@@ -292,16 +289,12 @@ pub(crate) fn send_media(m: Media) {
 }
 
 pub fn sleep() {
-    unsafe { SetSuspendState(false, false, false) };
+    sys::suspend();
 }
 
 /// Windows' own key repeat, which injected keys do not get.
 pub fn repeat_timing() -> (Duration, Duration) {
-    let (mut delay, mut speed) = (1u32, 31u32);
-    unsafe {
-        SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, (&raw mut delay).cast(), 0);
-        SystemParametersInfoW(SPI_GETKEYBOARDSPEED, 0, (&raw mut speed).cast(), 0);
-    }
+    let (delay, speed) = sys::keyboard_repeat(1, 31);
     timing(delay, speed)
 }
 

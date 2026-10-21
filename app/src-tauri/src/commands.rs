@@ -451,16 +451,10 @@ pub enum Link {
 /// Opens a project page; the URLs are fixed so the UI cannot open other targets.
 #[tauri::command]
 pub fn open_link(link: Link) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let verb = autostart::wide("open");
-    let url = autostart::wide(match link {
+    crate::sys::open(match link {
         Link::Repo => "https://github.com/janeblower/easyrazer",
         Link::License => "https://github.com/janeblower/easyrazer/blob/master/LICENSE",
-    });
-    let code = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), url.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
-    // ShellExecuteW reports failure as a value of 32 or less.
-    if code as usize > 32 { Ok(()) } else { Err(std::io::Error::last_os_error().to_string()) }
+    })
 }
 
 #[tauri::command]

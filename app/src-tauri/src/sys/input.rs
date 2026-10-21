@@ -1,0 +1,42 @@
+//! Injected input and the system calls the keyboard engine makes.
+
+use windows_sys::Win32::System::Power::SetSuspendState;
+use windows_sys::Win32::System::Shutdown::LockWorkStation;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, INPUT, SendInput};
+use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW};
+
+pub fn send_input(inputs: &[INPUT]) {
+    if !inputs.is_empty() {
+        unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
+    }
+}
+
+/// Whether the key is down now.
+pub fn key_down(vk: u16) -> bool {
+    (unsafe { GetAsyncKeyState(i32::from(vk)) }) < 0
+}
+
+pub fn lock_workstation() {
+    unsafe { LockWorkStation() };
+}
+
+pub fn suspend() {
+    unsafe { SetSuspendState(false, false, false) };
+}
+
+/// The keyboard delay and speed settings, or the given defaults where unreadable.
+pub fn keyboard_repeat(mut delay: u32, mut speed: u32) -> (u32, u32) {
+    unsafe {
+        SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, (&raw mut delay).cast(), 0);
+        SystemParametersInfoW(SPI_GETKEYBOARDSPEED, 0, (&raw mut speed).cast(), 0);
+    }
+    (delay, speed)
+}
+
+/// The buttons of a connected XInput slot.
+#[cfg(test)]
+pub fn xinput_buttons(slot: u32) -> Option<u16> {
+    use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
+    let mut state = XINPUT_STATE::default();
+    (unsafe { XInputGetState(slot, &mut state) } == 0).then_some(state.Gamepad.wButtons)
+}

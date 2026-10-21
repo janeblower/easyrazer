@@ -1,15 +1,10 @@
-use super::ipc::{Channel, owned};
-use crate::autostart::wide;
+use crate::sys::{self, Channel, Remote};
 use hidmaestro_client::{Controller, Writer};
 use std::io;
-use std::os::windows::io::{AsRawHandle, OwnedHandle};
-use std::ptr::null_mut;
+use std::os::windows::io::{AsHandle, BorrowedHandle, OwnedHandle};
 use std::sync::Mutex;
-use windows_sys::Win32::Foundation::{DUPLICATE_CLOSE_SOURCE, DuplicateHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Memory::{FILE_MAP_READ, FILE_MAP_WRITE};
 use windows_sys::Win32::System::Threading::*;
-use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 pub(super) struct Process {
     inner: Option<Endpoint>,
@@ -27,8 +22,8 @@ static LAUNCHING: Mutex<()> = Mutex::new(());
 impl Drop for Process {
     fn drop(&mut self) {
         if let Some(endpoint) = self.inner.take() {
-            if unsafe { SetEvent(endpoint.channel.stop.as_raw_handle()) } == 0 {
-                eprintln!("gamepad stop: {}", io::Error::last_os_error());
+            if let Err(e) = endpoint.channel.stop.set() {
+                eprintln!("gamepad stop: {e}");
             }
             STOPPING.lock().unwrap_or_else(|e| e.into_inner()).push(endpoint);
         }
@@ -36,8 +31,8 @@ impl Drop for Process {
 }
 
 impl Process {
-    pub(super) fn handle(&self) -> HANDLE {
-        self.inner.as_ref().unwrap().handle.as_raw_handle()
+    pub(super) fn handle(&self) -> BorrowedHandle<'_> {
+        self.inner.as_ref().unwrap().handle.as_handle()
     }
 
     fn channel(&self) -> &Channel {
@@ -46,13 +41,11 @@ impl Process {
 
     #[cfg(test)]
     fn close(&self) -> io::Result<()> {
-        if unsafe { SetEvent(self.channel().stop.as_raw_handle()) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        match unsafe { WaitForSingleObject(self.handle(), 120_000) } {
-            WAIT_OBJECT_0 => self.inner.as_ref().unwrap().result(),
-            WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "gamepad helper cleanup")),
-            _ => Err(io::Error::last_os_error()),
+        self.channel().stop.set()?;
+        if sys::wait(self.handle(), 120_000)? {
+            self.inner.as_ref().unwrap().result()
+        } else {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "gamepad helper cleanup"))
         }
     }
 }
@@ -60,10 +53,7 @@ impl Process {
 impl Endpoint {
     fn result(&self) -> io::Result<()> {
         self.channel.result()?;
-        let mut code = 0;
-        if unsafe { GetExitCodeProcess(self.handle.as_raw_handle(), &mut code) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let code = sys::exit_code(self.handle.as_handle())?;
         if code != 0 {
             return Err(io::Error::other(format!("helper exited with code {code}")));
         }
@@ -76,13 +66,13 @@ pub(super) fn cleanup() -> io::Result<bool> {
     let mut error = None;
     let mut i = 0;
     while i < stopping.len() {
-        match unsafe { WaitForSingleObject(stopping[i].handle.as_raw_handle(), 0) } {
-            WAIT_OBJECT_0 => {
+        match sys::wait(stopping[i].handle.as_handle(), 0) {
+            Ok(true) => {
                 if let Err(e) = stopping.swap_remove(i).result() { error.get_or_insert(e); }
             }
-            WAIT_TIMEOUT => i += 1,
-            _ => {
-                error.get_or_insert_with(io::Error::last_os_error);
+            Ok(false) => i += 1,
+            Err(e) => {
+                error.get_or_insert(e);
                 i += 1;
             }
         }
@@ -106,18 +96,17 @@ pub(super) fn launch() -> std::sync::mpsc::Receiver<Result<(Writer, Process), St
     rx
 }
 
+// The helper's handle transfer is a cross-process contract no type can check.
+#[allow(unsafe_code)]
 fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
     if cleanup()? {
         return Err(io::Error::new(io::ErrorKind::WouldBlock, "the previous gamepad helper is still stopping; apply again after cleanup"));
     }
     let process = spawn(exe)?;
     process.channel().wait_ready(process.handle())?;
-    let raw = process.channel().result()?;
-    if unsafe { SetEvent(process.channel().attached.as_raw_handle()) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let [a, b, c] = raw.map(|h| owned(h as HANDLE));
-    // The helper duplicated these handles into this process and stopped its writer.
+    // SAFETY: the channel's peer is the helper spawned above, whose `helper` duplicated these
+    // handles into this process, stopped its writer and revokes them only until Attached.
+    let [a, b, c] = unsafe { process.channel().attach() }?;
     let writer = Writer::from_handles([a?, b?, c?])?;
     Ok((writer, process))
 }
@@ -125,28 +114,8 @@ fn launch_inner(exe: &std::path::Path) -> io::Result<(Writer, Process)> {
 fn spawn(exe: &std::path::Path) -> io::Result<Process> {
     let channel = Channel::create()?;
     let args = format!("--gamepad-helper {} {}", std::process::id(), channel.name);
-    let handle = elevate(exe, &args)?;
+    let handle = sys::run_elevated(exe, &args)?;
     Ok(Process { inner: Some(Endpoint { handle, channel }) })
-}
-
-fn elevate(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle> {
-    use std::os::windows::ffi::OsStrExt;
-    let exe: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
-    let verb = wide("runas");
-    let args = wide(args);
-    let mut info = SHELLEXECUTEINFOW {
-        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_NOCLOSEPROCESS,
-        lpVerb: verb.as_ptr(),
-        lpFile: exe.as_ptr(),
-        lpParameters: args.as_ptr(),
-        nShow: SW_HIDE,
-        ..unsafe { std::mem::zeroed() }
-    };
-    if unsafe { ShellExecuteExW(&mut info) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    owned(info.hProcess)
 }
 
 pub(super) fn install() -> Result<(), String> {
@@ -165,8 +134,8 @@ fn driver_action(action: &str) -> Result<(), String> {
     let run = || -> io::Result<()> {
         let channel = Channel::create()?;
         let args = format!("{action} {} {}", std::process::id(), channel.name);
-        let process = elevate(&std::env::current_exe()?, &args)?;
-        if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
+        let process = sys::run_elevated(&std::env::current_exe()?, &args)?;
+        if !sys::wait(process.as_handle(), INFINITE)? {
             return Err(io::Error::last_os_error());
         }
         Endpoint { handle: process, channel }.result()?;
@@ -202,28 +171,25 @@ fn endpoint(args: &[String]) -> io::Result<(u32, &str)> {
     Ok((pid, name))
 }
 
-fn duplicate_writer(writer: &Writer, parent: HANDLE) -> io::Result<[usize; 3]> {
-    let mut remote = [0usize; 3];
+fn duplicate_writer<'p>(writer: &Writer, parent: BorrowedHandle<'p>) -> io::Result<[Remote<'p>; 3]> {
+    let mut remote = Vec::with_capacity(3);
     for (i, source) in writer.handles().into_iter().enumerate() {
         let access = if i == 0 { FILE_MAP_READ | FILE_MAP_WRITE } else { EVENT_MODIFY_STATE };
-        let mut target = null_mut();
-        if unsafe { DuplicateHandle(GetCurrentProcess(), source.as_raw_handle(), parent, &mut target, access, 0, 0) } == 0 {
-            let error = io::Error::last_os_error();
-            revoke(parent, &remote[..i]);
-            return Err(error);
+        match sys::duplicate_into(source, parent, access) {
+            Ok(target) => remote.push(target),
+            Err(error) => {
+                revoke(&remote);
+                return Err(error);
+            }
         }
-        remote[i] = target as usize;
     }
-    Ok(remote)
+    Ok([remote[0], remote[1], remote[2]])
 }
 
-fn revoke(parent: HANDLE, handles: &[usize]) {
-    for &handle in handles {
-        let mut local = null_mut();
+fn revoke(handles: &[Remote<'_>]) {
+    for handle in handles {
         // No parent reader has been signaled yet, so only this process owns these values.
-        if unsafe { DuplicateHandle(parent, handle as HANDLE, GetCurrentProcess(), &mut local, 0, 0, DUPLICATE_CLOSE_SOURCE) } != 0 {
-            drop(owned(local));
-        }
+        handle.close();
     }
 }
 
@@ -231,8 +197,9 @@ pub(super) fn helper(args: &[String]) -> io::Result<()> {
     let (pid, name) = endpoint(args)?;
     let channel = Channel::open(name)?;
     let result = (|| {
-        let parent = owned(unsafe { OpenProcess(PROCESS_DUP_HANDLE | PROCESS_SYNCHRONIZE, 0, pid) })?;
-        if unsafe { WaitForSingleObject(parent.as_raw_handle(), 0) } != WAIT_TIMEOUT {
+        let parent = sys::open_process(pid, PROCESS_DUP_HANDLE | PROCESS_SYNCHRONIZE)?;
+        let parent = parent.as_handle();
+        if !matches!(sys::wait(parent, 0), Ok(false)) {
             return Err(io::Error::other("parent exited before setup"));
         }
         let mut controller = Controller::create()?;
@@ -240,31 +207,23 @@ pub(super) fn helper(args: &[String]) -> io::Result<()> {
             // The parent drops its writer before Stop; a crashed parent closes all
             // handles before its process signals. Both precede controller cleanup.
             let writer = controller.take_writer()?;
-            let handles = duplicate_writer(&writer, parent.as_raw_handle())?;
+            let handles = duplicate_writer(&writer, parent)?;
             drop(writer);
-            channel.reply(handles, None);
+            channel.reply(handles.map(|h| h.value()), None);
             if let Err(e) = channel.signal_ready() {
-                revoke(parent.as_raw_handle(), &handles);
+                revoke(&handles);
                 return Err(e);
             }
-            let attach = [channel.attached.as_raw_handle(), channel.stop.as_raw_handle(), parent.as_raw_handle()];
-            let rc = unsafe { WaitForMultipleObjects(3, attach.as_ptr(), 0, INFINITE) };
-            if rc != WAIT_OBJECT_0 {
-                revoke(parent.as_raw_handle(), &handles);
-                return if rc == WAIT_OBJECT_0 + 1 || rc == WAIT_OBJECT_0 + 2 {
-                    Ok(())
-                } else {
-                    Err(io::Error::last_os_error())
-                };
-            }
-            let waits = [channel.stop.as_raw_handle(), parent.as_raw_handle()];
-            let rc = unsafe { WaitForMultipleObjects(2, waits.as_ptr(), 0, INFINITE) };
-            if rc != WAIT_OBJECT_0 && rc != WAIT_OBJECT_0 + 1 {
-                let error = io::Error::last_os_error();
-                // Keep the delegated writer contract even if the control wait fails.
-                unsafe {
-                    WaitForSingleObject(parent.as_raw_handle(), INFINITE);
+            match sys::wait_any(&[channel.attached.handle(), channel.stop.handle(), parent], INFINITE) {
+                Ok(Some(0)) => {}
+                attach => {
+                    revoke(&handles);
+                    return attach.map(drop);
                 }
+            }
+            if let Err(error) = sys::wait_any(&[channel.stop.handle(), parent], INFINITE) {
+                // Keep the delegated writer contract even if the control wait fails.
+                let _ = sys::wait(parent, INFINITE);
                 return Err(error);
             }
             Ok(())
@@ -294,8 +253,8 @@ mod tests {
         if let Some(name) = std::env::var_os("EASYRAZER_SLOW_CLEANUP") {
             let channel = Channel::open(&name.to_string_lossy()).unwrap();
             channel.signal_ready().unwrap();
-            assert_eq!(unsafe { WaitForSingleObject(channel.stop.as_raw_handle(), 5000) }, WAIT_OBJECT_0);
-            assert!(unsafe { windows_sys::Win32::System::Memory::OpenFileMappingW(FILE_MAP_READ, 0, wide(&format!("{}-Input", channel.name)).as_ptr()) }.is_null(), "writer must close before Stop");
+            assert!(channel.stop.wait(5000).unwrap());
+            assert!(!sys::mapping_exists(&format!("{}-Input", channel.name)), "writer must close before Stop");
             std::thread::sleep(std::time::Duration::from_millis(350));
             channel.reply([0; 3], None);
             return;
@@ -306,17 +265,10 @@ mod tests {
             .env("EASYRAZER_SLOW_CLEANUP", &channel.name)
             .stdout(std::process::Stdio::null())
             .spawn().unwrap();
-        let handle = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, child.id()) }).unwrap();
-        channel.wait_ready(handle.as_raw_handle()).unwrap();
-        let mapping = owned(unsafe {
-            windows_sys::Win32::System::Memory::CreateFileMappingW(
-                windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE, null_mut(),
-                windows_sys::Win32::System::Memory::PAGE_READWRITE, 0, 362,
-                wide(&format!("{}-Input", channel.name)).as_ptr(),
-            )
-        }).unwrap();
-        let input = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
-        let companion = owned(unsafe { CreateEventW(null_mut(), 0, 0, null_mut()) }).unwrap();
+        let handle = sys::open_process(child.id(), PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION).unwrap();
+        channel.wait_ready(handle.as_handle()).unwrap();
+        let mapping = sys::create_mapping(Some(&format!("{}-Input", channel.name)), 362).unwrap();
+        let (input, companion) = (sys::event().unwrap(), sys::event().unwrap());
         let writer = Writer::from_handles([mapping, input, companion]).unwrap();
         let mut runtime = super::super::Runtime::new();
         runtime.config.enabled = true;
@@ -356,17 +308,14 @@ mod tests {
         if std::env::var_os("EASYRAZER_PROBE_CHILD").is_some() {
             let mut active = None;
             for slot in 0..4 {
-                let mut state = windows_sys::Win32::UI::Input::XboxController::XINPUT_STATE::default();
-                if unsafe { windows_sys::Win32::UI::Input::XboxController::XInputGetState(slot, &mut state) } == 0 && state.Gamepad.wButtons == 4096 {
+                if sys::xinput_buttons(slot) == Some(4096) {
                     active = Some(slot);
                 }
             }
             let slot = active.expect("direct A press");
             // Exceed the driver's 500-read stale-section recovery threshold.
             for _ in 0..1100 {
-                let mut state = windows_sys::Win32::UI::Input::XboxController::XINPUT_STATE::default();
-                assert_eq!(unsafe { windows_sys::Win32::UI::Input::XboxController::XInputGetState(slot, &mut state) }, 0);
-                assert_eq!(state.Gamepad.wButtons, 4096);
+                assert_eq!(sys::xinput_buttons(slot), Some(4096));
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
             println!("buttons=4096");
@@ -404,7 +353,7 @@ mod tests {
         use std::io::BufRead;
         if std::env::var_os("EASYRAZER_PARENT_CHILD").is_some() {
             let (_writer, process) = launch_inner(&app_exe()).unwrap();
-            println!("HELPER_READY={}", unsafe { GetProcessId(process.handle()) });
+            println!("HELPER_READY={}", sys::process_id(process.handle()));
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
@@ -425,10 +374,10 @@ mod tests {
             .map_while(Result::ok)
             .find_map(|l| l.strip_prefix("HELPER_READY=").and_then(|p| p.parse().ok()))
             .expect("child helper startup");
-        let helper = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) }).unwrap();
+        let helper = sys::open_process(pid, PROCESS_SYNCHRONIZE).unwrap();
         child.kill().unwrap();
         child.wait().unwrap();
-        assert_eq!(unsafe { WaitForSingleObject(helper.as_raw_handle(), 120_000) }, WAIT_OBJECT_0);
+        assert!(sys::wait(helper.as_handle(), 120_000).unwrap());
         let (writer, process) = launch_inner(&app_exe()).unwrap();
         drop(writer);
         process.close().unwrap();
@@ -451,30 +400,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn duplicated_writer_handles_support_direct_submission() {
-        use windows_sys::Win32::System::Memory::*;
-        let mapping = owned(unsafe {
-            CreateFileMappingW(
-                windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE,
-                std::ptr::null(),
-                PAGE_READWRITE,
-                0,
-                362,
-                std::ptr::null(),
-            )
-        })
-        .unwrap();
-        let input = owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) }).unwrap();
-        let companion = owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) }).unwrap();
+        let mapping = sys::create_mapping(None, 362).unwrap();
+        let (input, companion) = (sys::event().unwrap(), sys::event().unwrap());
         let events = [input.try_clone().unwrap(), companion.try_clone().unwrap()];
         let writer = Writer::from_handles([mapping, input, companion]).unwrap();
-        let handles = duplicate_writer(&writer, unsafe { GetCurrentProcess() }).unwrap();
+        // This process plays the helper's part and duplicates the handles to itself.
+        let channel = Channel::create().unwrap();
+        let peer = Channel::open(&channel.name).unwrap();
+        peer.reply(duplicate_writer(&writer, sys::current_process()).unwrap().map(|h| h.value()), None);
         drop(writer);
-        let handles = handles.map(|h| owned(h as HANDLE).unwrap());
-        let mut writer = Writer::from_handles(handles).unwrap();
+        peer.signal_ready().unwrap();
+        let own = sys::open_process(std::process::id(), PROCESS_SYNCHRONIZE).unwrap();
+        channel.wait_ready(own.as_handle()).unwrap();
+        // SAFETY: the peer above duplicated each handle into this process and never revokes it.
+        let [a, b, c] = unsafe { channel.attach() }.unwrap();
+        let mut writer = Writer::from_handles([a.unwrap(), b.unwrap(), c.unwrap()]).unwrap();
         writer.submit(&hidmaestro_client::State::default()).unwrap();
         for event in events {
-            assert_eq!(unsafe { WaitForSingleObject(event.as_raw_handle(), 0) }, WAIT_OBJECT_0);
+            assert!(sys::wait(event.as_handle(), 0).unwrap());
         }
     }
 }

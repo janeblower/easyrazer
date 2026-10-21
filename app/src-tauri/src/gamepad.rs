@@ -4,10 +4,7 @@ use razer_core::layout::{self, Board};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, TryRecvError};
-use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
-use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
-mod ipc;
 mod process;
 pub mod drivers;
 
@@ -178,7 +175,7 @@ impl Runtime {
         if let Err(e) = process::cleanup() {
             self.error = Some(format!("Gamepad cleanup: {e}"));
         }
-        if self.session.as_ref().is_some_and(|s| unsafe { WaitForSingleObject(s.process.handle(), 0) } != WAIT_TIMEOUT) {
+        if self.session.as_ref().is_some_and(|s| !matches!(crate::sys::wait(s.process.handle(), 0), Ok(false))) {
             self.error = Some("Gamepad helper disconnected. Apply the configuration to retry.".into());
             self.session = None;
         }
