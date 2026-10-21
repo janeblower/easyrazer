@@ -61,6 +61,7 @@
   "snap": {
     "title": "Snap Tap",
     "noCombo": "no shortcut",
+    "absent": "This keyboard has no such key",
     "add": "Group the selected ({n})",
     "empty": "Select two or more keys on the map, such as A and D, and group them.",
     "rule": "Rule",

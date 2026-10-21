@@ -48,9 +48,14 @@ function add() {
           @click="picked = i"
         >
           <span class="rounded-sm h-2.5 w-2.5" :style="{ background: snapColor(i) }"></span>
-          <span v-for="k in g.keys" :key="k" class="text-xs px-1.5 border border-line rounded border-solid bg-key">{{
-            labels.get(k)
-          }}</span>
+          <span
+            v-for="k in g.keys"
+            :key="k"
+            class="text-xs px-1.5 border border-line rounded border-solid bg-key"
+            :class="{ 'text-muted border-dashed': !labels.has(k) }"
+            :title="labels.has(k) ? undefined : $t('snap.absent')"
+            >{{ labels.get(k) ?? "?" }}</span
+          >
           <span class="text-xs text-muted ml-auto">{{ $t(`snap.rules.${g.rule}`) }}</span>
         </button>
         <button class="icon-btn" :aria-label="$t('snap.remove')" :title="$t('snap.remove')" @click="emit('update', removeGroup(snap, i))">
