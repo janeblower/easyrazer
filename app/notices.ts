@@ -5,8 +5,35 @@ import { dirname, join, resolve } from "node:path";
 import type { Plugin } from "vite";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const FILE = "LICENSES.txt";
 const RULE = "=".repeat(80);
+
+export interface Component {
+  name: string;
+  version: string;
+}
+
+/** Components whose copies of a license name the same holders. */
+export interface Users {
+  components: Component[];
+  holders: string[];
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  users: Users[];
+  text: string;
+}
+
+export interface Notice {
+  title: string;
+  text: string;
+}
+
+export interface Notices {
+  groups: Group[];
+  notices: Notice[];
+}
 
 interface Package {
   name: string;
@@ -26,8 +53,16 @@ interface About {
   crates: { package: Package }[];
 }
 
-// A line naming a holder; the bracketed ones belong to the Apache appendix template and stay in the text.
-const holder = (line: string) => /^\s*(?:copyright\b|\(c\)|©)/i.test(line) && !/[[{<](?:yyyy|year)/i.test(line);
+// Holders are named with a year or a sign; license terms also start lines with "copyright" or "(c)".
+const holder = (line: string) => /^\s*(?:copyright\s*(?:\(c\)|©|\d)|\(c\)\s*\d|©\s*\d)/i.test(line);
+const holders = (text: string) => [
+  ...new Set(
+    text
+      .split(/\r?\n/)
+      .filter(holder)
+      .map((line) => line.trim()),
+  ),
+];
 const wording = (text: string) => text.replaceAll(/\s+/g, " ").trim();
 
 const files = (dir: string, pattern: RegExp) =>
@@ -35,8 +70,6 @@ const files = (dir: string, pattern: RegExp) =>
     .filter((f) => f.isFile() && pattern.test(f.name))
     .map((f) => join(dir, f.name))
     .toSorted();
-
-const section = (title: string, body: string) => `${RULE}\n${title}\n${RULE}\n\n${body.trim()}\n\n`;
 
 function cargoAbout(): About {
   // cargo-about refuses to write JSON to a pipe when it detects PowerShell.
@@ -54,77 +87,92 @@ function cargoAbout(): About {
   }
 }
 
-/**
- * One section per license: each crate with the holders its copy names, then the text once.
- * Copies of one license differ in holders, whitespace and headers, so the most common wording stands for all.
- */
-function grouped(licenses: License[], thirdParty: (p: Package) => boolean): string {
-  const groups = new Map<string, License[]>();
-  for (const l of licenses) groups.set(l.id, [...(groups.get(l.id) ?? []), l]);
-  return Array.from(groups.values(), (group) => {
-    const users = group.flatMap((l) => {
-      const crates = [...new Set(l.used_by.filter((u) => thirdParty(u.crate)).map((u) => `${u.crate.name} ${u.crate.version}`))];
-      const holders = [
-        ...new Set(
-          l.text
-            .split(/\r?\n/)
-            .filter(holder)
-            .map((line) => `    ${line.trim()}`),
-        ),
-      ];
-      return crates.length > 0 ? [[`  ${crates.join(", ")}`, ...holders].join("\n")] : [];
-    });
-    if (users.length === 0) return "";
-    const texts = group.map((l) =>
-      l.text
-        .split(/\r?\n/)
-        .filter((line) => !holder(line))
-        .join("\n")
-        .trim(),
-    );
-    const counts = new Map<string, number>();
-    for (const t of texts) counts.set(wording(t), (counts.get(wording(t)) ?? 0) + 1);
-    const count = (t: string) => counts.get(wording(t)) ?? 0;
-    const [text] = texts.toSorted((a, b) => count(b) - count(a));
-    return section(group[0].name, `Used by:\n${users.join("\n")}\n\n${text}`);
-  }).join("");
+/** Copies of one license differ in holders, whitespace and headers, so the most common wording stands for all. */
+function common(texts: string[]): string {
+  const bodies = texts.map((t) =>
+    t
+      .split(/\r?\n/)
+      .filter((line) => !holder(line))
+      .join("\n")
+      .trim(),
+  );
+  const counts = new Map<string, number>();
+  for (const b of bodies) counts.set(wording(b), (counts.get(wording(b)) ?? 0) + 1);
+  const count = (b: string) => counts.get(wording(b)) ?? 0;
+  return bodies.toSorted((a, b) => count(b) - count(a))[0];
 }
 
-function rust(): string {
-  const about = cargoAbout();
+function crates(about: About): { groups: Map<string, Group>; notices: Notice[] } {
   const root = ROOT.toLowerCase();
   const thirdParty = (p: Package) => !p.manifest_path.toLowerCase().startsWith(root);
+  const groups = new Map<string, Group>();
+  for (const id of new Set(about.licenses.map((l) => l.id))) {
+    const copies = about.licenses.filter((l) => l.id === id);
+    const users = copies.flatMap((l) => {
+      const components = l.used_by.filter((u) => thirdParty(u.crate)).map((u) => ({ name: u.crate.name, version: u.crate.version }));
+      return components.length > 0 ? [{ components, holders: holders(l.text) }] : [];
+    });
+    if (users.length > 0) groups.set(id, { id, name: copies[0].name, users, text: common(copies.map((l) => l.text)) });
+  }
   // Apache-2.0 NOTICE files, and notices of works a crate derives from, such as HIDMaestro's.
   const notices = about.crates
     .filter((c) => thirdParty(c.package))
     .flatMap((c) =>
-      files(dirname(c.package.manifest_path), /^(?:notice|third[-_]party[-_]notices)/i).map((f) =>
-        section(`${c.package.name} ${c.package.version}`, readFileSync(f, "utf8")),
-      ),
+      files(dirname(c.package.manifest_path), /^(?:notice|third[-_]party[-_]notices)/i).map((f) => ({
+        title: `${c.package.name} ${c.package.version}`,
+        text: readFileSync(f, "utf8").trim(),
+      })),
     );
-  return grouped(about.licenses, thirdParty) + notices.join("");
+  return { groups, notices };
 }
 
-function javascript(moduleIds: Iterable<string>): string {
+/** Adds each npm package to the group of the license it is used under, MIT where it offers a choice. */
+function packages(moduleIds: Iterable<string>, groups: Map<string, Group>): Notice[] {
   const dirs = new Set<string>();
   for (const id of moduleIds) {
     const m = /^\0?(.*[\\/]node_modules[\\/](?:@[^\\/]+[\\/])?[^\\/]+)[\\/]/.exec(id);
     if (m) dirs.add(m[1]);
   }
-  return Array.from(dirs, (dir) => {
+  return [...dirs].flatMap((dir) => {
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name: string; version: string; license?: string };
-    const texts = files(dir, /^(?:licen[cs]e|copying|notice)/i);
-    if (texts.length === 0) throw new Error(`${pkg.name} ships no license file`);
-    return section(`${pkg.name} ${pkg.version} (${pkg.license})`, texts.map((f) => readFileSync(f, "utf8")).join("\n\n"));
-  })
-    .toSorted()
-    .join("");
+    const offered = (pkg.license ?? "").replaceAll(/[()]/g, "").split(/\s+OR\s+/);
+    const group = groups.get(offered.includes("MIT") ? "MIT" : offered[0]);
+    if (!group) throw new Error(`${pkg.name}: no license text for ${pkg.license}`);
+    const texts = files(dir, /^(?:licen[cs]e|copying)(?!.*\.spdx$)/i).map((f) => readFileSync(f, "utf8"));
+    group.users.push({ components: [{ name: pkg.name, version: pkg.version }], holders: holders(texts.join("\n")) });
+    return files(dir, /^notice/i).map((f) => ({ title: `${pkg.name} ${pkg.version}`, text: readFileSync(f, "utf8").trim() }));
+  });
 }
 
-const notices = (moduleIds: Iterable<string>) =>
-  section("EasyRazer", readFileSync(join(ROOT, "LICENSE"), "utf8")) + rust() + javascript(moduleIds);
+function collect(moduleIds: Iterable<string>): Notices {
+  const { groups, notices } = crates(cargoAbout());
+  const fromPackages = packages(moduleIds, groups);
+  const size = (g: Group) => g.users.flatMap((u) => u.components).length;
+  return { groups: [...groups.values()].toSorted((a, b) => size(b) - size(a)), notices: [...notices, ...fromPackages] };
+}
 
-/** Emits LICENSES.txt: EasyRazer's license and those of every bundled crate and npm package. */
+const named = (c: Component) => `${c.name} ${c.version}`;
+const section = (title: string, body: string) => `${RULE}\n${title}\n${RULE}\n\n${body.trim()}\n\n`;
+
+/** The release copy: EasyRazer's license, the components by license, then each text once. */
+function text(n: Notices): string {
+  const list = n.groups.map((g) => `${g.name}:\n  ${g.users.flatMap((u) => u.components.map(named)).join(", ")}`);
+  const notices = n.notices.map((x) => `Notice: ${x.title}`);
+  const licenses = n.groups.map((g) =>
+    section(
+      g.name,
+      [...g.users.map((u) => [u.components.map(named).join(", "), ...u.holders.map((h) => `  ${h}`)].join("\n")), "", g.text].join("\n"),
+    ),
+  );
+  return (
+    section("EasyRazer", readFileSync(join(ROOT, "LICENSE"), "utf8")) +
+    section("Third-party components", [...list, ...notices].join("\n\n")) +
+    licenses.join("") +
+    n.notices.map((x) => section(x.title, x.text)).join("")
+  );
+}
+
+/** Emits licenses.json for the About window and LICENSES.txt for the release. */
 export function licenses(): Plugin {
   return {
     name: "easyrazer-licenses",
@@ -133,13 +181,15 @@ export function licenses(): Plugin {
       const rendered = Object.values(bundle).flatMap((chunk) =>
         chunk.type === "chunk" ? Object.entries(chunk.modules).flatMap(([id, m]) => (m.renderedLength ? [id] : [])) : [],
       );
-      this.emitFile({ type: "asset", fileName: FILE, source: notices(rendered) });
+      const notices = collect(rendered);
+      this.emitFile({ type: "asset", fileName: "licenses.json", source: JSON.stringify(notices) });
+      this.emitFile({ type: "asset", fileName: "LICENSES.txt", source: text(notices) });
     },
     // The dev server has no bundle to read npm packages from, so it lists the crates alone.
     configureServer(server) {
-      server.middlewares.use(`/${FILE}`, (_req, res) => {
-        res.setHeader("content-type", "text/plain; charset=utf-8");
-        res.end(notices([]));
+      server.middlewares.use("/licenses.json", (_req, res) => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(collect([])));
       });
     },
   };

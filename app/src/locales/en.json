@@ -11,7 +11,8 @@
     "description": "A lightweight Razer Synapse replacement for Razer analog keyboards on Windows.",
     "unofficial": "Unofficial project, not affiliated with or endorsed by Razer Inc. Razer is a trademark of Razer Inc.",
     "license": "EasyRazer is licensed under the {gpl} version 3 or later, with absolutely no warranty.",
-    "thirdParty": "Third-party licenses (HIDMaestro and others)",
+    "thirdParty": "Third-party components",
+    "notice": "Notice",
     "source": "Source code is available on {github}.",
     "close": "Close"
   },
