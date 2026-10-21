@@ -1010,7 +1010,10 @@ onUnmounted(() => {
 <template>
   <div class="flex h-screen" :class="{ 'flex-row-reverse': docked === 'left', 'flex-col': docked === 'bottom' }">
     <div class="flex-1 min-h-0 min-w-0 overflow-auto">
-      <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]" :class="{ 'h-full': tab === 'keys' && section === 'gamepad' }">
+      <main
+        class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px] min-h-full"
+        :class="{ 'h-full': tab === 'keys' && section === 'gamepad' }"
+      >
         <nav class="flex gap-1">
           <button
             v-for="name in TABS"
@@ -1306,7 +1309,7 @@ onUnmounted(() => {
           </template>
         </ModalDialog>
         <AboutDialog v-if="about && !closing" :version="version" @close="about = false" />
-        <footer class="text-xs text-muted">
+        <footer class="text-xs text-muted mt-auto">
           EasyRazer {{ version }} ·
           <button class="text-xs text-muted p-0 border-0 bg-transparent underline h-auto hover:text-text" @click="about = true">
             {{ $t("about.title") }}
