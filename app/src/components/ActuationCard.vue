@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ours } from "../keyboard";
 import type { Analog, RapidMode } from "../types";
+import AppIcon from "./AppIcon.vue";
 
 interface RapidView {
   mode: RapidMode | null;
@@ -24,6 +25,8 @@ const props = defineProps<{
   crt: boolean | null;
   /** Scale of the connected keyboard; `null` falls back to the Huntsman V2 Analog's. */
   analog: Analog | null;
+  /** Press point and Rapid Trigger of one key, to read the key held while nothing is selected. */
+  keyAt: (key: number) => { value: number | null; rapid: RapidView };
 }>();
 const emit = defineEmits<{
   set: [mm: number];
@@ -42,7 +45,7 @@ const mm = (e: Event) => Math.round(Number((e.target as HTMLInputElement).value)
 const rtHere = computed(() => props.driver || !!props.analog?.firmware_rapid);
 const rtOn = computed(() => rtHere.value && props.rapid.mode != null && props.rapid.mode !== "off");
 const modes = computed<RapidMode[]>(() => (props.crt == null ? ["off", "rt", "crt"] : ["off", "rt"]));
-const label = (v: number | null) => (v == null ? (props.count ? t("actuation.mixed") : "") : v.toFixed(1));
+const label = (v: number | null) => (v == null ? t("actuation.mixed") : v.toFixed(1));
 
 const V2: Analog = { zero_mm: 1.5, full_mm: 3.6, range: [1.5, 3.6], hw_range: [1.62, 3.56], firmware_rapid: false };
 const scale = computed(() => props.analog ?? V2);
@@ -63,12 +66,12 @@ const markTop = (v: number) => at(frac(v));
 const clamped = (m: number) => props.value != null && (m === hwMarks.value[0] ? props.value < m : props.value > m);
 
 // The first key held, streamed only in driver mode: depth 0..255 over zero_mm..full_mm, travel since
-// its last extreme on the same scale, and whether it is down.
-const lead = ref<[number, number, boolean]>([0, 0, false]);
+// its last extreme on the same scale, whether it is down, and the key.
+const lead = ref<[number, number, boolean, number]>([0, 0, false, 0]);
 let unlisten: UnlistenFn | undefined;
 onMounted(
   async () =>
-    (unlisten = await listen<[string, number, number, boolean]>("key-depth", (e) => {
+    (unlisten = await listen<[string, number, number, boolean, number]>("key-depth", (e) => {
       const [id, ...depth] = e.payload;
       if (ours(id)) lead.value = depth;
     })),
@@ -76,13 +79,21 @@ onMounted(
 onUnmounted(() => unlisten?.());
 const units = (mm: number) => (mm / (scale.value.full_mm - scale.value.zero_mm)) * 255;
 const depthMm = (d: number) => scale.value.zero_mm + (d / 255) * (scale.value.full_mm - scale.value.zero_mm);
-// With nothing selected the thumbs rest mid-track; "any" lets them sit between the 0.1 steps.
+// With nothing selected the scales follow the key held, mid-track without one; "any" lets them
+// sit between the 0.1 steps.
 const step = computed(() => (props.count ? 0.1 : "any"));
-const mid = (min: number, max: number, v: number | null | undefined, fallback: number) => (props.count ? (v ?? fallback) : (min + max) / 2);
+const held = computed(() => (!props.count && props.driver && lead.value[0] && lead.value[3] ? props.keyAt(lead.value[3]) : null));
+const mid = (min: number, max: number, v: number | null | undefined, fallback: number, idle?: number | null) =>
+  props.count ? (v ?? fallback) : (idle ?? (min + max) / 2);
 
 const NONE = { "--from": "0px", "--to": "0px" };
 const span = (from: number, to: number) => ({ "--from": at(from), "--to": at(to) });
 const fill = computed(() => (props.driver && lead.value[0] ? span(0, Math.min(1, Math.max(0, frac(depthMm(lead.value[0]))))) : NONE));
+// With nothing selected the scale has no thumb and reads the lead key's depth instead.
+const live = computed(() => (props.driver && lead.value[0] ? depthMm(lead.value[0]).toFixed(1) : ""));
+const hwHint = computed(() =>
+  hwMarks.value.length > 0 ? t("actuation.hwLimits", { min: hwMarks.value[0], max: hwMarks.value.at(-1) }) : undefined,
+);
 // Next move of the key: up to release once it is down, down to press otherwise.
 const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "up" : "down") : null));
 // Press grows down from the top and meets the thumb as the key goes down; release grows up
@@ -90,25 +101,31 @@ const arrow = computed(() => (props.driver && lead.value[0] ? (lead.value[2] ? "
 // With nothing selected it previews the lead key against the idle thumb, like the actuation slider.
 function rtFill(v: number, down: boolean) {
   const [, travel, isDown] = lead.value;
-  if (!props.driver || (props.count && !rtOn.value) || !travel || isDown !== down) return NONE;
+  const off = props.count ? !rtOn.value : !held.value || held.value.rapid.mode === "off";
+  if (!props.driver || off || !travel || isDown !== down) return NONE;
   if (!down) return span(0, (travel - units(RT_MIN)) / units(RT_MAX - RT_MIN));
   const thumb = (v - RT_MIN) / (RT_MAX - RT_MIN);
   return span(thumb * (1 - Math.min(1, travel / units(v))), thumb);
 }
 
-const shown = computed(() => mid(MIN.value, MAX.value, props.value, MIN.value));
+const shown = computed(() => mid(MIN.value, MAX.value, props.value, MIN.value, held.value?.value));
 const hsShown = computed(() => mid(MIN.value, MAX.value, props.hs, MIN.value));
-const rtShown = computed(() => [mid(RT_MIN, RT_MAX, props.rapid.press, 0.4), mid(RT_MIN, RT_MAX, props.rapid.release, 0.4)]);
+const rtShown = computed(() => [
+  mid(RT_MIN, RT_MAX, props.rapid.press, 0.4, held.value?.rapid.press),
+  mid(RT_MIN, RT_MAX, props.rapid.release, 0.4, held.value?.rapid.release),
+]);
 const rtSliders = computed(() => {
+  // Unsplit, the one slider stands for both: once the key is down it measures the release.
+  const first = rtShown.value[props.split || !lead.value[2] ? 0 : 1];
   const both = [
-    // Unsplit, the one slider stands for both.
     {
       kind: "press",
       value: props.rapid.press,
       shown: rtShown.value[0],
-      fill: rtFill(rtShown.value[0], props.split ? false : lead.value[2]),
+      mark: first,
+      fill: rtFill(first, props.split ? false : lead.value[2]),
     },
-    { kind: "release", value: props.rapid.release, shown: rtShown.value[1], fill: rtFill(rtShown.value[1], true) },
+    { kind: "release", value: props.rapid.release, shown: rtShown.value[1], mark: rtShown.value[1], fill: rtFill(rtShown.value[1], true) },
   ] as const;
   return props.split ? both : both.slice(0, 1);
 });
@@ -118,20 +135,35 @@ const rtSliders = computed(() => {
   <div class="flex gap-6 items-start justify-center">
     <div class="flex flex-col gap-1 items-center">
       <span class="text-sm flex h-6 items-center">{{ $t("actuation.title") }}, {{ $t("actuation.unit") }}</span>
+      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
+        <button
+          v-for="on in [false, true]"
+          :key="String(on)"
+          class="text-xs px-2 py-0 seg-btn"
+          :class="{ 'seg-on': hsSplit === on }"
+          :aria-pressed="hsSplit === on"
+          :disabled="!count"
+          @click="emit('hsSplit', on)"
+        >
+          {{ on ? "Hypershift" : $t("actuation.shared") }}
+        </button>
+      </span>
       <!-- Two slider columns wide: one sits centred, a split puts both at the edges, so nothing around moves. -->
       <div class="flex w-[144px]" :class="hsSplit ? 'justify-between' : 'justify-center'">
         <div class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
-          <!-- Room on both sides for the marks and the value, so the scale stays centred. -->
+          <!-- Room on both sides for the arrow and the marks, so the scale stays centred. -->
           <div class="mx-7 relative">
             <input
-              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              class="depth h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="MIN"
               :max="MAX"
               :step="step"
               :value="shown"
               :disabled="!count"
+              :title="hwHint"
               :style="fill"
               @input="emit('set', mm($event))"
             />
@@ -145,55 +177,45 @@ const rtSliders = computed(() => {
             >
               <path :d="arrow === 'up' ? 'M5 1 9 8H1z' : 'M5 9 9 2H1z'" fill="currentColor" />
             </svg>
-            <template v-if="hwMarks.length > 0">
-              <div
-                v-for="m in hwMarks"
-                :key="m"
-                class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
-                :class="clamped(m) ? 'bg-warn text-warn' : 'bg-muted text-muted'"
-                :style="{ top: markTop(m) }"
-              >
-                <span class="text-xs right-[calc(100%+4px)] top-[-8px] absolute">{{ m }}</span>
-              </div>
-            </template>
-            <span class="thumb-value" :style="{ top: at(frac(shown)) }">{{ label(value) }}</span>
+            <div
+              v-for="m in hwMarks"
+              :key="m"
+              class="h-[2px] w-[calc(100%+12px)] pointer-events-none left-[-6px] absolute"
+              :class="clamped(m) ? 'bg-warn' : 'bg-muted'"
+              :style="{ top: markTop(m) }"
+            />
+            <div
+              v-if="held?.value != null"
+              class="bg-text h-[2px] w-[calc(100%+8px)] pointer-events-none left-[-4px] absolute"
+              :style="{ top: markTop(held.value) }"
+            />
           </div>
           <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
+          <span class="readout">{{ count ? label(value) : live }}</span>
           <span class="text-xs text-muted" :class="{ invisible: !hsSplit }">{{ $t("actuation.normal") }}</span>
         </div>
         <div v-if="hsSplit" class="flex flex-col gap-1 items-center">
           <span class="text-xs text-muted">{{ MIN.toFixed(1) }}</span>
           <div class="mx-7 relative">
             <input
-              class="depth depth-hs h-[200px] block [writing-mode:vertical-lr]"
+              class="depth depth-hs h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="MIN"
               :max="MAX"
               :step="step"
               :value="hsShown"
               :disabled="!count"
+              :title="hwHint"
               :style="fill"
               @input="emit('hs', mm($event))"
             />
-            <span class="thumb-value" :style="{ top: at(frac(hsShown)) }">{{ label(hs) }}</span>
           </div>
           <span class="text-xs text-muted">{{ MAX.toFixed(1) }}</span>
+          <span class="readout">{{ count ? label(hs) : live }}</span>
           <span class="text-xs text-hs">Hypershift</span>
         </div>
       </div>
-      <span class="inline-flex h-6" role="group" :title="$t('actuation.hsSplit')">
-        <button
-          v-for="on in [false, true]"
-          :key="String(on)"
-          class="text-xs px-2 py-0 seg-btn"
-          :class="hsSplit === on && (on ? 'border-hs bg-hs text-ink' : 'seg-on')"
-          :aria-pressed="hsSplit === on"
-          :disabled="!count"
-          @click="emit('hsSplit', on)"
-        >
-          {{ on ? "Hypershift" : $t("actuation.shared") }}
-        </button>
-      </span>
     </div>
     <svg class="h-[200px] self-center" viewBox="0 0 120 200" aria-hidden="true">
       <g class="press chev">
@@ -215,6 +237,7 @@ const rtSliders = computed(() => {
       <path d="M34 172H86" style="stroke: var(--error)" stroke-width="3" stroke-linecap="round" />
     </svg>
     <div class="flex flex-col gap-1 items-center">
+      <span class="text-sm flex h-6 items-center">{{ $t("rapid.title") }}, {{ $t("actuation.unit") }}</span>
       <div class="flex gap-2 h-6">
         <span class="inline-flex h-6" role="group" :title="$t('rapid.title')">
           <button
@@ -246,7 +269,8 @@ const rtSliders = computed(() => {
           <span class="text-xs text-muted">0.1</span>
           <div class="mx-7 relative">
             <input
-              class="depth h-[200px] block [writing-mode:vertical-lr]"
+              class="depth h-[144px] block [writing-mode:vertical-lr]"
+              :class="{ idle: !count }"
               type="range"
               :min="RT_MIN"
               :max="RT_MAX"
@@ -256,13 +280,20 @@ const rtSliders = computed(() => {
               :style="s.fill"
               @input="s.kind === 'press' ? emit('press', mm($event)) : emit('release', mm($event))"
             />
-            <span class="thumb-value" :style="{ top: at((s.shown - RT_MIN) / (RT_MAX - RT_MIN)) }">{{ label(s.value) }}</span>
+            <div
+              v-if="held && held.rapid.mode !== 'off'"
+              class="bg-text h-[2px] w-[calc(100%+8px)] pointer-events-none left-[-4px] absolute"
+              :style="{ top: at((s.mark - RT_MIN) / (RT_MAX - RT_MIN)) }"
+            />
           </div>
           <span class="text-xs text-muted">1.0</span>
+          <span class="readout">{{
+            count && rtOn ? label(s.value) : held && held.rapid.mode !== "off" ? held.rapid[s.kind]?.toFixed(1) : ""
+          }}</span>
           <span class="text-xs text-muted" :class="{ invisible: !split }">{{ $t(`rapid.${s.kind}`) }}</span>
         </div>
       </div>
-      <span v-if="!rtHere" class="text-xs text-muted flex h-6 items-center">{{ $t("rapid.hwOnly") }}</span>
+      <span v-if="!rtHere" class="text-xs text-muted flex gap-1.5 h-6 items-center"><AppIcon name="ban" />{{ $t("rapid.hwOnly") }}</span>
       <span v-else class="inline-flex h-6" role="group" :title="$t('rapid.split')">
         <button
           v-for="on in [false, true]"
@@ -312,16 +343,19 @@ const rtSliders = computed(() => {
   border-radius: 50%;
   background: var(--text);
 }
-.thumb-value {
-  position: absolute;
-  left: calc(100% + 6px);
-  translate: 0 -50%;
-  font-size: 12px;
+.readout {
+  height: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  pointer-events: none;
 }
 .depth:disabled::-webkit-slider-thumb {
   background: var(--muted);
+}
+/* Unselected, the scale only shows live depth: a resting thumb would read as a value. */
+.depth.idle::-webkit-slider-thumb {
+  visibility: hidden;
 }
 .chev {
   fill: none;

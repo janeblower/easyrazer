@@ -146,9 +146,9 @@ pub enum Output {
     ToggleGamepad,
     /// Snap Tap turned on or off.
     SnapTap(bool),
-    /// The first key still pressed, for the UI: its depth (0 when none is), how far it moved
-    /// since its last extreme — what Rapid Trigger measures — and whether it is down.
-    Depth { depth: u8, travel: u8, down: bool },
+    /// The first key still pressed, for the UI: the key (0 when none is), its depth, how far it
+    /// moved since its last extreme — what Rapid Trigger measures — and whether it is down.
+    Depth { key: u8, depth: u8, travel: u8, down: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -376,7 +376,8 @@ impl Engine {
             return None;
         }
         self.shown = (d, k.down);
-        Some(Output::Depth { depth: d, travel: d.abs_diff(k.extreme), down: k.down })
+        let key = if d == 0 { 0 } else { self.lead.unwrap_or(0) };
+        Some(Output::Depth { key, depth: d, travel: d.abs_diff(k.extreme), down: k.down })
     }
 
     fn transition(&mut self, key: u8, down: bool, now: Instant, out: &mut Vec<Output>) {
@@ -512,7 +513,7 @@ impl Engine {
         // The next engine starts with nothing shown, so the UI must hear the release from this one.
         if self.shown != (0, false) {
             self.shown = (0, false);
-            out.push(Output::Depth { depth: 0, travel: 0, down: false });
+            out.push(Output::Depth { key: 0, depth: 0, travel: 0, down: false });
         }
         out
     }
@@ -728,16 +729,16 @@ mod tests {
             let d = depth(keys);
             e.feed_depth(&d, t);
             e.lead(&d).map(|o| match o {
-                Output::Depth { depth, travel, down } => (depth, travel, down),
+                Output::Depth { key, depth, travel, down } => (key, depth, travel, down),
                 _ => unreachable!(),
             })
         };
-        assert_eq!(feed(&[(S, 50)]), Some((50, 0, false)));
+        assert_eq!(feed(&[(S, 50)]), Some((S, 50, 0, false)));
         assert_eq!(feed(&[(A, 200), (S, 52)]), None);
-        assert_eq!(feed(&[(A, 200), (S, 150)]), Some((150, 0, true)));
-        assert_eq!(feed(&[(A, 200), (S, 120)]), Some((120, 30, true)));
-        assert_eq!(feed(&[(A, 200)]), Some((200, 0, true)));
-        assert_eq!(feed(&[]), Some((0, 0, false)));
+        assert_eq!(feed(&[(A, 200), (S, 150)]), Some((S, 150, 0, true)));
+        assert_eq!(feed(&[(A, 200), (S, 120)]), Some((S, 120, 30, true)));
+        assert_eq!(feed(&[(A, 200)]), Some((A, 200, 0, true)));
+        assert_eq!(feed(&[]), Some((0, 0, 0, false)));
         assert_eq!(feed(&[]), None);
     }
 
@@ -747,7 +748,7 @@ mod tests {
         let d = depth(&[(A, 150)]);
         e.feed_depth(&d, t);
         e.lead(&d);
-        assert_eq!(e.release_all(), [key(A, false), Output::Depth { depth: 0, travel: 0, down: false }]);
+        assert_eq!(e.release_all(), [key(A, false), Output::Depth { key: 0, depth: 0, travel: 0, down: false }]);
         assert_eq!(e.release_all(), []);
     }
 

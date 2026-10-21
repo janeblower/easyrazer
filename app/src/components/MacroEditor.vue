@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { call } from "../keyboard";
 import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
 import { dev } from "../dev";
 import { hex } from "../devConsole";
-import { useConfirmWrite } from "../confirmWrite";
-import { trackUnapplied } from "../unapplied";
+import { useSection } from "../changes";
 import DevBlock from "./DevBlock.vue";
-import ConfirmWrite from "./ConfirmWrite.vue";
-import ActionBar from "./ActionBar.vue";
+import EmptyState from "./EmptyState.vue";
 import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
@@ -53,7 +51,6 @@ const dirty = computed(
     !!draft.value &&
     (!saved.value || saved.value.name !== draft.value.name || JSON.stringify(saved.value.events) !== JSON.stringify(draft.value.events)),
 );
-trackUnapplied(() => dirty.value);
 const keys = computed(() => props.layout.filter((k) => k.editable).map((k) => ({ key: k.key, name: keyName(k, t) })));
 const byName = computed(() => new Map(props.layout.map((k) => [k.name, k.key])));
 const size = computed(() => footprint(bodySize(draft.value?.events ?? [])));
@@ -97,12 +94,24 @@ function open(id: number | null) {
   message.value = "";
 }
 
+function recordNew() {
+  open(null);
+  startRecording();
+}
+
 function move(i: number, by: number) {
   const ev = draft.value?.events;
   if (!ev || i + by < 0 || i + by >= ev.length) return;
   [ev[i], ev[i + by]] = [ev[i + by], ev[i]];
 }
 
+// Kept alive behind the other tabs: recording must not swallow keys typed there.
+const active = ref(true);
+onActivated(() => (active.value = true));
+onDeactivated(() => {
+  active.value = false;
+  stopRecording();
+});
 onUnmounted(stopRecording);
 
 // `state` picks the macro list out of the reply.
@@ -139,7 +148,22 @@ async function doWrite() {
   await run<MacroState>("write_macro", { macroId: selected.value }, "macros.written", (s) => s);
 }
 
-const { asking, write, onConfirm } = useConfirmWrite(doWrite, (error) => (message.value = String(error)));
+useSection({
+  id: "macros",
+  pending: () => (dirty.value ? 1 : 0),
+  parts: () => [{ label: t("keys.macros"), place: "macros" }],
+  canApply: () => dirty.value && !busy.value,
+  canRevert: () => dirty.value && !busy.value,
+  // An applied macro not yet in the flash is written from its own tab only: elsewhere it is not in view.
+  canWrite: () => props.writable && !busy.value && (dirty.value || (active.value && !!saved.value && !saved.value.written)),
+  apply: async () => {
+    await apply();
+  },
+  revert: () => {
+    open(selected.value);
+  },
+  write: doWrite,
+});
 
 async function remove() {
   if (!armed.value) {
@@ -156,17 +180,26 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
 </script>
 
 <template>
-  <div class="px-4 py-3 card flex gap-4 items-start">
+  <EmptyState v-if="list.length === 0 && !draft" class="card" icon="macro" :title="$t('macros.noneTitle')" :text="$t('macros.noneText')">
+    <span class="mt-1 flex gap-2">
+      <button class="primary" @click="recordNew">{{ $t("macros.recordNew") }}</button>
+      <button @click="open(null)">{{ $t("macros.createEmpty") }}</button>
+    </span>
+    <span v-if="state?.free != null" class="hint">{{ $t("macros.free", { n: state.free }) }}</span>
+  </EmptyState>
+  <div v-else class="px-4 py-3 card flex gap-4 items-start">
     <div class="flex flex-col gap-1 w-[180px]">
       <button
         v-for="m in list"
         :key="m.id"
-        class="text-left truncate"
-        :class="{ 'seg-on': selected === m.id }"
+        class="text-left flex gap-1.5 items-baseline"
+        :class="{ 'border-accent': selected === m.id }"
         :title="m.written ? '' : $t('macros.notWritten')"
         @click="open(m.id)"
       >
-        {{ m.id }}. {{ m.name }}<span v-if="!m.written" class="text-edited"> ●</span>
+        <span class="truncate">{{ m.id }}. {{ m.name }}</span
+        ><span v-if="!m.written" class="text-edited">●</span>
+        <span class="text-xs text-muted ml-auto truncate">{{ bound.get(m.id)?.join(", ") }}</span>
       </button>
       <button @click="open(null)">{{ $t("macros.new") }}</button>
     </div>
@@ -175,43 +208,44 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
         <span class="field-label">{{ $t("macros.name") }}</span>
         <input v-model="draft.name" class="flex-1" maxlength="40" />
       </div>
-      <ol class="m-0 pl-6 flex flex-col gap-1 max-h-[320px] overflow-y-auto">
-        <li v-for="(e, i) in draft.events" :key="i">
-          <span class="flex gap-2 items-center">
-            <template v-if="e.type === 'delay'">
-              {{ $t("macros.delay") }}
-              <input v-model.number="e.ms" type="number" min="0" max="600000" class="w-[80px]" />
+      <ol class="m-0 p-0 list-none flex flex-col gap-1 max-h-[320px] overflow-y-auto">
+        <li v-for="(e, i) in draft.events" :key="i" class="step">
+          <span class="text-xs text-muted text-right">{{ i + 1 }}</span>
+          <template v-if="e.type === 'delay'">
+            <span class="px-2">{{ $t("macros.delay") }}</span>
+            <span class="flex gap-2 items-center">
+              <input v-model.number="e.ms" type="number" min="0" max="600000" class="w-[90px]" />
               {{ $t("macros.ms") }}
-            </template>
-            <template v-else>
-              <select :value="String(e.down)" @change="e.down = value($event) === 'true'">
-                <option value="true">{{ $t("macros.down") }}</option>
-                <option value="false">{{ $t("macros.up") }}</option>
-              </select>
-              <select v-if="e.type === 'key'" v-model.number="e.key">
-                <option v-for="k in keys" :key="k.key" :value="k.key">{{ k.name }}</option>
-              </select>
-              <select v-else :value="e.button" @change="e.button = value($event) as Mouse">
-                <option v-for="b in MOUSE" :key="b" :value="b">{{ $t(`bindings.mouse.${b}`) }}</option>
-              </select>
-            </template>
-            <span class="ml-auto flex gap-1">
-              <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">
-                <AppIcon name="up" />
-              </button>
-              <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
-                <AppIcon name="down" />
-              </button>
-              <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">
-                <AppIcon name="remove" />
-              </button>
             </span>
+          </template>
+          <template v-else>
+            <select :value="String(e.down)" @change="e.down = value($event) === 'true'">
+              <option value="true">{{ $t("macros.down") }}</option>
+              <option value="false">{{ $t("macros.up") }}</option>
+            </select>
+            <select v-if="e.type === 'key'" v-model.number="e.key">
+              <option v-for="k in keys" :key="k.key" :value="k.key">{{ k.name }}</option>
+            </select>
+            <select v-else :value="e.button" @change="e.button = value($event) as Mouse">
+              <option v-for="b in MOUSE" :key="b" :value="b">{{ $t(`bindings.mouse.${b}`) }}</option>
+            </select>
+          </template>
+          <span class="step-actions flex gap-1">
+            <button class="icon-btn" :aria-label="$t('macros.moveUp')" :disabled="i === 0" @click="move(i, -1)">
+              <AppIcon name="up" />
+            </button>
+            <button class="icon-btn" :aria-label="$t('macros.moveDown')" :disabled="i === draft.events.length - 1" @click="move(i, 1)">
+              <AppIcon name="down" />
+            </button>
+            <button class="icon-btn" :aria-label="$t('macros.remove')" @click="draft.events.splice(i, 1)">
+              <AppIcon name="remove" />
+            </button>
           </span>
         </li>
       </ol>
       <p v-if="draft.events.length === 0" class="hint m-0">{{ $t("macros.empty") }}</p>
       <div class="flex flex-wrap gap-2 items-center">
-        <button :class="{ 'seg-on': recording }" @click="recording ? stopRecording() : startRecording()">
+        <button :class="{ 'border-error text-error': recording }" @click="recording ? stopRecording() : startRecording()">
           {{ $t(recording ? "macros.stop" : "macros.record") }}
         </button>
         <label class="flex gap-1 items-center"><input v-model="withDelays" type="checkbox" /> {{ $t("macros.withDelays") }}</label>
@@ -239,22 +273,30 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
           {{ $t(armed ? "macros.confirmDelete" : "macros.delete") }}
         </button>
       </div>
-      <ActionBar
-        :pending="dirty ? $t('common.notApplied') : ''"
-        :can-revert="dirty && !busy"
-        :can-apply="dirty && !busy"
-        :can-write="writable && !busy && (dirty || !saved?.written)"
-        :write-title="$t('macros.write')"
-        @revert="open(selected)"
-        @apply="apply"
-        @write="write"
-      />
       <DevBlock v-if="dev.mode && selected != null">
         <div>id {{ selected }} · {{ bytes?.length ?? 0 }} B · free {{ state?.free ?? "—" }}</div>
         <div>{{ hex(bytes ?? []) }}</div>
       </DevBlock>
     </div>
-    <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
-    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
+    <EmptyState v-else class="flex-1" icon="macro" :title="$t('macros.pickTitle')" :text="$t('macros.pickText')" />
   </div>
 </template>
+
+<style scoped>
+/* Fixed columns keep a pause in line with the key steps; the row's buttons sit right after it. */
+.step {
+  display: grid;
+  grid-template-columns: 24px 130px 180px auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: start;
+}
+.step-actions {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.step:hover .step-actions,
+.step:focus-within .step-actions {
+  opacity: 1;
+}
+</style>

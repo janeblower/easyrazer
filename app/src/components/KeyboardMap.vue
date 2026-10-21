@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import type { KeyMap, KeyView, Rgb, System } from "../types";
 import { escapesSelection } from "../keyboard";
+import { keyName } from "../bindings";
+import { ARROWS, step } from "../mapNav";
 import AppIcon from "./AppIcon.vue";
 
 interface Band {
@@ -119,6 +121,72 @@ function isRead(key: number) {
 const keys = computed(() => props.layout.filter((k) => k.shape !== "ring"));
 const rings = computed(() => props.layout.filter((k) => k.shape === "ring"));
 
+// One tab stop for the whole map; arrows move between the keys.
+const cursor = ref<number | null>(null);
+const navKeys = computed(() => keys.value.filter((k) => k.editable));
+const navRing = computed(() => rings.value.find((k) => k.editable));
+const focusable = computed(() => {
+  const all = [...navKeys.value, ...(navRing.value ? [navRing.value] : [])];
+  if (all.some((k) => k.key === cursor.value)) return cursor.value;
+  return (all.find((k) => selection.value.has(k.key)) ?? all[0])?.key ?? null;
+});
+// The ring frames the whole board: it is past every edge, and leaving it returns to the key it was entered from.
+let entered: KeyView | undefined;
+
+function tabindex(k: KeyView) {
+  if (!k.editable) return;
+  return k.key === focusable.value ? 0 : -1;
+}
+
+function label(k: KeyView) {
+  if (k.key in ZONES) return t(ZONES[k.key]);
+  const value = props.inline ? undefined : props.values[k.key];
+  return [keyName(k, t), value, props.hsBinds[k.key]?.text, props.errors[k.key]].filter((p) => p != null).join(", ");
+}
+
+async function focus(key: number) {
+  cursor.value = key;
+  await nextTick();
+  root.value?.querySelector<HTMLElement>(`[data-nav="${key}"]`)?.focus();
+}
+
+function target(from: KeyView, e: KeyboardEvent) {
+  const dir = ARROWS[e.key];
+  if (dir) {
+    if (from.shape === "ring") return entered ?? navKeys.value[0];
+    const next = step(navKeys.value, from, dir);
+    if (!next && navRing.value) entered = from;
+    return next ?? navRing.value;
+  }
+  if (e.key === "Home") return navKeys.value[0];
+  if (e.key === "End") return navKeys.value.at(-1);
+}
+
+function onKey(e: KeyboardEvent) {
+  const from = props.layout.find((k) => k.key === Number((e.target as HTMLElement).dataset.nav));
+  if (!from) return;
+  const multi = !props.single;
+  if (e.key === " " || e.key === "Enter") {
+    e.preventDefault();
+    const toggle = (e.ctrlKey || e.metaKey) && multi;
+    const next = toggle ? new Set(selection.value) : new Set<number>();
+    if (toggle && next.has(from.key)) next.delete(from.key);
+    else next.add(from.key);
+    selection.value = next;
+    return;
+  }
+  if (e.key === "a" && (e.ctrlKey || e.metaKey) && multi) {
+    e.preventDefault();
+    selection.value = new Set(props.layout.filter((k) => k.editable).map((k) => k.key));
+    return;
+  }
+  const to = target(from, e);
+  if (!to) return;
+  e.preventDefault();
+  if (e.shiftKey && multi) selection.value = new Set([...selection.value, from.key, to.key]);
+  void focus(to.key);
+}
+
 function ringStyle(k: KeyView) {
   const c = props.colors?.[k.key];
   return {
@@ -127,7 +195,9 @@ function ringStyle(k: KeyView) {
     width: `${k.w * U}px`,
     height: `${k.h * U}px`,
     borderWidth: `${RING * U}px`,
-    borderColor: c ? `rgb(${c.join(" ")})` : "var(--line)",
+    borderColor: "var(--line)",
+    // The color runs along the frame's inner edge, like the strip on a painted key.
+    boxShadow: c ? `inset 0 0 0 4px rgb(${c.join(" ")})` : undefined,
   };
 }
 
@@ -144,14 +214,15 @@ function keyClass(k: KeyView) {
   const selected = selection.value.has(k.key);
   const border = k.key in props.errors ? "border-error" : selected ? "border-accent" : "border-transparent";
   const look = props.colors
-    ? ["cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
+    ? ["bg-key cursor-pointer", selected && "outline-2 outline-solid outline-text outline-offset-1"]
     : k.editable && isRead(k.key)
       ? "bg-key cursor-pointer"
       : "bg-key-off text-muted cursor-default";
   return [border, look, k.shape === "round" ? "rounded-full !items-center !justify-center" : "rounded-md"];
 }
 
-// Painted keys keep their label readable on light and dark colors.
+// A painted key stays a dark cap with its color as a strip along the bottom: filled caps glared in
+// the dark theme. A shrunk map keeps its labels at a readable size.
 function keyStyle(k: KeyView) {
   const bar = props.snap[k.key];
   const box = {
@@ -162,9 +233,12 @@ function keyStyle(k: KeyView) {
     boxShadow: bar ? `inset 0 3px 0 ${bar}` : undefined,
   };
   if (!props.colors) return box;
-  const [r, g, b] = props.colors[k.key] ?? [0, 0, 0];
-  const light = 0.299 * r + 0.587 * g + 0.114 * b > 140;
-  return { ...box, background: `rgb(${r} ${g} ${b})`, color: light ? "#111" : "#eee" };
+  const c = props.colors[k.key];
+  return {
+    ...box,
+    boxShadow: c ? `inset 0 -5px 0 rgb(${c.join(" ")})` : undefined,
+    fontSize: `${scale.value < 1 ? 11 / scale.value : 12}px`,
+  };
 }
 
 function valueClass(key: number) {
@@ -217,6 +291,7 @@ function up(e: PointerEvent) {
     const [x, y] = point(e);
     const k = el ? props.layout.find((k) => k.key === Number(el.dataset.key)) : rings.value.find((r) => onRing(r, x, y, x, y));
     if (k?.editable) {
+      cursor.value = k.key;
       if (additive && next.has(k.key)) next.delete(k.key);
       else next.add(k.key);
     }
@@ -229,25 +304,48 @@ function up(e: PointerEvent) {
 
 <template>
   <div ref="box">
-    <div ref="root" class="mx-auto relative" :style="size" @pointerdown="down" @pointermove="move" @pointerup="up">
+    <div
+      ref="root"
+      class="mx-auto relative"
+      :style="size"
+      role="listbox"
+      :aria-label="$t('common.keyMap')"
+      :aria-multiselectable="!single"
+      @pointerdown="down"
+      @pointermove="move"
+      @pointerup="up"
+      @keydown="onKey"
+    >
       <div
         v-for="k in rings"
         :key="`ring-${k.key}`"
-        class="rounded-lg border-solid pointer-events-none box-border absolute"
+        class="map-cap rounded-lg border-solid pointer-events-none box-border absolute"
         :class="{ 'outline-2 outline-solid outline-text outline-offset-2': selection.has(k.key) }"
         :style="ringStyle(k)"
+        role="option"
+        :data-nav="k.key"
+        :tabindex="tabindex(k)"
+        :aria-label="label(k)"
+        :aria-selected="selection.has(k.key)"
+        :aria-disabled="!k.editable || undefined"
       ></div>
       <div
         v-for="k in keys"
         :key="k.key"
         :data-key="k.key"
-        class="px-[5px] py-[3px] border-2 border-solid flex flex-col transition-colors duration-300 justify-between absolute"
+        :data-nav="k.key"
+        role="option"
+        :tabindex="tabindex(k)"
+        :aria-label="label(k)"
+        :aria-selected="selection.has(k.key)"
+        :aria-disabled="!k.editable || undefined"
+        class="map-cap px-[5px] py-[3px] border-2 border-solid flex flex-col transition-colors duration-300 justify-between absolute"
         :class="keyClass(k)"
         :style="keyStyle(k)"
         :title="title(k.key)"
       >
         <span v-if="inline && values[k.key] != null" class="text-xs truncate" :class="labelClass(k.key)">{{ values[k.key] }}</span>
-        <span v-else class="text-xs">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
+        <span v-else :class="{ 'text-xs': !colors }">{{ k.key === 203 ? $t("zones.wrist") : k.label }}</span>
         <span v-if="!colors && isRead(k.key)" class="text-[11px] flex gap-1 items-end">
           <span
             v-if="rapid.has(k.key)"
@@ -279,3 +377,10 @@ function up(e: PointerEvent) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.map-cap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+</style>

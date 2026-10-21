@@ -6,14 +6,11 @@ import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Sta
 import { dev, log, nameOf } from "../dev";
 import { call, keyboard, ours } from "../keyboard";
 import { hex } from "../devConsole";
-import { useConfirmWrite } from "../confirmWrite";
-import { trackUnapplied } from "../unapplied";
+import { useSection } from "../changes";
 import DevBlock from "./DevBlock.vue";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import SelectionBar from "./SelectionBar.vue";
-import ConfirmWrite from "./ConfirmWrite.vue";
-import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
 
 interface Ui {
@@ -170,7 +167,6 @@ function same(a?: Look | null, b?: Look | null) {
 
 const draft = computed(() => ui.value && resolve(ui.value));
 const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
-trackUnapplied(() => dirty.value);
 const isCustom = computed(() => ui.value?.group === "custom");
 const canSave = computed(() => connected.value && !busy.value && !!draft.value && !isCustom.value && !same(draft.value, saved.value));
 
@@ -310,14 +306,18 @@ async function send(command: "lighting_apply" | "lighting_write", done: string) 
   }
 }
 
-const {
-  asking,
-  write: save,
-  onConfirm,
-} = useConfirmWrite(
-  async () => send("lighting_write", "lighting.saved"),
-  (error) => (message.value = String(error)),
-);
+useSection({
+  id: "lighting",
+  pending: () => (dirty.value ? 1 : 0),
+  parts: () => [{ label: t("tabs.lighting"), place: "lighting" }],
+  canApply: () => dirty.value && !busy.value && !blocked.value,
+  canRevert: () => dirty.value && !busy.value && !blocked.value,
+  canWrite: () => canSave.value,
+  apply: async () => send("lighting_apply", "lighting.applied"),
+  revert,
+  write: async () => send("lighting_write", "lighting.saved"),
+  skipsWrite: () => isCustom.value,
+});
 
 async function toggleDynamic() {
   const on = !dynamicLighting.value;
@@ -357,14 +357,15 @@ const lightingLog = computed(() =>
     <p v-if="!draft" class="msg">{{ $t("lighting.connect") }}</p>
     <div v-else-if="ui" class="flex gap-3" :class="{ 'pointer-events-none opacity-40': blocked }">
       <ul class="m-0 p-2.5 list-none card w-[210px]">
-        <li
-          v-for="g in groups"
-          :key="g.group"
-          :class="[`fx g-${g.group}`, { on: currentGroup === g }]"
-          class="mb-1 px-2.5 py-2 border-2 rounded-md border-solid bg-key cursor-pointer relative overflow-hidden"
-          @click="!blocked && pickGroup(g)"
-        >
-          <span>{{ g.label }}</span>
+        <li v-for="g in groups" :key="g.group" class="mb-1">
+          <button
+            :class="[`fx g-${g.group}`, { on: currentGroup === g }]"
+            class="px-2.5 py-2 text-left border-2 rounded-md border-solid bg-key w-full relative overflow-hidden"
+            :aria-pressed="currentGroup === g"
+            @click="!blocked && pickGroup(g)"
+          >
+            <span>{{ g.label }}</span>
+          </button>
         </li>
       </ul>
       <div class="px-4 py-3 card flex-1 min-w-0">
@@ -422,17 +423,21 @@ const lightingLog = computed(() =>
         </div>
         <div v-if="speedInfo" class="field">
           <span class="field-label">{{ $t("lighting.speed") }}</span>
-          <span class="hint">{{ $t("lighting.slow") }}</span>
-          <input
-            v-model.number="speedSlider"
-            class="w-60"
-            type="range"
-            :min="speedInfo.speed![0]"
-            :max="speedInfo.speed![1]"
-            step="1"
-            :disabled="blocked"
-          />
-          <span class="hint">{{ $t("lighting.fast") }}</span>
+          <span class="flex flex-col w-60">
+            <input
+              v-model.number="speedSlider"
+              class="m-0"
+              type="range"
+              :min="speedInfo.speed![0]"
+              :max="speedInfo.speed![1]"
+              step="1"
+              :disabled="blocked"
+            />
+            <span class="hint flex justify-between">
+              <span>{{ $t("lighting.slow") }}</span>
+              <span>{{ $t("lighting.fast") }}</span>
+            </span>
+          </span>
         </div>
         <template v-if="isCustom">
           <KeyboardMap v-model:selection="selection" :layout="layout" :colors="ui.paint" fit />
@@ -448,7 +453,7 @@ const lightingLog = computed(() =>
         <p v-if="ui.group === 'off'" class="msg">{{ $t("lighting.isOff") }}</p>
         <div v-else class="field">
           <span class="field-label">{{ $t("lighting.brightness") }}</span>
-          <input v-model.number="percent" class="w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
+          <input v-model.number="percent" class="m-0 w-60" type="range" min="0" max="100" step="1" :disabled="blocked" />
           <span>{{ percent }}%</span>
         </div>
       </div>
@@ -459,20 +464,9 @@ const lightingLog = computed(() =>
         {{ $t("lighting.dynamic") }}
       </label>
     </div>
-    <ActionBar
-      :pending="dirty ? $t('common.notApplied') : ''"
-      :can-revert="dirty && !busy && !blocked"
-      :can-apply="dirty && !busy && !blocked"
-      :can-write="canSave"
-      :apply-only="isCustom"
-      @revert="revert"
-      @apply="send('lighting_apply', 'lighting.applied')"
-      @write="save"
-    />
     <DevBlock v-if="dev.mode"
       ><div v-for="l in lightingLog" :key="l">{{ l }}</div></DevBlock
     >
-    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </section>
 </template>
 
@@ -486,6 +480,7 @@ const lightingLog = computed(() =>
 .fx > span {
   position: relative;
   z-index: 1;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 70%);
 }
 .fx::before,
 .fx::after {

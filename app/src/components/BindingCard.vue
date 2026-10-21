@@ -103,7 +103,7 @@ function setMod(bit: number, on: boolean) {
           v-for="ty in types"
           :key="ty"
           class="icon-btn seg-btn"
-          :class="keyId != null && type === ty ? (hypershift ? 'border-hs bg-hs text-ink' : 'seg-on') : ''"
+          :class="keyId != null && type === ty ? ['seg-on', { 'seg-hs': hypershift }] : ''"
           :disabled="keyId == null || (ty === 'macro' && macroList.length === 0)"
           :title="ty === 'macro' && macroList.length === 0 ? $t('bindings.noMacros') : $t(`bindings.types.${ty}`)"
           :aria-label="$t(`bindings.types.${ty}`)"
@@ -133,14 +133,18 @@ function setMod(bit: number, on: boolean) {
       </div>
       <div class="field">
         <span class="field-label">{{ $t("bindings.mods") }}</span>
-        <label v-for="(m, bit) in MODS" :key="m" class="flex gap-1 items-center">
-          <input
-            type="checkbox"
-            :checked="(keyAction.mods & sides(bit)) !== 0"
-            @change="setMod(bit, ($event.target as HTMLInputElement).checked)"
-          />
-          {{ $t(`bindings.modNames.${m}`) }}
-        </label>
+        <span class="flex gap-1.5">
+          <button
+            v-for="(m, bit) in MODS"
+            :key="m"
+            class="text-xs px-2.5 py-1"
+            :class="(keyAction.mods & sides(bit)) !== 0 ? 'border-accent text-text' : 'text-muted'"
+            :aria-pressed="(keyAction.mods & sides(bit)) !== 0"
+            @click="setMod(bit, (keyAction.mods & sides(bit)) === 0)"
+          >
+            {{ $t(`bindings.modNames.${m}`) }}
+          </button>
+        </span>
       </div>
     </template>
     <div v-else-if="action?.type === 'mouse'" class="field">
@@ -193,42 +197,6 @@ function setMod(bit: number, on: boolean) {
 </template>
 
 <style scoped>
-/* WebView2 renders rich options only in a customizable select. */
-.sys,
-.sys::picker(select) {
-  appearance: base-select;
-}
-.sys {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sys::picker(select) {
-  margin-top: 4px;
-  padding: 4px;
-  background: var(--key);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.sys option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 8px;
-  border-radius: 4px;
-  color: var(--muted);
-}
-.sys option:hover {
-  background: var(--line);
-}
-.sys option:checked {
-  color: var(--text);
-}
-.sys option::checkmark {
-  order: 1;
-  margin-left: auto;
-  color: var(--accent);
-}
 .sys selectedcontent {
   display: flex;
   align-items: center;

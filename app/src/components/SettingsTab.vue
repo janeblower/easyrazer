@@ -60,12 +60,13 @@ async function pickLanguage(e: Event) {
 }
 
 const checked = (e: Event) => (e.target as HTMLInputElement).checked;
-const TOGGLES = [
-  { key: "autostart", cmd: "set_autostart", label: "settings.autostart" },
-  { key: "watch_synapse", cmd: "set_watch_synapse", label: "settings.watchSynapse" },
-  { key: "confirm_write", cmd: "set_confirm_write", label: "settings.confirmWrite" },
-  { key: "dev_mode", cmd: "set_dev_mode", label: "settings.devMode" },
-  { key: "unverified_writes", cmd: "set_unverified_writes", label: "settings.unverifiedWrites" },
+const KEYBOARD = [
+  { key: "watch_synapse", cmd: "set_watch_synapse", label: "watchSynapse" },
+  { key: "confirm_write", cmd: "set_confirm_write", label: "confirmWrite" },
+] as const;
+const DEV = [
+  { key: "dev_mode", cmd: "set_dev_mode", label: "devMode" },
+  { key: "unverified_writes", cmd: "set_unverified_writes", label: "unverifiedWrites" },
 ] as const;
 
 onMounted(async () => {
@@ -88,26 +89,80 @@ onUnmounted(() => {
 <template>
   <section class="px-4 py-3 card">
     <template v-if="s">
-      <label class="field">
-        <span class="field-label min-w-[160px]">{{ $t("settings.language") }}</span>
+      <h3 class="group">{{ $t("settings.groups.app") }}</h3>
+      <label class="row">
+        <span class="flex-1">{{ $t("settings.language") }}</span>
         <select :value="s.language ?? $i18n.locale" @change="pickLanguage">
           <option v-for="(m, code) in messages" :key="code" :value="code">{{ m.language.name }}</option>
         </select>
       </label>
-      <label class="field">
-        <span class="field-label min-w-[160px]">{{ $t("settings.onClose") }}</span>
+      <label class="row">
+        <span class="flex-1"
+          >{{ $t("settings.onClose") }}<span class="desc">{{ $t("settings.hints.onClose") }}</span></span
+        >
         <select :value="s.close_action" @change="set('set_close_action', { action: ($event.target as HTMLSelectElement).value })">
           <option value="ask">{{ $t("settings.ask") }}</option>
           <option value="tray">{{ $t("settings.tray") }}</option>
           <option value="exit">{{ $t("settings.exit") }}</option>
         </select>
       </label>
-      <label v-for="o in TOGGLES" :key="o.cmd" class="switch my-2.5">
-        <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
-        {{ $t(o.label) }}
+      <label class="row switch">
+        <span class="flex-1"
+          >{{ $t("settings.autostart") }}<span class="desc">{{ $t("settings.hints.autostart") }}</span></span
+        >
+        <input type="checkbox" role="switch" :checked="s.autostart" @change="set('set_autostart', { on: checked($event) })" />
       </label>
-      <label v-if="s.dev_mode" class="field">
-        <span class="field-label min-w-[160px]">{{ $t("settings.devLogSize") }}</span>
+
+      <h3 class="group">{{ $t("settings.groups.keyboard") }}</h3>
+      <label v-for="o in KEYBOARD" :key="o.cmd" class="row switch">
+        <span class="flex-1"
+          >{{ $t(`settings.${o.label}`) }}<span class="desc">{{ $t(`settings.hints.${o.label}`) }}</span></span
+        >
+        <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
+      </label>
+    </template>
+
+    <h3 class="group">{{ $t("settings.groups.gamepad") }}</h3>
+    <div class="row">
+      <span class="flex-1">
+        <span class="flex gap-2 items-center">
+          HIDMaestro{{ driverStatus?.version && !outdated ? ` ${driverStatus.version}` : "" }}
+          <span class="driver-dot" :class="{ on: driverStatus?.installed, busy: !!driverOperation }"></span>
+          <span
+            class="text-xs"
+            role="status"
+            :aria-busy="!!driverOperation"
+            :class="outdated ? 'text-warn' : driverStatus?.installed ? 'text-accent' : 'text-muted'"
+            >{{ driverState }}</span
+          >
+        </span>
+        <span class="desc">{{ $t("settings.hints.hidmaestro") }}</span>
+      </span>
+      <button v-if="outdated" class="primary inline-flex gap-2 items-center" :disabled="!!driverOperation" @click="emit('install')">
+        <AppIcon name="shield" />
+        {{ $t("gamepad.update") }}
+      </button>
+      <button
+        class="inline-flex gap-2 items-center"
+        :disabled="driverStatus === null || !!driverOperation"
+        @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
+      >
+        <AppIcon name="shield" />
+        {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
+      </button>
+    </div>
+    <p v-if="driverError" class="text-error m-0" role="alert">{{ driverError }}</p>
+
+    <div v-if="s" class="danger">
+      <h3 class="group">{{ $t("settings.groups.dev") }}</h3>
+      <label v-for="o in DEV" :key="o.cmd" class="row switch" :class="{ risky: o.key === 'unverified_writes' }">
+        <span class="flex-1"
+          >{{ $t(`settings.${o.label}`) }}<span class="desc">{{ $t(`settings.hints.${o.label}`) }}</span></span
+        >
+        <input type="checkbox" role="switch" :checked="s[o.key]" @change="set(o.cmd, { on: checked($event) })" />
+      </label>
+      <label v-if="s.dev_mode" class="row">
+        <span class="flex-1">{{ $t("settings.devLogSize") }}</span>
         <input
           type="number"
           min="1000"
@@ -118,35 +173,7 @@ onUnmounted(() => {
           @change="set('set_dev_log_size', { size: Number(($event.target as HTMLInputElement).value) })"
         />
       </label>
-    </template>
-    <div class="mt-8">
-      <div class="flex gap-2 items-center">
-        HIDMaestro
-        <span
-          class="driver-dot"
-          :class="{ on: driverStatus?.installed, busy: !!driverOperation }"
-          :title="driverState"
-          role="status"
-          :aria-busy="!!driverOperation"
-        >
-          <span class="sr-only">{{ driverState }}</span>
-        </span>
-      </div>
-      <div class="mt-2 flex flex-wrap gap-2">
-        <button v-if="outdated" class="primary" :disabled="!!driverOperation" @click="emit('install')">
-          <AppIcon name="shield" />
-          {{ $t("gamepad.update") }}
-        </button>
-        <button
-          :disabled="driverStatus === null || !!driverOperation"
-          @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
-        >
-          <AppIcon name="shield" />
-          {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
-        </button>
-      </div>
     </div>
-    <p v-if="driverError" class="text-error m-0" role="alert">{{ driverError }}</p>
     <p v-if="message" class="text-error m-0">{{ message }}</p>
     <ModalDialog v-if="removingDriver" :title="$t('gamepad.uninstallTitle')" @cancel="removingDriver = false">
       <p>{{ $t("gamepad.uninstallText") }}</p>
@@ -159,6 +186,45 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.group {
+  margin: 16px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.group:first-child {
+  margin-top: 4px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 0;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+.desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.danger {
+  margin-top: 16px;
+  padding: 0 12px 2px;
+  border: 1px solid var(--write-line);
+  border-radius: 6px;
+}
+.danger .group {
+  color: var(--warn);
+}
+/* Writing to an unchecked model is not a state to look good in. */
+.risky input:checked {
+  background: var(--edited);
+}
 .driver-dot {
   width: 8px;
   height: 8px;

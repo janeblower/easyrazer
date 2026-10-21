@@ -61,6 +61,7 @@ test("gamepad disables the model and editor until driver mode and both packages 
     const hardware = await render(false, true);
     expect(inactive(hardware)).toBe(true);
     expect(hardware.includes("Install HIDMaestro")).toBe(false);
+    expect(hardware.includes("Switch to driver mode")).toBe(true);
     const missing = await render(true, false);
     expect(inactive(missing)).toBe(true);
     expect(missing.includes("Install HIDMaestro")).toBe(true);

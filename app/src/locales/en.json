@@ -21,12 +21,13 @@
     "clearSelection": "Clear selection",
     "selected": "Selected: {n}",
     "selectHint": "Select keys",
-    "selectHow": "Click, Ctrl+click or drag a box",
+    "selectHow": "Click, Ctrl+click, drag a box or use arrows and Space",
+    "keyMap": "Keys",
     "revert": "Revert changes",
     "apply": "Apply",
     "write": "Save to keyboard memory",
+    "writeSkips": "Save to keyboard memory. A custom lighting layout cannot be stored there and stays in EasyRazer only",
     "dontAsk": "Don't ask again",
-    "notApplied": "● not applied",
     "notAppliedN": "● not applied: {n}"
   },
   "actuation": {
@@ -36,6 +37,7 @@
     "hsSplit": "Separate for Hypershift",
     "normal": "normal",
     "mixed": "mixed",
+    "hwLimits": "In HW mode the firmware keeps the point within {min}–{max} mm",
     "unconfirmed": "Not confirmed: the keyboard has {v} mm",
     "failed": "Not applied or not confirmed for {n} keys (hover the red ones)",
     "applied": "Applied until the keyboard is unplugged",
@@ -56,11 +58,12 @@
     "rtHint": "Rapid Trigger: works below the press point",
     "crtHint": "Continuous Rapid Trigger: works along the whole travel until the key is fully up",
     "crtProfileHint": "Continuous Rapid Trigger for every key with RT: the firmware has one switch for the whole profile",
-    "hwOnly": "(not available in HW mode)"
+    "hwOnly": "Driver mode only"
   },
   "snap": {
     "title": "Snap Tap",
     "noCombo": "no shortcut",
+    "absent": "This keyboard has no such key",
     "add": "Group the selected ({n})",
     "empty": "Select two or more keys on the map, such as A and D, and group them.",
     "rule": "Rule",
@@ -93,6 +96,7 @@
     "hint": "Select a gamepad control and assign a keyboard key.",
     "enabled": "Enabled in this profile",
     "driverRequired": "Switch to driver mode to use the gamepad and read live key depth.",
+    "switchDriver": "Switch to driver mode",
     "running": "Controller active",
     "stopped": "Controller inactive",
     "selectHint": "Select a button or stick",
@@ -104,7 +108,6 @@
     "clear": "Clear assignments",
     "inputTitle": "Live input",
     "inputHint": "Trigger scales show press depth. Moving a stick reveals its axes, angle and displacement.",
-    "selectedHint": "A green outline marks the selected control.",
     "leftStick": "Left stick",
     "rightStick": "Right stick",
     "up": "Up",
@@ -130,6 +133,8 @@
   },
   "bindings": {
     "selectHint": "Pick a key",
+    "pickTitle": "Pick a key on the map",
+    "pickText": "Each key has two actions: the main one and Hypershift, with Fn held. Either can be another key, a mouse button, media or a macro.",
     "types": { "key": "Key", "mouse": "Mouse", "media": "Media", "macro": "Macro", "system": "System", "disabled": "Disabled" },
     "main": "Main action",
     "function": "Function",
@@ -189,7 +194,13 @@
     "newName": "Macro {n}",
     "untitled": "Untitled",
     "name": "Name",
-    "pick": "Pick a macro or create a new one",
+    "pickTitle": "Pick a macro on the left",
+    "pickText": "A macro is a chain of presses and pauses. To make it play, bind it to a key on the Bindings tab. ● means it is not saved to keyboard memory yet.",
+    "noneTitle": "No macros yet",
+    "noneText": "Record presses from the keyboard, with or without pauses, or build the steps by hand.",
+    "recordNew": "● Record a macro",
+    "createEmpty": "Create empty",
+    "free": "{n} B free in keyboard memory",
     "empty": "Empty: record key presses or add steps with the buttons below",
     "delay": "Pause",
     "ms": "ms",
@@ -212,7 +223,6 @@
     "confirmDelete": "Really delete?",
     "boundTo": "Bound to keys: {keys}. Unbind them first.",
     "notWritten": "Not in the keyboard: does not play in HW mode",
-    "write": "Save to keyboard memory",
     "applied": "Saved in EasyRazer; already plays in Driver mode",
     "written": "Written to the keyboard",
     "deleted": "Macro deleted"
@@ -254,7 +264,10 @@
     "color": "Color",
     "colorHex": "Color {hex}",
     "none": "No color",
-    "noColor": "⊘ No color"
+    "noColor": "⊘ No color",
+    "area": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Color code"
   },
   "dialogs": {
     "autostart": {
@@ -288,7 +301,17 @@
     "confirmWrite": "Ask before saving to keyboard memory",
     "devLogSize": "Developer log size, commands",
     "devMode": "Developer mode",
-    "unverifiedWrites": "Write to keyboards not yet checked on hardware (RAM only)"
+    "unverifiedWrites": "Write to unverified keyboards",
+    "groups": { "app": "App", "keyboard": "Keyboard", "gamepad": "Virtual gamepad", "dev": "For developers" },
+    "hints": {
+      "onClose": "In the tray EasyRazer keeps watching the keyboard and restores the lighting after a reconnect.",
+      "autostart": "EasyRazer starts in the tray and restores the lighting. Driver mode works only while the app is running.",
+      "watchSynapse": "While Razer Synapse is running, EasyRazer says so and does not write to the keyboard.",
+      "confirmWrite": "The keyboard's flash memory wears out with rewrites.",
+      "hidmaestro": "The driver that lets keys act as a gamepad.",
+      "devMode": "A panel with HID traffic and device details, raw bytes in the editors.",
+      "unverifiedWrites": "For models not yet checked on hardware. Writes go to RAM only, never to flash, and are gone after a reconnect."
+    }
   },
   "dev": {
     "title": "Developer tools",

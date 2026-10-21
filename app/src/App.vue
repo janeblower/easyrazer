@@ -45,8 +45,9 @@ import ModalDialog from "./components/ModalDialog.vue";
 import AboutDialog from "./components/AboutDialog.vue";
 import ConfirmWrite from "./components/ConfirmWrite.vue";
 import AppIcon from "./components/AppIcon.vue";
+import EmptyState from "./components/EmptyState.vue";
 import { useConfirmWrite } from "./confirmWrite";
-import { hasUnapplied, trackUnapplied } from "./unapplied";
+import { type Place, applyAll, hasUnapplied, revertAll, sections, summarize, useSection, writeAll } from "./changes";
 import { setLanguage, systemLanguage } from "./i18n";
 import DevPanel from "./components/DevPanel.vue";
 import { dev, reloadLog, setPanel, startDev } from "./dev";
@@ -134,14 +135,20 @@ const keyDirty = computed(
     (crtEdit.value == null ? 0 : 1),
 );
 const dirty = computed(() => keyDirty.value + (gamepadEdit.value ? 1 : 0));
-trackUnapplied(() => dirty.value > 0);
+const has = (edits: object) => Object.keys(edits).length > 0;
+const keyParts = computed(() => {
+  const parts: Place[] = [];
+  if (has(edits.value) || has(rapidEdits.value) || has(hsEdits.value) || snapEdit.value || crtEdit.value != null) parts.push("actuation");
+  if (has(bindEdits.value) || has(hsBindEdits.value)) parts.push("bindings");
+  if (gamepadEdit.value) parts.push("gamepad");
+  return parts.map((place) => ({ label: t(`keys.${place}`), place }));
+});
 const online = computed(() => !!status.value?.device);
 const writable = computed(() => online.value && !status.value?.synapse && !busy.value);
 // An offline keyboard still has its profiles, which live in the app.
 const editable = computed(() => !!status.value && !status.value.synapse && !busy.value);
 const shown = computed(() => devices.value?.devices.find((d) => d.id === keyboard.value) ?? null);
 const driver = computed(() => !!status.value?.driver_mode);
-const gamepadAvailable = computed(() => driver.value && gamepadDriver.value?.ready === true && !gamepadDriverOperation.value);
 const fwRapid = computed(() => !!status.value?.analog?.firmware_rapid);
 // Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
 const rapidHere = computed(() => driver.value || fwRapid.value);
@@ -166,12 +173,24 @@ const canSave = computed(
       Object.keys(hsBindEdits.value).length > 0 ||
       hsUnsaved.value.size > 0),
 );
+const changes = computed(() => summarize(sections.value));
 const actions = computed(() => ({
-  pending: dirty.value ? t("common.notAppliedN", { n: dirty.value }) : "",
-  canRevert: dirty.value > 0 && !busy.value,
-  canApply: canApply.value,
-  canWrite: canSave.value,
+  pending: changes.value.pending ? t("common.notAppliedN", { n: changes.value.pending }) : "",
+  parts: changes.value.parts,
+  canRevert: changes.value.canRevert,
+  canApply: changes.value.canApply,
+  canWrite: changes.value.canWrite,
+  writeTitle: changes.value.skipsWrite ? t("common.writeSkips") : undefined,
 }));
+
+function openPlace(place: Place) {
+  if (place === "lighting") {
+    tab.value = "lighting";
+    return;
+  }
+  tab.value = "keys";
+  section.value = place;
+}
 const valueOf = (k: number) => edits.value[k] ?? baseline.value[k];
 const hsOf = (k: number) => hsEdits.value[k] ?? hsBase.value[k];
 const selectedValue = computed(() => common(Array.from(selection.value, valueOf)));
@@ -230,6 +249,10 @@ const rapidKeys = computed(
     ),
 );
 const rapidEdited = computed(() => new Set(Object.keys(rapidEdits.value).map(Number)));
+const keyAt = (k: number) => {
+  const r = rapidOf(k);
+  return { value: valueOf(k) ?? null, rapid: { mode: modeOf(r), press: r.press, release: r.release } };
+};
 
 function setRapid(change: (r: Rapid) => Rapid) {
   const next = { ...rapidEdits.value };
@@ -898,9 +921,21 @@ const {
   write: save,
   onConfirm,
 } = useConfirmWrite(
-  async () => write("save", "actuation.saved"),
+  async () => writeAll(sections.value),
   (error) => (message.value = String(error)),
 );
+
+useSection({
+  id: "keys",
+  pending: () => dirty.value,
+  parts: () => keyParts.value,
+  canApply: () => canApply.value,
+  canRevert: () => dirty.value > 0 && !busy.value,
+  canWrite: () => canSave.value,
+  apply,
+  revert,
+  write: async () => write("save", "actuation.saved"),
+});
 
 async function onClose(action: CloseAction) {
   closing.value = false;
@@ -1010,7 +1045,10 @@ onUnmounted(() => {
 <template>
   <div class="flex h-screen" :class="{ 'flex-row-reverse': docked === 'left', 'flex-col': docked === 'bottom' }">
     <div class="flex-1 min-h-0 min-w-0 overflow-auto">
-      <main class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px]" :class="{ 'h-full': tab === 'keys' && section === 'gamepad' }">
+      <main
+        class="mx-auto p-4 flex flex-col gap-4 max-w-[1153px] min-h-full"
+        :class="{ 'h-full': tab === 'keys' && section === 'gamepad' }"
+      >
         <nav class="flex gap-1">
           <button
             v-for="name in TABS"
@@ -1086,8 +1124,10 @@ onUnmounted(() => {
           :error="appError"
         />
         <!-- With the map shown, the tab is as wide as the full-size map on every model, not the window. -->
+        <ActionBar v-bind="actions" @revert="revertAll(sections)" @apply="applyAll(sections)" @write="save" @open="openPlace" />
+        <!-- Kept in the page behind other tabs, so their drafts live on until applied. -->
         <div
-          v-if="tab === 'keys'"
+          v-show="tab === 'keys'"
           class="flex flex-col gap-4"
           :class="{ 'min-w-[1121px]': section === 'actuation' || section === 'bindings', 'flex-1 min-h-0': section === 'gamepad' }"
         >
@@ -1104,23 +1144,26 @@ onUnmounted(() => {
               </button>
             </span>
             <SelectionBar
-              v-if="section !== 'macros' && (section !== 'gamepad' || gamepadAvailable)"
+              v-if="section === 'actuation' || section === 'bindings'"
               class="ml-auto"
-              :count="section === 'gamepad' ? Number(gamepadSelected !== null) : selection.size"
-              :single="section === 'bindings' || section === 'gamepad'"
+              :count="selection.size"
+              :single="section === 'bindings'"
               @select-all="selectAll"
-              @clear="section === 'gamepad' ? (gamepadSelected = null) : (selection = new Set())"
+              @clear="selection = new Set()"
             />
           </div>
-          <MacroEditor
-            v-if="section === 'macros'"
-            :state="macroState"
-            :layout="layout"
-            :bound="macroKeys"
-            :writable="writable"
-            @update="(s) => (macroState = s)"
-          />
-          <template v-else-if="section === 'gamepad'">
+          <KeepAlive>
+            <MacroEditor
+              v-if="section === 'macros'"
+              :key="keyboard ?? undefined"
+              :state="macroState"
+              :layout="layout"
+              :bound="macroKeys"
+              :writable="writable"
+              @update="(s) => (macroState = s)"
+            />
+          </KeepAlive>
+          <template v-if="section === 'gamepad'">
             <GamepadTab
               :key="`${keyboard}:${status?.profile}`"
               v-model:selected="gamepadSelected"
@@ -1137,17 +1180,10 @@ onUnmounted(() => {
               :install-error="gamepadInstallError"
               @update="editGamepad"
               @install="changeGamepadDriver('install')"
-            />
-            <ActionBar
-              v-bind="actions"
-              :can-apply="actions.canApply && gamepadAvailable"
-              :can-revert="actions.canRevert && gamepadAvailable"
-              apply-only
-              @revert="revert"
-              @apply="apply"
+              @driver="setMode(true)"
             />
           </template>
-          <template v-else>
+          <template v-if="section === 'actuation' || section === 'bindings'">
             <KeyboardMap
               v-model:selection="selection"
               :layout="layout"
@@ -1166,7 +1202,14 @@ onUnmounted(() => {
               :single="section === 'bindings'"
               :loaded="progress && Math.floor((progress[0] / progress[1]) * editableCount)"
             />
-            <div class="gap-4 grid grid-cols-2" :class="{ 'opacity-60': !online }" :inert="!online">
+            <EmptyState
+              v-if="section === 'bindings' && bindKey == null"
+              class="card"
+              icon="keyboard"
+              :title="$t('bindings.pickTitle')"
+              :text="$t('bindings.pickText')"
+            />
+            <div v-else class="gap-4 grid grid-cols-2" :class="{ 'opacity-60': !online }" :inert="!online">
               <div class="px-4 py-3 card flex flex-col gap-3">
                 <ActuationCard
                   v-if="section === 'actuation'"
@@ -1179,6 +1222,7 @@ onUnmounted(() => {
                   :hs-split="hsSplit"
                   :driver="driver"
                   :analog="status?.analog ?? null"
+                  :key-at="keyAt"
                   @set="setValue"
                   @rapid="
                     (m) => setRapid((r) => ({ ...r, enabled: m !== 'off', continuous: m === 'off' || fwHw ? r.continuous : m === 'crt' }))
@@ -1227,12 +1271,11 @@ onUnmounted(() => {
               </div>
             </div>
             <DevKeys v-if="dev.mode" :keys="[...selection]" :depth="section === 'actuation'" :driver="driver" />
-            <ActionBar v-bind="actions" @revert="revert" @apply="apply" @write="save" />
           </template>
         </div>
-        <LightingTab v-else-if="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
+        <LightingTab v-show="tab === 'lighting'" :key="keyboard ?? undefined" :status="status" />
         <SettingsTab
-          v-else
+          v-if="tab === 'settings'"
           :driver-status="gamepadDriver"
           :driver-operation="gamepadDriverOperation"
           :driver-error="gamepadInstallError"
@@ -1305,7 +1348,7 @@ onUnmounted(() => {
           </template>
         </ModalDialog>
         <AboutDialog v-if="about && !closing" :version="version" @close="about = false" />
-        <footer class="text-xs text-muted">
+        <footer class="text-xs text-muted mt-auto">
           EasyRazer {{ version }} ·
           <button class="text-xs text-muted p-0 border-0 bg-transparent underline h-auto hover:text-text" @click="about = true">
             {{ $t("about.title") }}

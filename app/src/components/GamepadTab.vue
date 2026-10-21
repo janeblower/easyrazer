@@ -23,7 +23,7 @@ const props = defineProps<{
   driverOperation: "install" | "uninstall" | null;
   installError: string | null;
 }>();
-const emit = defineEmits<{ update: [config: GamepadConfig]; install: [] }>();
+const emit = defineEmits<{ update: [config: GamepadConfig]; install: []; driver: [] }>();
 const available = computed(() => props.driver && props.driverInstalled === true && !props.driverOperation);
 const { t } = useI18n();
 const notice = computed(() => {
@@ -136,15 +136,15 @@ onUnmounted(() => {
           <AppIcon v-else name="shield" />
           {{ t(driverOutdated ? "gamepad.update" : "gamepad.install") }}
         </button>
+        <button v-else-if="driverInstalled && !driver && !driverOperation" class="primary" @click="emit('driver')">
+          {{ t("gamepad.switchDriver") }}
+        </button>
         <p v-if="installError" class="gamepad-error" role="alert">{{ installError }}</p>
       </div>
     </div>
     <div class="gamepad-content" :class="{ unavailable: !available }" :inert="!available">
       <header class="gamepad-heading">
-        <div>
-          <h2>{{ t("gamepad.title") }}</h2>
-          <p class="hint">{{ t("gamepad.hint") }}</p>
-        </div>
+        <p class="hint">{{ t("gamepad.hint") }}</p>
         <label class="switch"
           ><input
             type="checkbox"
@@ -208,10 +208,7 @@ onUnmounted(() => {
           <div class="input-help">
             <h3>{{ t("gamepad.inputTitle") }}</h3>
             <p class="hint">{{ t("gamepad.inputHint") }}</p>
-            <p class="hint">{{ t("gamepad.selectedHint") }}</p>
-            <p class="input-status" :class="{ running }" role="status">
-              <span />{{ t(!driver ? "gamepad.driverRequired" : running ? "gamepad.running" : "gamepad.stopped") }}
-            </p>
+            <p class="input-status" :class="{ running }" role="status"><span />{{ t(running ? "gamepad.running" : "gamepad.stopped") }}</p>
           </div>
         </aside>
       </div>
@@ -308,10 +305,6 @@ onUnmounted(() => {
     animation: none;
   }
 }
-h2 {
-  font-size: 18px;
-  margin: 0 0 8px;
-}
 h3 {
   font-size: 15px;
   margin: 0 0 12px;
@@ -349,6 +342,8 @@ p {
 }
 .gamepad-editor {
   padding: 18px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .assignment {
   display: grid;
