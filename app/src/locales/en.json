@@ -293,7 +293,17 @@
     "confirmWrite": "Ask before saving to keyboard memory",
     "devLogSize": "Developer log size, commands",
     "devMode": "Developer mode",
-    "unverifiedWrites": "Write to keyboards not yet checked on hardware (RAM only)"
+    "unverifiedWrites": "Write to unverified keyboards",
+    "groups": { "app": "App", "keyboard": "Keyboard", "gamepad": "Virtual gamepad", "dev": "For developers" },
+    "hints": {
+      "onClose": "In the tray EasyRazer keeps watching the keyboard and restores the lighting after a reconnect.",
+      "autostart": "EasyRazer starts in the tray and restores the lighting. Driver mode works only while the app is running.",
+      "watchSynapse": "While Razer Synapse is running, EasyRazer says so and does not write to the keyboard.",
+      "confirmWrite": "The keyboard's flash memory wears out with rewrites.",
+      "hidmaestro": "The driver that lets keys act as a gamepad.",
+      "devMode": "A panel with HID traffic and device details, raw bytes in the editors.",
+      "unverifiedWrites": "For models not yet checked on hardware. Writes go to RAM only, never to flash, and are gone after a reconnect."
+    }
   },
   "dev": {
     "title": "Developer tools",
