@@ -20,10 +20,10 @@ const faces = [
   { id: "a", x: 570, y: 398 },
 ] as const;
 const dpad = [
-  { id: "dpad_up", x: 310, y: 466, glyph: "⌃" },
-  { id: "dpad_down", x: 310, y: 534, glyph: "⌄" },
-  { id: "dpad_left", x: 276, y: 500, glyph: "‹" },
-  { id: "dpad_right", x: 344, y: 500, glyph: "›" },
+  { id: "dpad_up", x: 310, y: 466, angle: 0 },
+  { id: "dpad_down", x: 310, y: 534, angle: 180 },
+  { id: "dpad_left", x: 276, y: 500, angle: 270 },
+  { id: "dpad_right", x: 344, y: 500, angle: 90 },
 ] as const;
 const shoulders = [
   { id: "lb", trigger: "lt", x: 180, mirror: false },
@@ -88,11 +88,11 @@ const choose = (id: GamepadBinding | "left" | "right", e: KeyboardEvent) => {
         <path d="M137 61 V133 M132 61 H141 M134 79 H141 M132 97 H141 M134 115 H141 M132 133 H141" />
         <rect x="145" y="61" width="4" height="72" class="track" />
         <rect x="145" :y="133 - state[s.trigger] * 72" width="4" :height="state[s.trigger] * 72" class="meter" />
-        <text x="139" y="47" :transform="s.mirror ? 'translate(278 0) scale(-1 1)' : ''">{{ Math.round(state[s.trigger] * 100) }}%</text>
+        <text x="139" y="44" :transform="s.mirror ? 'translate(278 0) scale(-1 1)' : ''">{{ Math.round(state[s.trigger] * 100) }}%</text>
         <text
           v-for="(value, i) in [100, 50, 0]"
           :key="value"
-          x="118"
+          x="116"
           :y="61 + i * 36"
           :transform="s.mirror ? 'translate(236 0) scale(-1 1)' : ''"
         >
@@ -157,7 +157,7 @@ const choose = (id: GamepadBinding | "left" | "right", e: KeyboardEvent) => {
       @keydown="choose(d.id, $event)"
     >
       <rect :x="d.x - 15" :y="d.y - 15" width="30" height="30" rx="3" />
-      <text :x="d.x" :y="d.y">{{ d.glyph }}</text>
+      <path d="M-6 3 L0 -3 L6 3" class="glyph" :transform="`translate(${d.x} ${d.y}) rotate(${d.angle})`" />
     </g>
     <g
       v-for="s in sticks"
@@ -306,7 +306,7 @@ text {
 .trigger-ruler text {
   stroke: none;
   font:
-    10px ui-monospace,
+    12px ui-monospace,
     monospace;
 }
 .trigger-ruler .track {
@@ -316,10 +316,6 @@ text {
 .trigger-ruler .meter {
   fill: var(--accent);
   stroke: none;
-}
-.dpad text {
-  font-size: 24px;
-  fill: var(--muted);
 }
 .stick .socket {
   fill: var(--bg);

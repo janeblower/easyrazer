@@ -1104,12 +1104,12 @@ onUnmounted(() => {
               </button>
             </span>
             <SelectionBar
-              v-if="section !== 'macros' && (section !== 'gamepad' || gamepadAvailable)"
+              v-if="section === 'actuation' || section === 'bindings'"
               class="ml-auto"
-              :count="section === 'gamepad' ? Number(gamepadSelected !== null) : selection.size"
-              :single="section === 'bindings' || section === 'gamepad'"
+              :count="selection.size"
+              :single="section === 'bindings'"
               @select-all="selectAll"
-              @clear="section === 'gamepad' ? (gamepadSelected = null) : (selection = new Set())"
+              @clear="selection = new Set()"
             />
           </div>
           <MacroEditor
@@ -1137,6 +1137,7 @@ onUnmounted(() => {
               :install-error="gamepadInstallError"
               @update="editGamepad"
               @install="changeGamepadDriver('install')"
+              @driver="setMode(true)"
             />
             <ActionBar
               v-bind="actions"
