@@ -256,7 +256,10 @@
     "color": "Color",
     "colorHex": "Color {hex}",
     "none": "No color",
-    "noColor": "⊘ No color"
+    "noColor": "⊘ No color",
+    "area": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Color code"
   },
   "dialogs": {
     "autostart": {
