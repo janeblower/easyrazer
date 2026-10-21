@@ -90,9 +90,78 @@ button.primary:not(:disabled) {
   border-color: var(--accent);
 }
 
-input[type="range"],
-input[type="checkbox"] {
+input[type="range"] {
   accent-color: var(--accent);
+}
+
+/* Native checkboxes and select pickers ignore the palette; a customizable select also renders rich options. */
+input[type="checkbox"]:not(.switch input) {
+  appearance: none;
+  flex: none;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+  background: center / 10px no-repeat;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:not(.switch input):checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.5 8.5 2.5' fill='none' stroke='%230b0b0b' stroke-width='1.8'/%3E%3C/svg%3E");
+}
+
+select,
+select::picker(select) {
+  appearance: base-select;
+}
+
+select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+select::picker-icon {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+select::picker(select) {
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--key);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+option:hover,
+option:focus-visible {
+  background: var(--line);
+  color: var(--text);
+  outline: none;
+}
+
+option:checked {
+  color: var(--text);
+}
+
+option::checkmark {
+  order: 1;
+  margin-left: auto;
+  color: var(--accent);
 }
 
 .switch {
