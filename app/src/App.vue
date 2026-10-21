@@ -1302,11 +1302,10 @@ onUnmounted(() => {
         </ModalDialog>
         <AboutDialog v-if="about && !closing" :version="version" @close="about = false" />
         <footer class="text-xs text-muted">
-          {{ version }} ·
+          EasyRazer {{ version }} ·
           <button class="text-xs text-muted p-0 border-0 bg-transparent underline h-auto hover:text-text" @click="about = true">
             {{ $t("about.title") }}
           </button>
-          · {{ $t("footer") }}
         </footer>
       </main>
     </div>
