@@ -6,14 +6,11 @@ import type { Effect, EffectInfo, KeyMap, KeyView, LightingState, Look, Rgb, Sta
 import { dev, log, nameOf } from "../dev";
 import { call, keyboard, ours } from "../keyboard";
 import { hex } from "../devConsole";
-import { useConfirmWrite } from "../confirmWrite";
-import { trackUnapplied } from "../unapplied";
+import { useSection } from "../changes";
 import DevBlock from "./DevBlock.vue";
 import ColorPicker from "./ColorPicker.vue";
 import KeyboardMap from "./KeyboardMap.vue";
 import SelectionBar from "./SelectionBar.vue";
-import ConfirmWrite from "./ConfirmWrite.vue";
-import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
 
 interface Ui {
@@ -170,7 +167,6 @@ function same(a?: Look | null, b?: Look | null) {
 
 const draft = computed(() => ui.value && resolve(ui.value));
 const dirty = computed(() => !!draft.value && !same(draft.value, applied.value ?? saved.value));
-trackUnapplied(() => dirty.value);
 const isCustom = computed(() => ui.value?.group === "custom");
 const canSave = computed(() => connected.value && !busy.value && !!draft.value && !isCustom.value && !same(draft.value, saved.value));
 
@@ -310,14 +306,18 @@ async function send(command: "lighting_apply" | "lighting_write", done: string) 
   }
 }
 
-const {
-  asking,
-  write: save,
-  onConfirm,
-} = useConfirmWrite(
-  async () => send("lighting_write", "lighting.saved"),
-  (error) => (message.value = String(error)),
-);
+useSection({
+  id: "lighting",
+  pending: () => (dirty.value ? 1 : 0),
+  parts: () => [{ label: t("tabs.lighting"), place: "lighting" }],
+  canApply: () => dirty.value && !busy.value && !blocked.value,
+  canRevert: () => dirty.value && !busy.value && !blocked.value,
+  canWrite: () => canSave.value,
+  apply: async () => send("lighting_apply", "lighting.applied"),
+  revert,
+  write: async () => send("lighting_write", "lighting.saved"),
+  skipsWrite: () => isCustom.value,
+});
 
 async function toggleDynamic() {
   const on = !dynamicLighting.value;
@@ -464,20 +464,9 @@ const lightingLog = computed(() =>
         {{ $t("lighting.dynamic") }}
       </label>
     </div>
-    <ActionBar
-      :pending="dirty ? $t('common.notApplied') : ''"
-      :can-revert="dirty && !busy && !blocked"
-      :can-apply="dirty && !busy && !blocked"
-      :can-write="canSave"
-      :apply-only="isCustom"
-      @revert="revert"
-      @apply="send('lighting_apply', 'lighting.applied')"
-      @write="save"
-    />
     <DevBlock v-if="dev.mode"
       ><div v-for="l in lightingLog" :key="l">{{ l }}</div></DevBlock
     >
-    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </section>
 </template>
 

@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { call } from "../keyboard";
 import type { KeyView, MacroEvent, MacroState, Mouse } from "../types";
 import { MOUSE, bodySize, codeName, footprint, keyName } from "../bindings";
 import { dev } from "../dev";
 import { hex } from "../devConsole";
-import { useConfirmWrite } from "../confirmWrite";
-import { trackUnapplied } from "../unapplied";
+import { useSection } from "../changes";
 import DevBlock from "./DevBlock.vue";
-import ConfirmWrite from "./ConfirmWrite.vue";
-import ActionBar from "./ActionBar.vue";
 import AppIcon from "./AppIcon.vue";
 
 const props = defineProps<{
@@ -53,7 +50,6 @@ const dirty = computed(
     !!draft.value &&
     (!saved.value || saved.value.name !== draft.value.name || JSON.stringify(saved.value.events) !== JSON.stringify(draft.value.events)),
 );
-trackUnapplied(() => dirty.value);
 const keys = computed(() => props.layout.filter((k) => k.editable).map((k) => ({ key: k.key, name: keyName(k, t) })));
 const byName = computed(() => new Map(props.layout.map((k) => [k.name, k.key])));
 const size = computed(() => footprint(bodySize(draft.value?.events ?? [])));
@@ -103,6 +99,13 @@ function move(i: number, by: number) {
   [ev[i], ev[i + by]] = [ev[i + by], ev[i]];
 }
 
+// Kept alive behind the other tabs: recording must not swallow keys typed there.
+const active = ref(true);
+onActivated(() => (active.value = true));
+onDeactivated(() => {
+  active.value = false;
+  stopRecording();
+});
 onUnmounted(stopRecording);
 
 // `state` picks the macro list out of the reply.
@@ -139,7 +142,22 @@ async function doWrite() {
   await run<MacroState>("write_macro", { macroId: selected.value }, "macros.written", (s) => s);
 }
 
-const { asking, write, onConfirm } = useConfirmWrite(doWrite, (error) => (message.value = String(error)));
+useSection({
+  id: "macros",
+  pending: () => (dirty.value ? 1 : 0),
+  parts: () => [{ label: t("keys.macros"), place: "macros" }],
+  canApply: () => dirty.value && !busy.value,
+  canRevert: () => dirty.value && !busy.value,
+  // An applied macro not yet in the flash is written from its own tab only: elsewhere it is not in view.
+  canWrite: () => props.writable && !busy.value && (dirty.value || (active.value && !!saved.value && !saved.value.written)),
+  apply: async () => {
+    await apply();
+  },
+  revert: () => {
+    open(selected.value);
+  },
+  write: doWrite,
+});
 
 async function remove() {
   if (!armed.value) {
@@ -239,22 +257,11 @@ const value = (e: Event) => (e.target as HTMLSelectElement).value;
           {{ $t(armed ? "macros.confirmDelete" : "macros.delete") }}
         </button>
       </div>
-      <ActionBar
-        :pending="dirty ? $t('common.notApplied') : ''"
-        :can-revert="dirty && !busy"
-        :can-apply="dirty && !busy"
-        :can-write="writable && !busy && (dirty || !saved?.written)"
-        :write-title="$t('macros.write')"
-        @revert="open(selected)"
-        @apply="apply"
-        @write="write"
-      />
       <DevBlock v-if="dev.mode && selected != null">
         <div>id {{ selected }} · {{ bytes?.length ?? 0 }} B · free {{ state?.free ?? "—" }}</div>
         <div>{{ hex(bytes ?? []) }}</div>
       </DevBlock>
     </div>
     <p v-else class="hint flex-1">{{ $t("macros.pick") }}</p>
-    <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
   </div>
 </template>
