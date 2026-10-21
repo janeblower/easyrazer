@@ -133,11 +133,12 @@ onUnmounted(() => {
         </span>
       </div>
       <div class="mt-2 flex flex-wrap gap-2">
-        <button v-if="outdated" class="primary" :disabled="!!driverOperation" @click="emit('install')">
+        <button v-if="outdated" class="primary inline-flex gap-2 items-center" :disabled="!!driverOperation" @click="emit('install')">
           <AppIcon name="shield" />
           {{ $t("gamepad.update") }}
         </button>
         <button
+          class="inline-flex gap-2 items-center"
           :disabled="driverStatus === null || !!driverOperation"
           @click="driverStatus?.installed ? (removingDriver = true) : emit('install')"
         >
