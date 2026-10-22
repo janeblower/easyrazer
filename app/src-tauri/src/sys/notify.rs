@@ -44,9 +44,11 @@ pub fn notify(on_hid: fn(), on_resume: fn()) {
         u: CM_NOTIFY_FILTER_0 { DeviceInterface: CM_NOTIFY_FILTER_0_0 { ClassGuid: GUID_DEVINTERFACE_HID } },
     };
     let mut cm: HCMNOTIFICATION = std::ptr::null_mut();
+    // SAFETY: `filter` and `cm` live across the call; `interface` matches the callback type and lives for the program.
     unsafe { CM_Register_Notification(&filter, std::ptr::null(), Some(interface), &mut cm) };
     // Windows keeps the parameters for the life of the subscription, which is the process.
     let params = Box::leak(Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS { Callback: Some(power), Context: std::ptr::null_mut() }));
     let mut power_handle = std::ptr::null_mut();
+    // SAFETY: `params` is leaked, so it outlives the subscription; `power` matches the callback type.
     unsafe { PowerRegisterSuspendResumeNotification(DEVICE_NOTIFY_CALLBACK, (params as *mut DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS).cast(), &mut power_handle) };
 }

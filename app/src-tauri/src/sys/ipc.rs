@@ -30,12 +30,15 @@ pub struct Channel {
     attached_once: Cell<bool>,
 }
 
-// The mapping stays valid across thread moves; its owner serializes access.
+// SAFETY: the view is process-wide memory that stays mapped across thread moves; its owner
+// serializes access.
 unsafe impl Send for Channel {}
 
 impl Channel {
     pub fn create() -> io::Result<Self> {
         let mut token = [0u8; 32];
+        // SAFETY: `token` is writable for the length passed; a null algorithm with the
+        // system-preferred flag is the documented form.
         if unsafe { BCryptGenRandom(ptr::null_mut(), token.as_mut_ptr(), token.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } < 0 {
             return Err(io::Error::other("cannot generate IPC token"));
         }
@@ -50,14 +53,17 @@ impl Channel {
     fn connect(name: &str, create: bool) -> io::Result<Self> {
         let mapping = if create {
             let wide_name = wide(name);
+            // SAFETY: `wide_name` is NUL-terminated and alive for the call; null means default security.
             let handle = owned(unsafe {
                 CreateFileMappingW(INVALID_HANDLE_VALUE, ptr::null(), PAGE_READWRITE, 0, size_of::<Reply>() as u32, wide_name.as_ptr())
             })?;
+            // SAFETY: no arguments; read right after CreateFileMappingW on this thread.
             if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control mapping already exists"));
             }
             handle
         } else {
+            // SAFETY: the name is a NUL-terminated temporary alive for the call.
             owned(unsafe { OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, 0, wide(name).as_ptr()) })?
         };
         let mut events = Vec::new();
@@ -65,6 +71,7 @@ impl Channel {
             let name = format!("{name}-{suffix}");
             events.push(if create { Event::create(&name, true)? } else { Event::open(&name, EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE)? });
         }
+        // SAFETY: `mapping` is owned here; the view is unmapped in Drop.
         let view = unsafe { MapViewOfFile(mapping.as_raw_handle(), FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size_of::<Reply>()) };
         if view.Value.is_null() {
             return Err(io::Error::last_os_error());
@@ -83,7 +90,8 @@ impl Channel {
             reply.error[..size].copy_from_slice(&bytes[..size]);
             reply.length = size as u32;
         }
-        // The helper is the only writer; the parent reads after Ready or process exit.
+        // SAFETY: the page-aligned view spans a Reply and lives as long as `self`. The helper is the
+        // only writer; the parent reads after Ready or process exit.
         unsafe {
             self.view.Value.cast::<Reply>().write_volatile(reply);
         }
@@ -95,6 +103,7 @@ impl Channel {
     }
 
     pub fn wait_ready(&self, process: BorrowedHandle<'_>) -> io::Result<()> {
+        // SAFETY: the array holds two handles borrowed live for the whole wait.
         match unsafe { WaitForMultipleObjects(2, [self.ready.handle().as_raw_handle(), process.as_raw_handle()].as_ptr(), 0, 30_000) } {
             WAIT_OBJECT_0 => Ok(()),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "helper startup")),
@@ -106,7 +115,8 @@ impl Channel {
     /// The handle values the helper reported, or the error it sent instead.
     pub fn result(&self) -> io::Result<[usize; 3]> {
         fence(Ordering::SeqCst);
-        // Ready/process termination synchronizes the one writer with this reader.
+        // SAFETY: the page-aligned view spans a Reply, which any bytes form. Ready or process
+        // termination synchronizes the one writer with this reader.
         let reply = unsafe { self.view.Value.cast::<Reply>().read_volatile() };
         if reply.length as usize > reply.error.len() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid helper response"));
@@ -135,7 +145,7 @@ impl Channel {
 
 impl Drop for Channel {
     fn drop(&mut self) {
-        // All accesses to this process's view have ended.
+        // SAFETY: the view was mapped in `connect`, and all accesses to it have ended.
         unsafe {
             UnmapViewOfFile(self.view);
         }

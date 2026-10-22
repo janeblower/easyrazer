@@ -119,25 +119,26 @@ pub fn container_id(path: &std::ffi::CStr) -> Option<String> {
     use windows_sys::core::GUID;
 
     let path: Vec<u16> = path.to_str().ok()?.encode_utf16().chain([0]).collect();
-    unsafe {
-        let mut ty = 0;
-        let mut id = [0u16; 512];
-        let mut size = size_of_val(&id) as u32;
-        if CM_Get_Device_Interface_PropertyW(path.as_ptr(), &DEVPKEY_Device_InstanceId, &mut ty, id.as_mut_ptr().cast(), &mut size, 0) != CR_SUCCESS {
-            return None;
-        }
-        let mut node = 0;
-        if CM_Locate_DevNodeW(&mut node, id.as_ptr(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS {
-            return None;
-        }
-        let mut g: GUID = std::mem::zeroed();
-        let mut size = size_of::<GUID>() as u32;
-        if CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_ContainerId, &mut ty, (&raw mut g).cast(), &mut size, 0) != CR_SUCCESS {
-            return None;
-        }
-        let tail: String = g.data4.iter().map(|b| format!("{b:02X}")).collect();
-        Some(format!("{:08X}-{:04X}-{:04X}-{}-{}", g.data1, g.data2, g.data3, &tail[..4], &tail[4..]))
+    let mut ty = 0;
+    let mut id = [0u16; 512];
+    let mut size = size_of_val(&id) as u32;
+    // SAFETY: `path` is NUL-terminated; `id` is writable for `size` bytes.
+    if unsafe { CM_Get_Device_Interface_PropertyW(path.as_ptr(), &DEVPKEY_Device_InstanceId, &mut ty, id.as_mut_ptr().cast(), &mut size, 0) } != CR_SUCCESS {
+        return None;
     }
+    let mut node = 0;
+    // SAFETY: on success `id` holds a NUL-terminated instance id within the buffer.
+    if unsafe { CM_Locate_DevNodeW(&mut node, id.as_ptr(), CM_LOCATE_DEVNODE_NORMAL) } != CR_SUCCESS {
+        return None;
+    }
+    let mut g = GUID::from_u128(0);
+    let mut size = size_of::<GUID>() as u32;
+    // SAFETY: `g` is writable for `size` bytes, the size of the GUID the property holds.
+    if unsafe { CM_Get_DevNode_PropertyW(node, &DEVPKEY_Device_ContainerId, &mut ty, (&raw mut g).cast(), &mut size, 0) } != CR_SUCCESS {
+        return None;
+    }
+    let tail: String = g.data4.iter().map(|b| format!("{b:02X}")).collect();
+    Some(format!("{:08X}-{:04X}-{:04X}-{}-{}", g.data1, g.data2, g.data3, &tail[..4], &tail[4..]))
 }
 
 #[cfg(not(windows))]

@@ -8,6 +8,7 @@ unsafe extern "system" fn no_alt_menu_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp:
     if msg == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_KEYMENU as usize && lp == 0 {
         return 0;
     }
+    // SAFETY: passes on what Windows gave this subclass procedure.
     unsafe { DefSubclassProc(hwnd, msg, wp, lp) }
 }
 
@@ -15,5 +16,6 @@ unsafe extern "system" fn no_alt_menu_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp:
 ///
 /// `hwnd` is a window handle value; Windows rejects one that names no window of this thread.
 pub fn no_alt_menu(hwnd: *mut std::ffi::c_void) {
+    // SAFETY: Windows rejects a bad `hwnd`; `no_alt_menu_proc` matches SUBCLASSPROC and lives for the program.
     unsafe { SetWindowSubclass(hwnd, Some(no_alt_menu_proc), 1, 0) };
 }
