@@ -2,7 +2,7 @@
 
 use super::wide;
 use std::io;
-use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 use std::ptr::null_mut;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::DiUninstallDriverW;
 use windows_sys::Win32::Foundation::{
@@ -114,39 +114,6 @@ pub fn duplicate_into<'p>(source: BorrowedHandle<'_>, process: BorrowedHandle<'p
         return Err(io::Error::last_os_error());
     }
     Ok(Remote { process, value: target as usize })
-}
-
-pub struct Event(OwnedHandle);
-impl Event {
-    /// Creates a named event, failing if the name is taken.
-    pub(super) fn create(name: &str, manual: bool) -> io::Result<Self> {
-        let name = wide(name);
-        // SAFETY: `name` is NUL-terminated and alive for the call; null means default security.
-        let handle = owned(unsafe { CreateEventW(std::ptr::null(), manual.into(), 0, name.as_ptr()) })?;
-        if already_exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control event already exists"));
-        }
-        Ok(Self(handle))
-    }
-
-    pub(super) fn open(name: &str, access: u32) -> io::Result<Self> {
-        // SAFETY: the name is a NUL-terminated temporary alive for the call.
-        owned(unsafe { OpenEventW(access, 0, wide(name).as_ptr()) }).map(Self)
-    }
-
-    pub fn set(&self) -> io::Result<()> {
-        // SAFETY: the event handle is owned by `self`.
-        if unsafe { SetEvent(self.0.as_raw_handle()) } == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
-    }
-
-    #[cfg(test)]
-    pub fn wait(&self, ms: u32) -> io::Result<bool> {
-        wait(self.handle(), ms)
-    }
-
-    pub fn handle(&self) -> BorrowedHandle<'_> {
-        self.0.as_handle()
-    }
 }
 
 /// An unnamed auto-reset event.
