@@ -327,20 +327,15 @@ pub async fn set_driver_mode(state: State<'_, AppState>, id: String, on: bool) -
     lock(&dev).set_driver_mode(on)
 }
 
-/// Hands the lamps back to the keyboards; switching Windows Dynamic Lighting is the user's call.
+/// Hands the keyboard's lamps to Windows or takes them back; switching Dynamic Lighting itself is the user's call.
 #[tauri::command]
-pub async fn take_back_lighting(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_lighting_delegated(state: State<'_, AppState>, id: String, on: bool) -> Result<(), String> {
     let watch = state.settings().watch_synapse;
     if watch && device::synapse_running() {
         return Err(i18n::t(&state.lang(), "backend.synapseRunning"));
     }
-    let mut first = None;
-    for (_, d) in state.boards.all() {
-        if let Err(e) = lock(&d).take_back_lighting() {
-            first.get_or_insert(e);
-        }
-    }
-    first.map_or(Ok(()), Err)
+    let dev = state.device(&id)?;
+    lock(&dev).set_lighting_delegated(on)
 }
 
 /// Opens the Dynamic Lighting page of Windows Settings, where it can be switched per device.

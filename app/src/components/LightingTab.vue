@@ -57,6 +57,7 @@ const saved = ref<Look | null>(null);
 // What the controls show; the effect sent to the keyboard is derived from it.
 const ui = ref<Ui | null>(null);
 const dynamicLighting = ref(false);
+const delegated = ref(false);
 const busy = ref(false);
 const message = ref("");
 const layout = ref<KeyView[]>([]);
@@ -274,6 +275,7 @@ async function load() {
     applied.value = s.applied;
     saved.value = s.saved;
     dynamicLighting.value = s.dynamic_lighting;
+    delegated.value = s.delegated;
     loading = true;
     ui.value = stateFrom(s.applied ?? s.saved);
     await nextTick();
@@ -319,10 +321,13 @@ useSection({
   skipsWrite: () => isCustom.value,
 });
 
-async function takeBack() {
+async function setDelegated(on: boolean) {
+  const id = keyboard.value;
   try {
-    await invoke("take_back_lighting");
-    message.value = t("lighting.dlTaken");
+    await call("set_lighting_delegated", { on }, id);
+    if (!ours(id)) return;
+    delegated.value = on;
+    message.value = t(on ? "lighting.dlDelegated" : "lighting.dlTaken");
   } catch (error) {
     message.value = String(error);
   }
@@ -356,9 +361,9 @@ const lightingLog = computed(() =>
 
 <template>
   <section class="flex flex-col gap-3">
-    <div v-if="dynamicLighting" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
+    <div v-if="dynamicLighting && !delegated" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
       {{ $t("lighting.dlWarning") }}
-      <button :disabled="blocked" @click="takeBack">{{ $t("lighting.dlTakeBack") }}</button>
+      <button :disabled="blocked" @click="setDelegated(false)">{{ $t("lighting.dlTakeBack") }}</button>
       <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
@@ -468,7 +473,16 @@ const lightingLog = computed(() =>
     </div>
     <div class="px-4 py-3 card">
       <div class="flex gap-3 items-center">
-        {{ $t("lighting.dynamic") }}
+        <label class="switch">
+          <input
+            type="checkbox"
+            role="switch"
+            :checked="delegated"
+            :disabled="blocked"
+            @change="setDelegated(($event.target as HTMLInputElement).checked)"
+          />
+          {{ $t("lighting.dynamic") }}
+        </label>
         <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
       </div>
     </div>

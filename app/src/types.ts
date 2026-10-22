@@ -170,6 +170,7 @@ export interface LightingState {
   applied: Look | null;
   saved: Look | null;
   dynamic_lighting: boolean;
+  delegated: boolean;
   custom: KeyMap<Rgb> | null;
 }
 

@@ -197,7 +197,7 @@ fn main() {
             commands::lighting_write,
             commands::set_confirm_write,
             commands::set_driver_mode,
-            commands::take_back_lighting,
+            commands::set_lighting_delegated,
             commands::open_dynamic_lighting_settings,
             commands::app_settings,
             commands::set_autostart,
