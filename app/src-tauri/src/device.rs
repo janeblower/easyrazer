@@ -21,8 +21,6 @@ use razer_core::profiles::{self as slots, RawKey, Snapshot};
 use razer_core::layout::{self, Board};
 use razer_core::{control, trigger};
 use serde::{Deserialize, Serialize};
-use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 
 use crate::dynamic_lighting;
 use crate::engine::{self, EngineHandle, MenuListener, Sink};
@@ -1334,23 +1332,7 @@ fn usable(d: &DeviceSpec, look: Option<Look>) -> Option<Look> {
 
 /// A failed snapshot counts as "running": writing while Synapse is alive gets overwritten.
 pub fn synapse_running() -> bool {
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
-            return true;
-        }
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut found = false;
-        let mut ok = Process32FirstW(snap, &mut entry);
-        while ok != 0 && !found {
-            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-            found = String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case("RazerAppEngine.exe");
-            ok = Process32NextW(snap, &mut entry);
-        }
-        CloseHandle(snap);
-        found
-    }
+    crate::sys::process_running("RazerAppEngine.exe").unwrap_or(true)
 }
 
 /// What `forget` found stale: `saved` when the settings changed, `resync` when the slots must be read again.

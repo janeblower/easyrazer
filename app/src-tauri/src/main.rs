@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Win32 calls live behind safe wrappers in sys, the only exception.
+#![deny(unsafe_code)]
 
 mod autostart;
 mod boards;
@@ -13,6 +15,8 @@ mod i18n;
 mod profiles;
 mod settings;
 mod stored;
+#[allow(unsafe_code)]
+mod sys;
 mod transfer;
 mod tray;
 mod wake;
@@ -305,20 +309,4 @@ fn sink(h: AppHandle, id: String) -> Sink {
             }
         });
     })
-}
-
-/// A lone Alt opens the (absent) window menu, and its modal loop stalls the event loop until the
-/// next key: live depth freezes mid-release. Alt+Space still opens the system menu.
-fn no_alt_menu(hwnd: *mut std::ffi::c_void) {
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SC_KEYMENU, WM_SYSCOMMAND};
-
-    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
-        if msg == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_KEYMENU as usize && lp == 0 {
-            return 0;
-        }
-        unsafe { DefSubclassProc(hwnd, msg, wp, lp) }
-    }
-    unsafe { SetWindowSubclass(hwnd, Some(proc), 1, 0) };
 }

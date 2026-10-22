@@ -1,21 +1,16 @@
-use crate::autostart::wide;
+//! The gamepad helper's control channel: a reply section and three events.
+
+use super::handle::{Event, owned};
+use super::wide;
+use std::cell::Cell;
 use std::io;
 use std::mem::size_of;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsRawHandle, BorrowedHandle, OwnedHandle};
 use std::ptr;
 use std::sync::atomic::{Ordering, fence};
-use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
 use windows_sys::Win32::System::{Memory::*, Threading::*};
-
-pub(super) fn owned(handle: HANDLE) -> io::Result<OwnedHandle> {
-    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-        Err(io::Error::last_os_error())
-    } else {
-        // The caller transfers a newly opened handle to this owner.
-        Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
-    }
-}
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -25,20 +20,21 @@ struct Reply {
     error: [u8; 512],
 }
 
-pub(super) struct Channel {
-    pub(super) name: String,
-    pub(super) ready: OwnedHandle,
-    pub(super) stop: OwnedHandle,
-    pub(super) attached: OwnedHandle,
+pub struct Channel {
+    pub name: String,
+    pub ready: Event,
+    pub stop: Event,
+    pub attached: Event,
     view: MEMORY_MAPPED_VIEW_ADDRESS,
     _mapping: OwnedHandle,
+    attached_once: Cell<bool>,
 }
 
 // The mapping stays valid across thread moves; its owner serializes access.
 unsafe impl Send for Channel {}
 
 impl Channel {
-    pub(super) fn create() -> io::Result<Self> {
+    pub fn create() -> io::Result<Self> {
         let mut token = [0u8; 32];
         if unsafe { BCryptGenRandom(ptr::null_mut(), token.as_mut_ptr(), token.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } < 0 {
             return Err(io::Error::other("cannot generate IPC token"));
@@ -47,21 +43,15 @@ impl Channel {
         Self::connect(&format!("Local\\EasyRazerGamepad-{}-{secret}", std::process::id()), true)
     }
 
-    pub(super) fn open(name: &str) -> io::Result<Self> {
+    pub fn open(name: &str) -> io::Result<Self> {
         Self::connect(name, false)
     }
 
     fn connect(name: &str, create: bool) -> io::Result<Self> {
         let mapping = if create {
+            let wide_name = wide(name);
             let handle = owned(unsafe {
-                CreateFileMappingW(
-                    INVALID_HANDLE_VALUE,
-                    ptr::null(),
-                    PAGE_READWRITE,
-                    0,
-                    size_of::<Reply>() as u32,
-                    wide(name).as_ptr(),
-                )
+                CreateFileMappingW(INVALID_HANDLE_VALUE, ptr::null(), PAGE_READWRITE, 0, size_of::<Reply>() as u32, wide_name.as_ptr())
             })?;
             if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control mapping already exists"));
@@ -72,17 +62,8 @@ impl Channel {
         };
         let mut events = Vec::new();
         for suffix in ["Ready", "Stop", "Attached"] {
-            let name = wide(&format!("{name}-{suffix}"));
-            let handle = if create {
-                let handle = owned(unsafe { CreateEventW(ptr::null(), 1, 0, name.as_ptr()) })?;
-                if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-                    return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control event already exists"));
-                }
-                handle
-            } else {
-                owned(unsafe { OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) })?
-            };
-            events.push(handle);
+            let name = format!("{name}-{suffix}");
+            events.push(if create { Event::create(&name, true)? } else { Event::open(&name, EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE)? });
         }
         let view = unsafe { MapViewOfFile(mapping.as_raw_handle(), FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size_of::<Reply>()) };
         if view.Value.is_null() {
@@ -91,22 +72,11 @@ impl Channel {
         let attached = events.pop().unwrap();
         let stop = events.pop().unwrap();
         let ready = events.pop().unwrap();
-        Ok(Self {
-            name: name.into(),
-            ready,
-            stop,
-            attached,
-            view,
-            _mapping: mapping,
-        })
+        Ok(Self { name: name.into(), ready, stop, attached, view, _mapping: mapping, attached_once: Cell::new(false) })
     }
 
-    pub(super) fn reply(&self, handles: [usize; 3], error: Option<&str>) {
-        let mut reply = Reply {
-            handles,
-            length: 0,
-            error: [0; 512],
-        };
+    pub fn reply(&self, handles: [usize; 3], error: Option<&str>) {
+        let mut reply = Reply { handles, length: 0, error: [0; 512] };
         if let Some(error) = error {
             let bytes = error.as_bytes();
             let size = bytes.len().min(reply.error.len());
@@ -120,16 +90,12 @@ impl Channel {
         fence(Ordering::SeqCst);
     }
 
-    pub(super) fn signal_ready(&self) -> io::Result<()> {
-        if unsafe { SetEvent(self.ready.as_raw_handle()) } == 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+    pub fn signal_ready(&self) -> io::Result<()> {
+        self.ready.set()
     }
 
-    pub(super) fn wait_ready(&self, process: HANDLE) -> io::Result<()> {
-        match unsafe { WaitForMultipleObjects(2, [self.ready.as_raw_handle(), process].as_ptr(), 0, 30_000) } {
+    pub fn wait_ready(&self, process: BorrowedHandle<'_>) -> io::Result<()> {
+        match unsafe { WaitForMultipleObjects(2, [self.ready.handle().as_raw_handle(), process.as_raw_handle()].as_ptr(), 0, 30_000) } {
             WAIT_OBJECT_0 => Ok(()),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "helper startup")),
             n if n == WAIT_OBJECT_0 + 1 => Err(io::Error::other("helper exited before becoming ready")),
@@ -137,7 +103,8 @@ impl Channel {
         }
     }
 
-    pub(super) fn result(&self) -> io::Result<[usize; 3]> {
+    /// The handle values the helper reported, or the error it sent instead.
+    pub fn result(&self) -> io::Result<[usize; 3]> {
         fence(Ordering::SeqCst);
         // Ready/process termination synchronizes the one writer with this reader.
         let reply = unsafe { self.view.Value.cast::<Reply>().read_volatile() };
@@ -148,6 +115,21 @@ impl Channel {
             return Err(io::Error::other(String::from_utf8_lossy(&reply.error[..reply.length as usize]).into_owned()));
         }
         Ok(reply.handles)
+    }
+
+    /// Tells the helper the parent takes over, then owns the handles it duplicated here. Once only.
+    ///
+    /// # Safety
+    /// The reply must come from a peer that duplicated each value into this process for this
+    /// channel alone and revokes them only until Attached is set, as the gamepad helper does.
+    /// Values it did not create here would become owners of unrelated handles.
+    pub unsafe fn attach(&self) -> io::Result<[io::Result<OwnedHandle>; 3]> {
+        let values = self.result()?;
+        if self.attached_once.replace(true) {
+            return Err(io::Error::other("helper handles were already taken"));
+        }
+        self.attached.set()?;
+        Ok(values.map(|h| owned(h as _)))
     }
 }
 
@@ -163,6 +145,8 @@ impl Drop for Channel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sys::open_process;
+    use std::os::windows::io::AsHandle;
 
     #[test]
     fn startup_errors_cross_the_control_channel() {
@@ -173,8 +157,8 @@ mod tests {
             peer.reply([0; 3], Some("device setup failed"));
             peer.signal_ready().unwrap();
         });
-        let process = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, std::process::id()) }).unwrap();
-        channel.wait_ready(process.as_raw_handle()).unwrap();
+        let process = open_process(std::process::id(), PROCESS_SYNCHRONIZE).unwrap();
+        channel.wait_ready(process.as_handle()).unwrap();
         task.join().unwrap();
         assert_eq!(channel.result().unwrap_err().to_string(), "device setup failed");
     }
@@ -185,8 +169,8 @@ mod tests {
         let peer = Channel::open(&channel.name).unwrap();
         peer.reply([123, 456, 789], None);
         peer.signal_ready().unwrap();
-        let process = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, std::process::id()) }).unwrap();
-        channel.wait_ready(process.as_raw_handle()).unwrap();
+        let process = open_process(std::process::id(), PROCESS_SYNCHRONIZE).unwrap();
+        channel.wait_ready(process.as_handle()).unwrap();
         assert_eq!(channel.result().unwrap(), [123, 456, 789]);
     }
 }

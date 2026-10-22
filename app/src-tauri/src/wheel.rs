@@ -4,7 +4,6 @@
 //! The hook cannot tell devices apart, but Raw Input can, and Windows queues the
 //! `WM_INPUT` of a wheel notch before it calls the hook for it (checked on hardware).
 
-use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -12,19 +11,10 @@ use std::time::{Duration, Instant};
 
 use razer_core::hid::{self, Unit};
 use razer_core::rapid::Media;
-use windows_sys::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-use windows_sys::Win32::UI::Input::{
-    GetRawInputData, GetRawInputDeviceInfoW, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
-    RIDEV_INPUTSINK, RIDEV_REMOVE, RIDI_DEVICENAME, RegisterRawInputDevices,
-};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PM_REMOVE, PeekMessageW, PostThreadMessageW, RI_MOUSE_WHEEL, RegisterClassW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WHEEL_DELTA, WM_INPUT, WM_MOUSEWHEEL, WM_QUIT, WM_USER, WNDCLASSW,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
 
 use crate::engine;
+use crate::sys::{self, WheelEvents};
 
 /// A queued notch older than this lost its hook call to another hook that swallowed it.
 const STALE: Duration = Duration::from_millis(100);
@@ -79,10 +69,6 @@ fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-thread_local! {
-    static WINDOW: Cell<HWND> = const { Cell::new(std::ptr::null_mut()) };
-}
-
 /// One keyboard's share of the wheel handling; the last one dropped stops it.
 pub struct Wheel {
     id: u64,
@@ -96,11 +82,9 @@ impl Wheel {
             let (tx, rx) = std::sync::mpsc::channel();
             let join = std::thread::spawn(move || {
                 // A thread has no message queue until it first asks for one; without it a WM_QUIT
-                // posted before `run` gets there fails and the join in Drop would never return.
-                let mut msg: MSG = unsafe { std::mem::zeroed() };
-                unsafe { PeekMessageW(&mut msg, std::ptr::null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };
-                let _ = tx.send(unsafe { GetCurrentThreadId() });
-                unsafe { run() };
+                // posted before `run_wheel` gets there fails and the join in Drop would never return.
+                let _ = tx.send(sys::start_message_queue());
+                sys::run_wheel(WheelEvents { notch: record, turn });
             });
             *thread = Some((rx.recv().unwrap_or(0), join));
         }
@@ -115,86 +99,29 @@ impl Drop for Wheel {
         if last && let Some((tid, join)) = thread.take() {
             // Posted before the loop starts it stays queued, so the loop still sees it. It can only
             // fail once the thread has exited, which the join below then returns from at once.
-            unsafe { PostThreadMessageW(tid, WM_QUIT, 0, 0) };
+            sys::quit_thread(tid);
             let _ = join.join();
         }
     }
 }
 
-unsafe fn run() {
-    unsafe {
-        let class: Vec<u16> = "EasyRazerWheel\0".encode_utf16().collect();
-        let wc = WNDCLASSW { lpfnWndProc: Some(window), lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
-        RegisterClassW(&wc);
-        let hwnd = CreateWindowExW(0, class.as_ptr(), class.as_ptr(), 0, 0, 0, 0, 0, HWND_MESSAGE, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
-        if hwnd.is_null() {
-            return;
-        }
-        let mut rid = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
-        let size = size_of::<RAWINPUTDEVICE>() as u32;
-        let hook = if RegisterRawInputDevices(&rid, 1, size) != 0 {
-            WINDOW.set(hwnd);
-            SetWindowsHookExW(WH_MOUSE_LL, Some(hook), std::ptr::null_mut(), 0)
-        } else {
-            std::ptr::null_mut()
-        };
-        let mut msg: MSG = std::mem::zeroed();
-        while !hook.is_null() && GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-            DispatchMessageW(&msg);
-        }
-        if !hook.is_null() {
-            UnhookWindowsHookEx(hook);
-            rid.dwFlags = RIDEV_REMOVE;
-            rid.hwndTarget = std::ptr::null_mut();
-            RegisterRawInputDevices(&rid, 1, size);
-        }
-        WINDOW.set(std::ptr::null_mut());
-        DestroyWindow(hwnd);
-    }
-}
-
-unsafe extern "system" fn window(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-    if msg == WM_INPUT {
-        unsafe { record(l as HRAWINPUT) };
-    }
-    unsafe { DefWindowProcW(hwnd, msg, w, l) }
-}
-
 /// Queues a wheel notch from Raw Input with its source.
-unsafe fn record(handle: HRAWINPUT) {
-    unsafe {
-        let mut ri: RAWINPUT = std::mem::zeroed();
-        let mut size = size_of::<RAWINPUT>() as u32;
-        let header = size_of::<RAWINPUTHEADER>() as u32;
-        if GetRawInputData(handle, RID_INPUT, (&raw mut ri).cast(), &mut size, header) == u32::MAX {
-            return;
+fn record(device: isize) {
+    let mut r = registry();
+    let owner = match r.owners.get(&device) {
+        Some(o) => *o,
+        None => {
+            let o = identify(device).and_then(|(pid, container)| r.owner(pid, container.as_deref()));
+            r.owners.insert(device, o);
+            o
         }
-        if u32::from(ri.data.mouse.Anonymous.Anonymous.usButtonFlags) & RI_MOUSE_WHEEL == 0 {
-            return;
-        }
-        let device = ri.header.hDevice;
-        let mut r = registry();
-        let owner = match r.owners.get(&(device as isize)) {
-            Some(o) => *o,
-            None => {
-                let o = identify(device).and_then(|(pid, container)| r.owner(pid, container.as_deref()));
-                r.owners.insert(device as isize, o);
-                o
-            }
-        };
-        r.seen.push_back((Instant::now(), owner));
-    }
+    };
+    r.seen.push_back((Instant::now(), owner));
 }
 
 /// Raw Input names are device interface paths, so they resolve to a container like hidapi's.
-unsafe fn identify(device: HANDLE) -> Option<(u16, Option<String>)> {
-    let mut name = [0u16; 256];
-    let mut len = name.len() as u32;
-    if unsafe { GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, name.as_mut_ptr().cast(), &mut len) } == u32::MAX {
-        return None;
-    }
-    let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
-    let name = String::from_utf16_lossy(&name[..end]);
+fn identify(device: isize) -> Option<(u16, Option<String>)> {
+    let name = sys::raw_input_device_name(device)?;
     let upper = name.to_uppercase();
     let rest = upper.split_once("VID_1532&PID_")?.1;
     let pid = u16::from_str_radix(rest.get(..4)?, 16).ok()?;
@@ -205,34 +132,21 @@ unsafe fn identify(device: HANDLE) -> Option<(u16, Option<String>)> {
     Some((pid, hid::container_id(&path)))
 }
 
-unsafe extern "system" fn hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
-    unsafe {
-        if code >= 0 && w as u32 == WM_MOUSEWHEEL {
-            let m = &*(l as *const MSLLHOOKSTRUCT);
-            if m.flags & LLMHF_INJECTED == 0 && from_keyboard() {
-                let delta = (m.mouseData >> 16) as i16;
-                let media = if delta > 0 { Media::VolumeUp } else { Media::VolumeDown };
-                for _ in 0..(delta.unsigned_abs() / WHEEL_DELTA as u16).max(1) {
-                    engine::send_media(media);
-                }
-                return 1;
-            }
-        }
-        CallNextHookEx(std::ptr::null_mut(), code, w, l)
+/// Swallows a wheel turn from a registered keyboard and sends volume keys instead.
+fn turn(delta: i16) -> bool {
+    if !from_keyboard() {
+        return false;
     }
+    let media = if delta > 0 { Media::VolumeUp } else { Media::VolumeDown };
+    for _ in 0..(delta.unsigned_abs() / WHEEL_DELTA as u16).max(1) {
+        engine::send_media(media);
+    }
+    true
 }
 
 /// Whether the notch the hook is handling came from a registered keyboard.
-unsafe fn from_keyboard() -> bool {
-    let hwnd = WINDOW.get();
-    if hwnd.is_null() {
-        return false;
-    }
-    let mut msg: MSG = unsafe { std::mem::zeroed() };
-    while unsafe { PeekMessageW(&mut msg, hwnd, WM_INPUT, WM_INPUT, PM_REMOVE) } != 0 {
-        unsafe { window(hwnd, msg.message, msg.wParam, msg.lParam) };
-    }
-    registry().take().is_some()
+fn from_keyboard() -> bool {
+    sys::drain_raw_input() && registry().take().is_some()
 }
 
 #[cfg(test)]

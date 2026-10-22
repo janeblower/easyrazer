@@ -122,25 +122,13 @@ pub fn uninstall() -> Result<(), String> {
 }
 
 pub(super) fn remove() -> Result<(), String> {
-    use crate::autostart::wide;
-    use windows_sys::Win32::{
-        Devices::DeviceAndDriverInstallation::DiUninstallDriverW,
-        Foundation::{ERROR_ALREADY_EXISTS, GetLastError},
-        System::Threading::CreateMutexW,
-    };
-    let owner = super::ipc::owned(unsafe {
-        CreateMutexW(std::ptr::null(), 0, wide("Global\\HIDMaestroRustController0").as_ptr())
-    }).map_err(|e| e.to_string())?;
-    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+    let (owner, existed) = crate::sys::create_mutex("Global\\HIDMaestroRustController0").map_err(|e| e.to_string())?;
+    if existed {
         return Err("Disable the gamepad before uninstalling HIDMaestro".into());
     }
     let mut reboot = false;
     for path in packages(&inf_directory()?).map_err(|e| e.to_string())?.0 {
-        let mut needed = 0;
-        if unsafe { DiUninstallDriverW(std::ptr::null_mut(), wide(&path.to_string_lossy()).as_ptr(), 0, &mut needed) } == 0 {
-            return Err(format!("HIDMaestro removal: {}", io::Error::last_os_error()));
-        }
-        reboot |= needed != 0;
+        reboot |= crate::sys::uninstall_driver(&path).map_err(|e| format!("HIDMaestro removal: {e}"))?;
     }
     run(UNTRUST).map_err(|e| format!("HIDMaestro certificate removal: {e}"))?;
     drop(owner);
@@ -193,11 +181,8 @@ mod tests {
     #[test]
     #[ignore = "explicit elevated test reserves the controller lease without removing drivers"]
     fn removal_refuses_an_active_controller() {
-        use windows_sys::Win32::System::Threading::CreateMutexW;
         let before = packages(&inf_directory().unwrap()).unwrap().0;
-        let owner = super::super::ipc::owned(unsafe {
-            CreateMutexW(std::ptr::null(), 0, crate::autostart::wide("Global\\HIDMaestroRustController0").as_ptr())
-        }).unwrap();
+        let (owner, _) = crate::sys::create_mutex("Global\\HIDMaestroRustController0").unwrap();
         let error = remove().unwrap_err();
         assert!(error.contains("Disable the gamepad"), "{error}");
         assert_eq!(packages(&inf_directory().unwrap()).unwrap().0, before);

@@ -110,6 +110,7 @@ pub fn open_lamp_array(api: &HidApi, unit: &Unit) -> Result<HidDevice, Error> {
 
 /// The ContainerId Windows gives every interface of one USB device; `None` where it cannot be read.
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub fn container_id(path: &std::ffi::CStr) -> Option<String> {
     use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
         CM_Get_DevNode_PropertyW, CM_Get_Device_Interface_PropertyW, CM_LOCATE_DEVNODE_NORMAL, CM_Locate_DevNodeW, CR_SUCCESS,

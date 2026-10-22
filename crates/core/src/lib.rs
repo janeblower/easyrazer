@@ -1,5 +1,8 @@
 //! Razer control protocol, independent of the OS transport.
 
+// The one Win32 call, in hid::container_id, is allowed there alone.
+#![deny(unsafe_code)]
+
 pub mod actuation;
 pub mod analog;
 pub mod binding;
