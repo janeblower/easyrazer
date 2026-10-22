@@ -41,17 +41,29 @@ mod tests {
         assert_eq!(command_line(Path::new(r"C:\Program Files\Изи\easyrazer.exe")), r#""C:\Program Files\Изи\easyrazer.exe" --tray"#);
     }
 
+    /// Puts the user's own value back byte for byte, even if the test panics: `set(true)`
+    /// would write the test binary's path instead.
+    struct Restore(Option<winreg::RegValue<'static>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let restored = RegKey::predef(HKEY_CURRENT_USER).create_subkey_with_flags(KEY, KEY_SET_VALUE).and_then(|(key, _)| match &self.0 {
+                Some(value) => key.set_raw_value(VALUE, value),
+                None => key.delete_value(VALUE).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
+            });
+            if let Err(e) = restored {
+                eprintln!("could not restore HKCU Run\\{VALUE}: {e}");
+            }
+        }
+    }
+
     #[test]
     #[ignore = "writes HKCU Run"]
     fn round_trip_in_registry() {
-        let was = enabled();
+        let _restore = Restore(RegKey::predef(HKEY_CURRENT_USER).open_subkey(KEY).and_then(|key| key.get_raw_value(VALUE)).ok());
         set(true).unwrap();
         assert!(enabled());
         set(false).unwrap();
         assert!(!enabled());
         set(false).unwrap();
-        if was {
-            set(true).unwrap();
-        }
     }
 }
