@@ -5,12 +5,8 @@ use crate::sys;
 const KEY: &str = r"Software\Microsoft\Lighting";
 const VALUE: &str = "AmbientLightingEnabled";
 
-/// Anything but a clear `0` counts as enabled: a false warning beats an effect that silently stays hidden.
+/// Whether the global switch is on; it says nothing of the per-device ones, so the app only
+/// warns on it. Anything but a clear `0` counts as on: a needless hint beats a hidden effect.
 pub fn enabled() -> bool {
     sys::dword(KEY, VALUE) != Some(0)
-}
-
-/// The Lighting service watches this value and switches at once.
-pub fn set(on: bool) -> Result<(), String> {
-    sys::set_dword(KEY, VALUE, on as u32)
 }

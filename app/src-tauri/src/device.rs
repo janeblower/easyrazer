@@ -1012,9 +1012,10 @@ impl Device {
         answer
     }
 
-    /// Hands the lamps back to the app once Windows stopped driving them; the registry is written by the caller.
-    pub fn set_dynamic_lighting(&mut self, on: bool) -> Result<(), String> {
-        if on || self.control.is_none() {
+    /// Hands the lamps back to the keyboard's own effect; Windows may claim them again while
+    /// Dynamic Lighting stays on for this device.
+    pub fn take_back_lighting(&mut self) -> Result<(), String> {
+        if self.control.is_none() {
             return Ok(());
         }
         self.writable()?;

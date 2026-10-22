@@ -319,11 +319,18 @@ useSection({
   skipsWrite: () => isCustom.value,
 });
 
-async function toggleDynamic() {
-  const on = !dynamicLighting.value;
+async function takeBack() {
   try {
-    await invoke("set_dynamic_lighting", { on });
-    dynamicLighting.value = on;
+    await invoke("take_back_lighting");
+    message.value = t("lighting.dlTaken");
+  } catch (error) {
+    message.value = String(error);
+  }
+}
+
+async function openLightingSettings() {
+  try {
+    await invoke("open_dynamic_lighting_settings");
   } catch (error) {
     message.value = String(error);
   }
@@ -351,7 +358,8 @@ const lightingLog = computed(() =>
   <section class="flex flex-col gap-3">
     <div v-if="dynamicLighting" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
       {{ $t("lighting.dlWarning") }}
-      <button :disabled="blocked" @click="toggleDynamic">{{ $t("lighting.dlOff") }}</button>
+      <button :disabled="blocked" @click="takeBack">{{ $t("lighting.dlTakeBack") }}</button>
+      <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
     <p v-if="!draft" class="msg">{{ $t("lighting.connect") }}</p>
@@ -459,10 +467,10 @@ const lightingLog = computed(() =>
       </div>
     </div>
     <div class="px-4 py-3 card">
-      <label class="switch">
-        <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
+      <div class="flex gap-3 items-center">
         {{ $t("lighting.dynamic") }}
-      </label>
+        <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
+      </div>
     </div>
     <DevBlock v-if="dev.mode"
       ><div v-for="l in lightingLog" :key="l">{{ l }}</div></DevBlock

@@ -18,7 +18,7 @@ use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, Ma
 use razer_core::macros::Event;
 use razer_core::analog::KeyAssignment;
 use crate::settings::{self, CloseAction, DevPanel, DevWindow, Rapid, Settings, Shared, SnapTap};
-use crate::{autostart, dynamic_lighting, i18n, tray, wake};
+use crate::{autostart, i18n, tray, wake};
 
 pub struct AppState {
     pub settings: Shared,
@@ -327,22 +327,26 @@ pub async fn set_driver_mode(state: State<'_, AppState>, id: String, on: bool) -
     lock(&dev).set_driver_mode(on)
 }
 
+/// Hands the lamps back to the keyboards; switching Windows Dynamic Lighting is the user's call.
 #[tauri::command]
-pub async fn set_dynamic_lighting(state: State<'_, AppState>, on: bool) -> Result<(), String> {
-    if !on {
-        let watch = state.settings().watch_synapse;
-        if watch && device::synapse_running() {
-            return Err(i18n::t(&state.lang(), "backend.synapseRunning"));
-        }
+pub async fn take_back_lighting(state: State<'_, AppState>) -> Result<(), String> {
+    let watch = state.settings().watch_synapse;
+    if watch && device::synapse_running() {
+        return Err(i18n::t(&state.lang(), "backend.synapseRunning"));
     }
-    dynamic_lighting::set(on)?;
     let mut first = None;
     for (_, d) in state.boards.all() {
-        if let Err(e) = lock(&d).set_dynamic_lighting(on) {
+        if let Err(e) = lock(&d).take_back_lighting() {
             first.get_or_insert(e);
         }
     }
     first.map_or(Ok(()), Err)
+}
+
+/// Opens the Dynamic Lighting page of Windows Settings, where it can be switched per device.
+#[tauri::command]
+pub fn open_dynamic_lighting_settings() -> Result<(), String> {
+    crate::sys::open("ms-settings:personalization-lighting")
 }
 
 #[derive(Serialize)]
