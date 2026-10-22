@@ -1,7 +1,8 @@
 //! Razer control protocol, independent of the OS transport.
 
 // The one Win32 call, in hid::container_id, is allowed there alone.
-#![deny(unsafe_code)]
+#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks, clippy::multiple_unsafe_ops_per_block)]
 
 pub mod actuation;
 pub mod analog;

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Win32 calls live behind safe wrappers in sys, the only exception.
-#![deny(unsafe_code)]
+#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks, clippy::multiple_unsafe_ops_per_block)]
 
 mod autostart;
 mod boards;

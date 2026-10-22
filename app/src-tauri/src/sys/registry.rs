@@ -12,22 +12,26 @@ fn check(status: u32) -> Result<(), String> {
 }
 
 pub fn has_string(key: &str, value: &str) -> bool {
+    // SAFETY: the names are NUL-terminated temporaries alive for the call; null outputs ask for no data.
     let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr(), RRF_RT_REG_SZ, null_mut(), null_mut(), null_mut()) };
     status == ERROR_SUCCESS
 }
 
 pub fn set_string(key: &str, value: &str, data: &str) -> Result<(), String> {
     let data = wide(data);
+    // SAFETY: the names are NUL-terminated temporaries alive for the call; `data` is readable for the byte length passed.
     check(unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) })
 }
 
 pub fn delete_value(key: &str, value: &str) -> Result<(), String> {
+    // SAFETY: the names are NUL-terminated temporaries alive for the call.
     check(unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr()) })
 }
 
 pub fn dword(key: &str, value: &str) -> Option<u32> {
     let mut data = 0u32;
     let mut size = 4u32;
+    // SAFETY: the names are NUL-terminated temporaries alive for the call; `data` is writable for `size` bytes.
     let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr(), RRF_RT_REG_DWORD, null_mut(), (&mut data as *mut u32).cast(), &mut size) };
     (status == ERROR_SUCCESS).then_some(data)
 }
