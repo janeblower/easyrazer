@@ -4,7 +4,7 @@ use super::wide;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 
 fn check(status: u32) -> Result<(), String> {
@@ -30,8 +30,4 @@ pub fn dword(key: &str, value: &str) -> Option<u32> {
     let mut size = 4u32;
     let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr(), RRF_RT_REG_DWORD, null_mut(), (&mut data as *mut u32).cast(), &mut size) };
     (status == ERROR_SUCCESS).then_some(data)
-}
-
-pub fn set_dword(key: &str, value: &str, data: u32) -> Result<(), String> {
-    check(unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(value).as_ptr(), REG_DWORD, (&data as *const u32).cast(), 4) })
 }

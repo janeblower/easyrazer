@@ -101,6 +101,8 @@ pub struct LightingState {
     /// What the keyboard's flash holds; `None` when unknown or unreadable.
     pub saved: Option<Look>,
     pub dynamic_lighting: bool,
+    /// The lamps are handed to Windows.
+    pub delegated: bool,
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
@@ -160,6 +162,8 @@ pub struct Device {
     progress: Option<Progress>,
     /// The keyboard shows a look the window has not applied.
     previewed: bool,
+    /// The lamps were handed to Windows this connect.
+    lighting_delegated: bool,
 }
 
 /// Reports a slot read: reads done, reads in all, the key and its press point when the window shows it.
@@ -191,6 +195,7 @@ impl Device {
             sink: None,
             progress: None,
             previewed: false,
+            lighting_delegated: false,
         })
     }
 
@@ -222,6 +227,7 @@ impl Device {
         self.startup = None;
         self.control = None;
         self.unit = None;
+        self.lighting_delegated = false;
     }
 
     /// Drops the connection once the keyboard stops answering; discovery attaches it again.
@@ -908,6 +914,7 @@ impl Device {
             },
             saved,
             dynamic_lighting,
+            delegated: self.lighting_delegated,
             custom: p.and_then(|p| p.custom.clone()),
         })
     }
@@ -1012,18 +1019,17 @@ impl Device {
         answer
     }
 
-    /// Hands the lamps back to the app once Windows stopped driving them; the registry is written by the caller.
-    pub fn set_dynamic_lighting(&mut self, on: bool) -> Result<(), String> {
-        if on || self.control.is_none() {
-            return Ok(());
-        }
+    /// Hands the lamps to Windows Dynamic Lighting, or takes them back for the keyboard's own
+    /// effect; Windows may claim them again while Dynamic Lighting stays on for this device.
+    pub fn set_lighting_delegated(&mut self, on: bool) -> Result<(), String> {
         self.writable()?;
         let d = self.keyboard()?.1;
         let unit = self.unit.as_ref().ok_or_else(|| self.msg("backend.noKeyboard"))?;
-        let r = hid::set_autonomous(&self.api, unit, true);
-        self.log.note("LampArray autonomous", &[1], r.as_ref().err().map(ToString::to_string));
+        let r = hid::set_autonomous(&self.api, unit, !on);
+        self.log.note("LampArray autonomous", &[u8::from(!on)], r.as_ref().err().map(ToString::to_string));
         r.map_err(|e| e.to_string())?;
-        if let (Some((t, _)), Some(look)) = (&self.control, self.data().loaded_profile().and_then(|p| p.data.look.as_ref())) {
+        self.lighting_delegated = on;
+        if !on && let (Some((t, _)), Some(look)) = (&self.control, self.data().loaded_profile().and_then(|p| p.data.look.as_ref())) {
             lighting::set_look(t, d, Store::Temporary, look).map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -1527,7 +1533,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false };
+        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false, lighting_delegated: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }

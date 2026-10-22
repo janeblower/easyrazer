@@ -57,6 +57,7 @@ const saved = ref<Look | null>(null);
 // What the controls show; the effect sent to the keyboard is derived from it.
 const ui = ref<Ui | null>(null);
 const dynamicLighting = ref(false);
+const delegated = ref(false);
 const busy = ref(false);
 const message = ref("");
 const layout = ref<KeyView[]>([]);
@@ -274,6 +275,7 @@ async function load() {
     applied.value = s.applied;
     saved.value = s.saved;
     dynamicLighting.value = s.dynamic_lighting;
+    delegated.value = s.delegated;
     loading = true;
     ui.value = stateFrom(s.applied ?? s.saved);
     await nextTick();
@@ -319,11 +321,21 @@ useSection({
   skipsWrite: () => isCustom.value,
 });
 
-async function toggleDynamic() {
-  const on = !dynamicLighting.value;
+async function setDelegated(on: boolean) {
+  const id = keyboard.value;
   try {
-    await invoke("set_dynamic_lighting", { on });
-    dynamicLighting.value = on;
+    await call("set_lighting_delegated", { on }, id);
+    if (!ours(id)) return;
+    delegated.value = on;
+    message.value = t(on ? "lighting.dlDelegated" : "lighting.dlTaken");
+  } catch (error) {
+    message.value = String(error);
+  }
+}
+
+async function openLightingSettings() {
+  try {
+    await invoke("open_dynamic_lighting_settings");
   } catch (error) {
     message.value = String(error);
   }
@@ -349,9 +361,10 @@ const lightingLog = computed(() =>
 
 <template>
   <section class="flex flex-col gap-3">
-    <div v-if="dynamicLighting" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
+    <div v-if="dynamicLighting && !delegated" class="text-warn px-3 py-2 rounded-md bg-warn-bg flex gap-3 items-center">
       {{ $t("lighting.dlWarning") }}
-      <button :disabled="blocked" @click="toggleDynamic">{{ $t("lighting.dlOff") }}</button>
+      <button :disabled="blocked" @click="setDelegated(false)">{{ $t("lighting.dlTakeBack") }}</button>
+      <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
     </div>
     <p v-if="message" class="msg">{{ message }}</p>
     <p v-if="!draft" class="msg">{{ $t("lighting.connect") }}</p>
@@ -459,10 +472,19 @@ const lightingLog = computed(() =>
       </div>
     </div>
     <div class="px-4 py-3 card">
-      <label class="switch">
-        <input type="checkbox" role="switch" :checked="dynamicLighting" :disabled="blocked" @change="toggleDynamic" />
-        {{ $t("lighting.dynamic") }}
-      </label>
+      <div class="flex gap-3 items-center">
+        <label class="switch">
+          <input
+            type="checkbox"
+            role="switch"
+            :checked="delegated"
+            :disabled="blocked"
+            @change="setDelegated(($event.target as HTMLInputElement).checked)"
+          />
+          {{ $t("lighting.dynamic") }}
+        </label>
+        <button @click="openLightingSettings">{{ $t("lighting.dlSettings") }}</button>
+      </div>
     </div>
     <DevBlock v-if="dev.mode"
       ><div v-for="l in lightingLog" :key="l">{{ l }}</div></DevBlock

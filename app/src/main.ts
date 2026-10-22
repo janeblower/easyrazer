@@ -276,6 +276,7 @@ async function mockBackend() {
       applied: { effect: { name: "wave", dir: "right", speed: 40 }, brightness: 200 },
       saved: { effect: { name: "static", rgb1: [0, 255, 0] }, brightness: 255 },
       dynamic_lighting: false,
+      delegated: false,
       custom: null,
     },
     app_settings: { autostart_offered: true, language: null, close_action: "ask" },
