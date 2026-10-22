@@ -29,8 +29,7 @@ thread_local! {
 
 /// Gives this thread a message queue, so a quit posted before the loop starts stays queued.
 pub fn start_message_queue() -> u32 {
-    // SAFETY: MSG is plain data; all zeroes is a valid value.
-    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    let mut msg = MSG::default();
     // SAFETY: `msg` is writable; PM_NOREMOVE leaves the queue as it was.
     unsafe { PeekMessageW(&mut msg, std::ptr::null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };
     // SAFETY: no arguments.
@@ -47,8 +46,7 @@ pub fn quit_thread(thread: u32) {
 pub fn run_wheel(events: WheelEvents) {
     EVENTS.set(Some(events));
     let class: Vec<u16> = "EasyRazerWheel\0".encode_utf16().collect();
-    // SAFETY: WNDCLASSW is plain data; zero means no icon, cursor, menu or extra bytes.
-    let wc = WNDCLASSW { lpfnWndProc: Some(window), lpszClassName: class.as_ptr(), ..unsafe { std::mem::zeroed() } };
+    let wc = WNDCLASSW { lpfnWndProc: Some(window), lpszClassName: class.as_ptr(), ..Default::default() };
     // SAFETY: `wc` and the class name live across the call; `window` matches WNDPROC.
     unsafe { RegisterClassW(&wc) };
     // SAFETY: `class` is NUL-terminated and outlives the window, which is destroyed below.
@@ -68,8 +66,7 @@ pub fn run_wheel(events: WheelEvents) {
     } else {
         std::ptr::null_mut()
     };
-    // SAFETY: MSG is plain data; all zeroes is a valid value.
-    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    let mut msg = MSG::default();
     // SAFETY: `msg` is writable; pumping this thread's queue is what runs the hook.
     while !hook.is_null() && unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
         // SAFETY: `msg` was just filled by GetMessageW.
@@ -99,8 +96,7 @@ unsafe extern "system" fn window(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> 
 
 /// Reports a wheel notch from Raw Input with its source.
 unsafe fn record(handle: HRAWINPUT) {
-    // SAFETY: RAWINPUT is plain data; all zeroes is a valid value.
-    let mut ri: RAWINPUT = unsafe { std::mem::zeroed() };
+    let mut ri = RAWINPUT::default();
     let mut size = size_of::<RAWINPUT>() as u32;
     let header = size_of::<RAWINPUTHEADER>() as u32;
     // SAFETY: `ri` is writable for `size` bytes, and Windows rejects a bad `handle`.
@@ -125,8 +121,7 @@ pub fn drain_raw_input() -> bool {
     if hwnd.is_null() {
         return false;
     }
-    // SAFETY: MSG is plain data; all zeroes is a valid value.
-    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    let mut msg = MSG::default();
     // SAFETY: `msg` is writable; `hwnd` is this thread's wheel window.
     while unsafe { PeekMessageW(&mut msg, hwnd, WM_INPUT, WM_INPUT, PM_REMOVE) } != 0 {
         // SAFETY: hands the window procedure the WM_INPUT message just removed for its window.

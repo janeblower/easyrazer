@@ -2,7 +2,8 @@
 
 use std::path::Path;
 
-use crate::sys;
+use winreg::RegKey;
+use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
 
 const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE: &str = "EasyRazer";
@@ -10,7 +11,7 @@ pub const TRAY_ARG: &str = "--tray";
 
 /// The value itself is the source of truth: the user may remove it in Task Manager.
 pub fn enabled() -> bool {
-    sys::has_string(KEY, VALUE)
+    RegKey::predef(HKEY_CURRENT_USER).open_subkey(KEY).and_then(|key| key.get_value::<String, _>(VALUE)).is_ok()
 }
 
 fn command_line(exe: &Path) -> String {
@@ -21,11 +22,13 @@ pub fn set(on: bool) -> Result<(), String> {
     if on == enabled() {
         return Ok(());
     }
+    let registry = |e: std::io::Error| format!("registry: {e}");
+    let (key, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey_with_flags(KEY, KEY_SET_VALUE).map_err(registry)?;
     if on {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        sys::set_string(KEY, VALUE, &command_line(&exe))
+        key.set_value(VALUE, &command_line(&exe)).map_err(registry)
     } else {
-        sys::delete_value(KEY, VALUE)
+        key.delete_value(VALUE).map_err(registry)
     }
 }
 

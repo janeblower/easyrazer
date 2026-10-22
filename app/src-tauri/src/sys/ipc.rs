@@ -1,6 +1,6 @@
 //! The gamepad helper's control channel: a reply section and three events.
 
-use super::handle::{Event, owned};
+use super::handle::{Event, already_exists, owned};
 use super::wide;
 use std::cell::Cell;
 use std::io;
@@ -8,8 +8,7 @@ use std::mem::size_of;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, OwnedHandle};
 use std::ptr;
 use std::sync::atomic::{Ordering, fence};
-use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
+use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::{Memory::*, Threading::*};
 
 #[derive(Clone, Copy)]
@@ -37,11 +36,7 @@ unsafe impl Send for Channel {}
 impl Channel {
     pub fn create() -> io::Result<Self> {
         let mut token = [0u8; 32];
-        // SAFETY: `token` is writable for the length passed; a null algorithm with the
-        // system-preferred flag is the documented form.
-        if unsafe { BCryptGenRandom(ptr::null_mut(), token.as_mut_ptr(), token.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } < 0 {
-            return Err(io::Error::other("cannot generate IPC token"));
-        }
+        getrandom::fill(&mut token).map_err(|_| io::Error::other("cannot generate IPC token"))?;
         let secret: String = token.iter().map(|b| format!("{b:02x}")).collect();
         Self::connect(&format!("Local\\EasyRazerGamepad-{}-{secret}", std::process::id()), true)
     }
@@ -57,8 +52,7 @@ impl Channel {
             let handle = owned(unsafe {
                 CreateFileMappingW(INVALID_HANDLE_VALUE, ptr::null(), PAGE_READWRITE, 0, size_of::<Reply>() as u32, wide_name.as_ptr())
             })?;
-            // SAFETY: no arguments; read right after CreateFileMappingW on this thread.
-            if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            if already_exists() {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control mapping already exists"));
             }
             handle

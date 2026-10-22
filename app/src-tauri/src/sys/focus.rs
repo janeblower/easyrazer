@@ -77,8 +77,7 @@ pub fn watch_win_events(events: &[u32], on_event: fn()) {
         // SAFETY: `win_event` matches WINEVENTPROC and lives for the program; out-of-context hooks need no module.
         unsafe { SetWinEventHook(event, event, null_mut(), Some(win_event), 0, 0, WINEVENT_OUTOFCONTEXT) };
     }
-    // SAFETY: MSG is plain data; all zeroes is a valid value.
-    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    let mut msg = MSG::default();
     // SAFETY: `msg` is writable; pumping this thread's queue is what delivers the hook calls.
     while unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) } > 0 {}
 }

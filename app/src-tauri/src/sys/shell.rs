@@ -4,17 +4,8 @@ use super::handle::owned;
 use super::wide;
 use std::io;
 use std::os::windows::io::OwnedHandle;
-use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW, ShellExecuteW};
-use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNORMAL};
-
-/// Opens a URL or file with its default handler.
-pub fn open(target: &str) -> Result<(), String> {
-    let (verb, target) = (wide("open"), wide(target));
-    // SAFETY: `verb` and `target` are NUL-terminated and alive for the call; the rest may be null.
-    let code = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), target.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
-    // ShellExecuteW reports failure as a value of 32 or less.
-    if code as usize > 32 { Ok(()) } else { Err(io::Error::last_os_error().to_string()) }
-}
+use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 /// Starts the program hidden and elevated, which asks the user, and returns its process.
 pub fn run_elevated(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle> {
@@ -29,8 +20,7 @@ pub fn run_elevated(exe: &std::path::Path, args: &str) -> io::Result<OwnedHandle
         lpFile: exe.as_ptr(),
         lpParameters: args.as_ptr(),
         nShow: SW_HIDE,
-        // SAFETY: SHELLEXECUTEINFOW is plain data; zero means null pointers and handles.
-        ..unsafe { std::mem::zeroed() }
+        ..Default::default()
     };
     // SAFETY: `info` and the strings it points to live across the call.
     if unsafe { ShellExecuteExW(&mut info) } == 0 {

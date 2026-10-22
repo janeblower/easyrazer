@@ -341,7 +341,7 @@ pub async fn set_lighting_delegated(state: State<'_, AppState>, id: String, on: 
 /// Opens the Dynamic Lighting page of Windows Settings, where it can be switched per device.
 #[tauri::command]
 pub fn open_dynamic_lighting_settings() -> Result<(), String> {
-    crate::sys::open("ms-settings:personalization-lighting")
+    open::that_detached("ms-settings:personalization-lighting").map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -450,10 +450,11 @@ pub enum Link {
 /// Opens a project page; the URLs are fixed so the UI cannot open other targets.
 #[tauri::command]
 pub fn open_link(link: Link) -> Result<(), String> {
-    crate::sys::open(match link {
+    open::that_detached(match link {
         Link::Repo => "https://github.com/janeblower/easyrazer",
         Link::License => "https://github.com/janeblower/easyrazer/blob/master/LICENSE",
     })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

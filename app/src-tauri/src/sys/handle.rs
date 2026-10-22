@@ -6,7 +6,7 @@ use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle,
 use std::ptr::null_mut;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::DiUninstallDriverW;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, DUPLICATE_CLOSE_SOURCE, DuplicateHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    CloseHandle, DUPLICATE_CLOSE_SOURCE, DuplicateHandle, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
     WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
@@ -20,6 +20,11 @@ pub(super) fn owned(handle: HANDLE) -> io::Result<OwnedHandle> {
         // SAFETY: the call returned a fresh handle that nothing else owns.
         Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
+}
+
+/// Whether the create call just made on this thread opened an existing object.
+pub(super) fn already_exists() -> bool {
+    io::Error::last_os_error().raw_os_error() == Some(ERROR_ALREADY_EXISTS as i32)
 }
 
 /// This process, through its pseudo-handle, which stays valid for its whole life. Waits
@@ -118,8 +123,7 @@ impl Event {
         let name = wide(name);
         // SAFETY: `name` is NUL-terminated and alive for the call; null means default security.
         let handle = owned(unsafe { CreateEventW(std::ptr::null(), manual.into(), 0, name.as_ptr()) })?;
-        // SAFETY: no arguments; read right after CreateEventW on this thread.
-        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        if already_exists() {
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, "control event already exists"));
         }
         Ok(Self(handle))
@@ -174,8 +178,7 @@ pub fn create_mutex(name: &str) -> io::Result<(OwnedHandle, bool)> {
     let name = wide(name);
     // SAFETY: `name` is NUL-terminated and alive for the call; null means default security.
     let handle = owned(unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) })?;
-    // SAFETY: no arguments; read right after CreateMutexW on this thread.
-    Ok((handle, unsafe { GetLastError() } == ERROR_ALREADY_EXISTS))
+    Ok((handle, already_exists()))
 }
 
 /// Whether a process with this executable name runs.
@@ -185,9 +188,7 @@ pub fn process_running(exe: &str) -> io::Result<bool> {
     if snap == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
     }
-    // SAFETY: PROCESSENTRY32W is plain data; all zeroes is a valid value.
-    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
     let mut found = false;
     // SAFETY: `snap` is open; `entry` is writable and its dwSize is set.
     let mut ok = unsafe { Process32FirstW(snap, &mut entry) };
