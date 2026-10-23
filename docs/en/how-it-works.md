@@ -43,7 +43,8 @@ typing back to the firmware (HW mode) and returns to driver mode afterwards. Wha
 working there is whatever the firmware can do in HW mode: on the V2 Analog line Rapid
 Trigger and Snap Tap stop; on the V3 line the firmware keeps Rapid Trigger and one Snap
 Tap pair. Each switch takes about 25 ms on the V2 Analog. Ctrl+Alt+Del accepts only a
-real keyboard, so it does nothing in driver mode.
+real keyboard, so it does nothing in driver mode; the approaches studied are in
+[Ctrl+Alt+Del in driver mode](ctrl-alt-del.md).
 
 Injecting through Razer's kernel driver would lift these limits, but it was rejected as
 too troublesome and unsafe.

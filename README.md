@@ -146,6 +146,7 @@ Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`
 
 - [User guide](docs/en/usage.md) — features, controls, limitations.
 - [How it works](docs/en/how-it-works.md) — comparison with Synapse, modes, flash wear.
+- [Ctrl+Alt+Del in driver mode](docs/en/ctrl-alt-del.md) — why it does not work and the approaches studied.
 - [Development](docs/en/development.md) — layout, rules, adding a keyboard model.
 - [Keyboard models](docs/en/devices/README.md) — protocol and firmware of each supported or studied model.
 
