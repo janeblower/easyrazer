@@ -12,7 +12,7 @@ mod window;
 pub use focus::*;
 pub use handle::*;
 pub use input::*;
-pub use ipc::Channel;
+pub use ipc::{Channel, ControlMessage};
 pub use notify::*;
 pub use shell::*;
 pub use wheel::*;
