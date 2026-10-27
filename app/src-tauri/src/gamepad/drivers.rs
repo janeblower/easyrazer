@@ -285,32 +285,14 @@ fn remove_legacy() -> Result<(), String> {
     for path in legacy_packages(&inf_directory()?).map_err(|e| e.to_string())? {
         reboot |= crate::sys::uninstall_driver(&path).map_err(|e| format!("HIDMaestro removal: {e}"))?;
     }
-    run(UNTRUST).map_err(|e| format!("HIDMaestro certificate removal: {e}"))?;
+    // HIDMaestro's installer trusted its signing certificate only while its drivers were installed.
+    for store in ["My", "Root", "TrustedPublisher"] {
+        // Root and TrustedPublisher copies may still point at the key deleted with the My one.
+        crate::sys::remove_machine_certificates(store, "HIDMaestroTestCert", store == "My")
+            .map_err(|e| format!("HIDMaestro certificate removal: {e}"))?;
+    }
     drop(owner);
     if reboot { return Err("Restart Windows to finish removing HIDMaestro, then install hidshim".into()); }
-    Ok(())
-}
-
-/// HIDMaestro's installer trusted its signing certificate only while its drivers were installed.
-const UNTRUST: &str = r#"$ErrorActionPreference = 'Stop'
-foreach ($name in @('My', 'Root', 'TrustedPublisher')) {
-    Get-ChildItem "Cert:\LocalMachine\$name" | Where-Object Subject -eq 'CN=HIDMaestroTestCert' | ForEach-Object {
-        # Root and TrustedPublisher copies may still point at the key deleted with the My one.
-        if ($name -eq 'My') { Remove-Item -LiteralPath $_.PSPath -DeleteKey } else { Remove-Item -LiteralPath $_.PSPath }
-    }
-}"#;
-
-fn run(script: &str) -> Result<(), String> {
-    let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?;
-    let output = Command::new(PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        // PowerShell 7's module path hides Windows PowerShell's own modules.
-        .env_remove("PSModulePath")
-        .creation_flags(CREATE_NO_WINDOW)
-        .output().map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
     Ok(())
 }
 
