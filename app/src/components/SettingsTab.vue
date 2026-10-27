@@ -16,7 +16,7 @@ const props = defineProps<{
 const emit = defineEmits<{ install: []; uninstall: [] }>();
 const removingDriver = ref(false);
 const { t } = useI18n();
-// Both packages are installed, but older than the client needs.
+// Installed, but older than the app needs.
 const outdated = computed(() => (props.driverStatus?.ready === false ? props.driverStatus.version : null));
 const driverState = computed(() => {
   if (props.driverOperation) return t(props.driverOperation === "install" ? "gamepad.installing" : "gamepad.uninstalling");
@@ -126,7 +126,7 @@ onUnmounted(() => {
     <div class="row">
       <span class="flex-1">
         <span class="flex gap-2 items-center">
-          HIDMaestro{{ driverStatus?.version && !outdated ? ` ${driverStatus.version}` : "" }}
+          hidshim{{ driverStatus?.version && !outdated ? ` ${driverStatus.version}` : "" }}
           <span class="driver-dot" :class="{ on: driverStatus?.installed, busy: !!driverOperation }"></span>
           <span
             class="text-xs"
@@ -136,7 +136,8 @@ onUnmounted(() => {
             >{{ driverState }}</span
           >
         </span>
-        <span class="desc">{{ $t("settings.hints.hidmaestro") }}</span>
+        <span class="desc">{{ $t("settings.hints.driver") }}</span>
+        <span v-if="driverStatus?.legacy" class="desc text-warn">{{ $t("gamepad.legacyInstalled") }}</span>
       </span>
       <button v-if="outdated" class="primary inline-flex gap-2 items-center" :disabled="!!driverOperation" @click="emit('install')">
         <AppIcon name="shield" />

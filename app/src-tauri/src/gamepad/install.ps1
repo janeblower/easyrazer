@@ -2,64 +2,24 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$stage = Join-Path $env:ProgramFiles ('EasyRazer.DriverInstall.' + [Guid]::NewGuid().ToString('N'))
-$cert = $null
-
-function Invoke-Tool([string] $file, [string[]] $arguments) {
-    $output = & $file @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "$file failed ($LASTEXITCODE): $output" }
-}
+# Not $env:ProgramFiles: this runs elevated, and the user's environment could point it elsewhere.
+$base = [Environment]::GetFolderPath('ProgramFiles')
+$stage = Join-Path $base ('EasyRazer.DriverInstall.' + [Guid]::NewGuid().ToString('N'))
 
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
-    $zip = Join-Path $stage 'HIDMaestro.zip'
-    Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri 'https://github.com/hifihedgehog/HIDMaestro/releases/download/v2.0.0/HIDMaestro-v2.0.0.zip' -OutFile $zip
-    if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne '9678CA1E7D2B689AF99D353677403F644F9948BD0553598C953F80E4333A8479') {
-        throw 'HIDMaestro release checksum mismatch'
+    $exe = Join-Path $stage 'hidshim.exe'
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri 'https://github.com/janeblower/hidshim/releases/download/0.1.0/hidshim.exe' -OutFile $exe
+    if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne 'B9E84BEA2864207E7463C3C6EC1C2BEAA38838FFC5B32FD8198A7205A2D3E268') {
+        throw 'hidshim release checksum mismatch'
     }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [IO.Compression.ZipFile]::OpenRead($zip)
-    try {
-        $entry = $archive.Entries | Where-Object Name -eq 'HIDMaestro.Core.dll' | Select-Object -First 1
-        if (-not $entry) { throw 'HIDMaestro SDK is missing from the release' }
-        $sdk = Join-Path $stage 'HIDMaestro.Core.dll'
-        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $sdk)
-    } finally { $archive.Dispose() }
-    $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($sdk))
-    $neutral = @('Inf2Cat.exe', 'inf2cat.exe.manifest', 'WindowsProtectedFiles.xml', 'Microsoft.UniversalStore.HardwareWorkflow.Cabinets.dll', 'Microsoft.UniversalStore.HardwareWorkflow.Catalogs.dll', 'Microsoft.UniversalStore.HardwareWorkflow.InfReader.dll', 'Microsoft.UniversalStore.HardwareWorkflow.SubmissionBuilder.dll', 'Microsoft.Kits.Logger.dll')
-    foreach ($name in $assembly.GetManifestResourceNames()) {
-        if ($name.StartsWith('HIDMaestro.Native.x64.')) { $file = $name.Substring(22) }
-        elseif ($name.StartsWith('HIDMaestro.Resources.') -and $neutral -contains $name.Substring(21)) { $file = $name.Substring(21) }
-        else { continue }
-        if ([IO.Path]::GetFileName($file) -ne $file) { throw 'Invalid payload filename' }
-        $source = $assembly.GetManifestResourceStream($name)
-        $target = [IO.File]::Create((Join-Path $stage $file))
-        try { $source.CopyTo($target) } finally { $target.Dispose(); $source.Dispose() }
-    }
-    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=HIDMaestroTestCert' -CertStoreLocation Cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(10)
-    foreach ($name in @('Root', 'TrustedPublisher')) {
-        $store = New-Object Security.Cryptography.X509Certificates.X509Store($name, 'LocalMachine')
-        $store.Open('ReadWrite')
-        try { $store.Add($cert) } finally { $store.Close() }
-    }
-    $sign = Join-Path $stage 'signtool.exe'
-    foreach ($file in @('HIDMaestro.dll', 'HMXInput.dll')) {
-        Invoke-Tool $sign @('sign', '/sm', '/s', 'My', '/sha1', $cert.Thumbprint, '/fd', 'SHA256', (Join-Path $stage $file))
-    }
-    Invoke-Tool (Join-Path $stage 'Inf2Cat.exe') @("/driver:$stage", '/os:10_X64')
-    foreach ($file in @('hidmaestro.cat', 'hidmaestro_xusb.cat')) {
-        Invoke-Tool $sign @('sign', '/sm', '/s', 'My', '/sha1', $cert.Thumbprint, '/fd', 'SHA256', (Join-Path $stage $file))
-    }
-    foreach ($file in @('hidmaestro.inf', 'hidmaestro_xusb.inf')) {
-        $output = & "$env:SystemRoot\System32\pnputil.exe" /add-driver (Join-Path $stage $file) /install 2>&1
-        if ($LASTEXITCODE -notin @(0, 3010)) { throw "Driver installation failed ($LASTEXITCODE): $output" }
-    }
+    # hidshim copies itself to Program Files and lists itself among installed apps.
+    $output = & $exe install 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "hidshim installation failed ($LASTEXITCODE): $output" }
 } catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 } finally {
-    # Nothing is signed after this run, so the trusted key is not kept around.
-    if ($cert) { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($cert.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $stage) {
         Get-ChildItem -LiteralPath $stage -File | Remove-Item -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $stage -ErrorAction SilentlyContinue

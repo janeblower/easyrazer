@@ -180,6 +180,8 @@ export interface GamepadDriverStatus {
   installed: boolean;
   ready: boolean;
   version: string | null;
+  /** HIDMaestro, which earlier versions used, is still installed. */
+  legacy: boolean;
 }
 
 export interface AppSettings {

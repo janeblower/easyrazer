@@ -11,7 +11,7 @@ test("settings offers install or uninstall and prevents duplicate driver operati
   try {
     const { default: SettingsTab } = (await server.ssrLoadModule("/src/components/SettingsTab.vue")) as { default: Component };
     const render = async (
-      driverStatus: { installed: boolean; ready: boolean } | null,
+      driverStatus: { installed: boolean; ready: boolean; legacy?: boolean } | null,
       driverOperation: "install" | "uninstall" | null = null,
     ) => {
       const app = createSSRApp(SettingsTab, { driverStatus, driverOperation, driverError: null });
@@ -19,12 +19,15 @@ test("settings offers install or uninstall and prevents duplicate driver operati
       return renderToString(app);
     };
     const missing = await render({ installed: false, ready: false });
-    expect(missing.includes("Install HIDMaestro")).toBe(true);
-    expect(missing.includes("Uninstall HIDMaestro")).toBe(false);
+    expect(missing.includes("Install hidshim")).toBe(true);
+    expect(missing.includes("Uninstall hidshim")).toBe(false);
     const installed = await render({ installed: true, ready: true });
-    expect(installed.includes("Uninstall HIDMaestro")).toBe(true);
+    expect(installed.includes("Uninstall hidshim")).toBe(true);
     const partial = await render({ installed: true, ready: false });
-    expect(partial.includes("Uninstall HIDMaestro")).toBe(true);
+    expect(partial.includes("Uninstall hidshim")).toBe(true);
+    expect(installed.includes("HIDMaestro")).toBe(false);
+    const legacy = await render({ installed: true, ready: true, legacy: true });
+    expect(legacy.includes(en.gamepad.legacyInstalled)).toBe(true);
     for (const operation of ["install", "uninstall"] as const) {
       const busy = await render({ installed: true, ready: true }, operation);
       expect(busy.includes('aria-busy="true"')).toBe(true);
@@ -60,11 +63,11 @@ test("gamepad disables the model and editor until driver mode and both packages 
     const inactive = (html: string) => /<div[^>]*gamepad-content[^>]* inert(?:\s|>)/.test(html);
     const hardware = await render(false, true);
     expect(inactive(hardware)).toBe(true);
-    expect(hardware.includes("Install HIDMaestro")).toBe(false);
+    expect(hardware.includes("Install hidshim")).toBe(false);
     expect(hardware.includes("Switch to driver mode")).toBe(true);
     const missing = await render(true, false);
     expect(inactive(missing)).toBe(true);
-    expect(missing.includes("Install HIDMaestro")).toBe(true);
+    expect(missing.includes("Install hidshim")).toBe(true);
     expect(missing.includes('viewBox="0 0 24 24"')).toBe(true);
     const installing = await render(true, false, true);
     expect(installing.includes('aria-busy="true"')).toBe(true);

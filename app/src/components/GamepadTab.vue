@@ -23,7 +23,7 @@ const props = defineProps<{
   driverOperation: "install" | "uninstall" | null;
   installError: string | null;
 }>();
-const emit = defineEmits<{ update: [config: GamepadConfig]; install: []; driver: [] }>();
+const emit = defineEmits<{ update: [config: GamepadConfig]; toggle: [enabled: boolean]; retry: []; install: []; driver: [] }>();
 const available = computed(() => props.driver && props.driverInstalled === true && !props.driverOperation);
 const { t } = useI18n();
 const notice = computed(() => {
@@ -150,11 +150,14 @@ onUnmounted(() => {
             type="checkbox"
             :checked="config.enabled"
             :disabled="!canEdit"
-            @change="emit('update', { ...config, enabled: ($event.target as HTMLInputElement).checked })"
+            @change="emit('toggle', ($event.target as HTMLInputElement).checked)"
           />{{ t("gamepad.enabled") }}</label
         >
       </header>
-      <p v-if="error" class="gamepad-error" role="alert">{{ error }}</p>
+      <p v-if="error" class="gamepad-error" role="alert">
+        {{ error }}
+        <button v-if="config.enabled && canEdit" class="retry" @click="emit('retry')">{{ t("gamepad.retry") }}</button>
+      </p>
       <div class="gamepad-workspace">
         <div class="gamepad-stage">
           <GamepadModel :config="config" :depth="available ? depth : []" :selected="selected" @select="available && (selected = $event)" />
@@ -423,6 +426,9 @@ p {
 }
 .gamepad-error {
   color: var(--error);
+}
+.gamepad-error .retry {
+  margin-left: 8px;
 }
 @media (max-width: 850px) {
   .gamepad-workspace {

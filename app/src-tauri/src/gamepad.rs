@@ -1,8 +1,9 @@
-use hidmaestro_client::{Buttons, State, Writer};
+use hidshim::{Buttons, Gamepad, State};
 use razer_core::binding::{Action, UNIQUE};
 use razer_core::layout::{self, Board};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::io;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 mod process;
@@ -82,13 +83,13 @@ impl Config {
         let mut buttons = Buttons::default();
         for (id, button) in [
             ("a", Buttons::A), ("b", Buttons::B), ("x", Buttons::X), ("y", Buttons::Y),
-            ("lb", Buttons::LEFT_BUMPER), ("rb", Buttons::RIGHT_BUMPER),
-            ("left_click", Buttons::LEFT_STICK), ("right_click", Buttons::RIGHT_STICK),
+            ("lb", Buttons::LEFT_SHOULDER), ("rb", Buttons::RIGHT_SHOULDER),
+            ("left_click", Buttons::LEFT_THUMB), ("right_click", Buttons::RIGHT_THUMB),
             ("back", Buttons::BACK), ("start", Buttons::START),
-            ("dpad_up", Buttons::UP), ("dpad_down", Buttons::DOWN),
-            ("dpad_left", Buttons::LEFT), ("dpad_right", Buttons::RIGHT),
+            ("dpad_up", Buttons::DPAD_UP), ("dpad_down", Buttons::DPAD_DOWN),
+            ("dpad_left", Buttons::DPAD_LEFT), ("dpad_right", Buttons::DPAD_RIGHT),
         ] {
-            if value(id) >= 128 { buttons = buttons | button; }
+            if value(id) >= 128 { buttons |= button; }
         }
         State {
             buttons,
@@ -111,13 +112,12 @@ impl Default for Input {
 }
 
 struct Session {
-    writer: Writer,
+    pad: Gamepad,
     previous: State,
-    process: process::Process,
 }
 
 impl Drop for Session {
-    fn drop(&mut self) { let _ = self.writer.submit(&State::default()); }
+    fn drop(&mut self) { let _ = self.pad.submit(&State::default()); }
 }
 
 pub struct Runtime {
@@ -125,16 +125,19 @@ pub struct Runtime {
     pub profile: u32,
     depth: [u8; 256],
     session: Option<Session>,
-    pending: Option<Receiver<Result<(Writer, process::Process), String>>>,
+    pending: Option<Receiver<Result<Gamepad, String>>>,
     error: Option<String>,
+    open: fn() -> io::Result<Gamepad>,
 }
 
 impl Runtime {
     pub fn new() -> Self {
-        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None }
+        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None, open: Gamepad::open }
     }
 
-    pub fn configure(&mut self, profile: u32, config: Config, launch: bool) {
+    /// Opens the pad when it is enabled. `request` means the user just turned it on, which may
+    /// ask for elevation to bring the pad back, as after a reboot.
+    pub fn configure(&mut self, profile: u32, config: Config, request: bool) {
         self.check();
         if self.config != config || self.profile != profile {
             self.neutral();
@@ -144,40 +147,45 @@ impl Runtime {
         if !self.config.enabled {
             self.stop();
             self.error = None;
-        } else if self.session.is_none() && self.pending.is_none() && launch {
-            self.pending = Some(process::launch());
-            self.error = None;
-        } else if self.session.is_none() && self.pending.is_none() && self.error.is_none() {
-            self.error = Some("Apply the gamepad configuration to start the controller.".into());
+            return;
+        }
+        if self.session.is_some() || self.pending.is_some() {
+            return;
+        }
+        match (self.open)() {
+            Ok(pad) => {
+                self.session = Some(Session { pad, previous: State::default() });
+                self.error = None;
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound && request => {
+                self.pending = Some(drivers::restore());
+                self.error = None;
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                self.error = Some(format!("{e}. Retry to start the gamepad."));
+            }
+            Err(e) => self.error = Some(e.to_string()),
         }
     }
 
     fn check(&mut self) {
-        if let Some(pending) = &self.pending {
-            match pending.try_recv() {
-                Ok(result) => {
-                    self.pending = None;
-                    match result {
-                        Ok((writer, process)) => {
-                            self.session = Some(Session { writer, previous: State::default(), process });
-                            self.error = None;
-                        }
-                        Err(e) => self.error = Some(e),
+        let Some(pending) = &self.pending else { return };
+        match pending.try_recv() {
+            Ok(result) => {
+                self.pending = None;
+                match result {
+                    Ok(pad) => {
+                        self.session = Some(Session { pad, previous: State::default() });
+                        self.error = None;
                     }
+                    Err(e) => self.error = Some(e),
                 }
-                Err(TryRecvError::Disconnected) => {
-                    self.pending = None;
-                    self.error = Some("Gamepad startup interrupted. Apply the configuration to retry.".into());
-                }
-                Err(TryRecvError::Empty) => {}
             }
-        }
-        if let Err(e) = process::cleanup() {
-            self.error = Some(format!("Gamepad cleanup: {e}"));
-        }
-        if self.session.as_ref().is_some_and(|s| !matches!(crate::sys::wait(s.process.handle(), 0), Ok(false))) {
-            self.error = Some("Gamepad helper disconnected. Apply the configuration to retry.".into());
-            self.session = None;
+            Err(TryRecvError::Disconnected) => {
+                self.pending = None;
+                self.error = Some("Gamepad startup interrupted. Retry to start it.".into());
+            }
+            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -187,7 +195,7 @@ impl Runtime {
         let state = self.config.output(depth);
         if let Some(s) = &mut self.session {
             if state == s.previous { return; }
-            match s.writer.submit(&state) {
+            match s.pad.submit(&state) {
                 Ok(()) => s.previous = state,
                 Err(e) => {
                     self.error = Some(e.to_string());
@@ -200,7 +208,7 @@ impl Runtime {
     pub fn neutral(&mut self) {
         self.depth = [0; 256];
         if let Some(s) = &mut self.session {
-            match s.writer.submit(&State::default()) {
+            match s.pad.submit(&State::default()) {
                 Ok(()) => s.previous = State::default(),
                 Err(e) => {
                     self.error = Some(e.to_string());
@@ -226,21 +234,25 @@ impl Runtime {
     }
 }
 
-pub fn helper(args: &[String]) -> Result<(), String> {
-    process::helper(args).map_err(|e| e.to_string())
-}
-
-pub fn driver_helper(args: &[String], uninstall: bool) -> Result<(), String> {
-    process::driver_helper(args, uninstall)
+pub fn driver_helper(action: &str, args: &[String]) -> Result<(), String> {
+    process::driver_helper(action, args)
 }
 
 #[cfg(test)]
 mod editor_tests {
     use super::*;
 
+    fn missing() -> io::Result<Gamepad> {
+        Err(io::Error::new(io::ErrorKind::NotFound, "hidshim is not installed"))
+    }
+
+    fn offline() -> Runtime {
+        Runtime { open: missing, ..Runtime::new() }
+    }
+
     #[test]
     fn pending_start_survives_a_temporary_input_block_and_reports_failure() {
-        let mut runtime = Runtime::new();
+        let mut runtime = offline();
         let (tx, rx) = std::sync::mpsc::channel();
         runtime.pending = Some(rx);
         let config = Config { enabled: true, ..Default::default() };
@@ -299,7 +311,7 @@ mod editor_tests {
 
     #[test]
     fn disabled_capture_and_profile_changes_reset_input_without_launching() {
-        let mut runtime = Runtime::new();
+        let mut runtime = offline();
         let mut depth = [0; 256];
         depth[18] = 201;
         runtime.feed(&depth);
@@ -309,6 +321,7 @@ mod editor_tests {
         assert_eq!(runtime.input().depth, vec![0; 256]);
         runtime.configure(2, Config { enabled: true, bindings: Default::default(), ..Default::default() }, false);
         assert!(runtime.input().error.is_some());
+        assert!(runtime.pending.is_none(), "only a request may ask for elevation");
         runtime.configure(2, Config::default(), false);
         assert!(runtime.input().error.is_none());
     }
