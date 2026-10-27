@@ -182,6 +182,8 @@ export interface GamepadDriverStatus {
   version: string | null;
   /** HIDMaestro, which earlier versions used, is still installed. */
   legacy: boolean;
+  /** hidshim brings its pads back on boot; null when the installed one cannot. */
+  boot: boolean | null;
 }
 
 export interface AppSettings {

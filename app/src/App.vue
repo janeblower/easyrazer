@@ -454,6 +454,22 @@ async function changeGamepadDriver(operation: "install" | "uninstall", replace =
   }
 }
 
+const gamepadBootChanging = ref(false);
+
+async function setGamepadBoot(on: boolean) {
+  if (gamepadBootChanging.value || gamepadDriverOperation.value) return;
+  gamepadBootChanging.value = true;
+  gamepadInstallError.value = null;
+  try {
+    await invoke("set_gamepad_driver_boot", { on });
+  } catch (error) {
+    gamepadInstallError.value = String(error);
+  } finally {
+    await checkGamepadDriver();
+    gamepadBootChanging.value = false;
+  }
+}
+
 const replacingLegacy = ref(false);
 
 function installGamepadDriver() {
@@ -1307,8 +1323,10 @@ onUnmounted(() => {
           :driver-status="gamepadDriver"
           :driver-operation="gamepadDriverOperation"
           :driver-error="gamepadInstallError"
+          :boot-changing="gamepadBootChanging"
           @install="installGamepadDriver"
           @uninstall="changeGamepadDriver('uninstall')"
+          @boot="setGamepadBoot"
         />
         <ModalDialog v-if="replacingLegacy" :title="$t('gamepad.legacyTitle')" @cancel="replacingLegacy = false">
           <p>{{ $t("gamepad.legacyText") }}</p>

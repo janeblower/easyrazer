@@ -12,8 +12,9 @@ const props = defineProps<{
   driverStatus: GamepadDriverStatus | null;
   driverOperation: "install" | "uninstall" | null;
   driverError: string | null;
+  bootChanging?: boolean;
 }>();
-const emit = defineEmits<{ install: []; uninstall: [] }>();
+const emit = defineEmits<{ install: []; uninstall: []; boot: [on: boolean] }>();
 const removingDriver = ref(false);
 const { t } = useI18n();
 // Installed, but older than the app needs.
@@ -152,6 +153,18 @@ onUnmounted(() => {
         {{ $t(driverStatus?.installed ? "gamepad.uninstall" : "gamepad.install") }}
       </button>
     </div>
+    <label v-if="driverStatus?.boot != null" class="row switch">
+      <span class="flex-1"
+        >{{ $t("settings.driverBoot") }}<span class="desc">{{ $t("settings.hints.driverBoot") }}</span></span
+      >
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="driverStatus.boot"
+        :disabled="bootChanging || !!driverOperation"
+        @change="emit('boot', checked($event))"
+      />
+    </label>
     <p v-if="driverError" class="text-error m-0" role="alert">{{ driverError }}</p>
 
     <div v-if="s" class="danger">

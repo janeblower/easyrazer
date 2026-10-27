@@ -109,6 +109,7 @@ async function mockBackend() {
   let mockDriver = true;
   // ?driver=missing or ?driver=outdated starts without a usable driver, ?driver=legacy without one but with HIDMaestro.
   let mockGamepadDriver = new URLSearchParams(location.search).get("driver") ?? "ready";
+  let mockGamepadBoot = false;
   let seq = 0;
   const devLog: unknown[] = [];
   const entry = (cmd: string, args: number[], reply: number[] = [], live = true) => {
@@ -141,7 +142,12 @@ async function mockBackend() {
       ready: mockGamepadDriver === "ready",
       version: { ready: "0.1.0", outdated: "0.0.9" }[mockGamepadDriver] ?? null,
       legacy: mockGamepadDriver === "legacy",
+      boot: mockGamepadDriver === "ready" ? mockGamepadBoot : null,
     }),
+    set_gamepad_driver_boot: async ({ on }) => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      mockGamepadBoot = Boolean(on);
+    },
     install_gamepad_driver: async () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       mockGamepadDriver = "ready";

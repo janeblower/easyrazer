@@ -600,6 +600,11 @@ pub async fn install_gamepad_driver(replace: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn set_gamepad_driver_boot(on: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::gamepad::drivers::set_boot(on)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn uninstall_gamepad_driver() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(crate::gamepad::drivers::uninstall).await.map_err(|e| e.to_string())?
 }
