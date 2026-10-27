@@ -6,6 +6,7 @@ mod input;
 mod ipc;
 mod notify;
 mod shell;
+mod web;
 mod wheel;
 mod window;
 
@@ -15,6 +16,7 @@ pub use input::*;
 pub use ipc::{Channel, ControlMessage};
 pub use notify::*;
 pub use shell::*;
+pub use web::*;
 pub use wheel::*;
 pub use window::*;
 

@@ -8,9 +8,9 @@ once; custom assignments and later clearing of assignments are preserved.
 
 The editor, including the controller preview, is inactive in hardware mode
 and until the hidshim driver is installed. Click **Install hidshim** in the tab
-and approve Windows' administrator prompt. EasyRazer downloads the pinned
-[hidshim](https://github.com/janeblower/hidshim) **0.1.0** release, verifies its
-SHA-256 and runs its installer. hidshim copies itself to `Program Files\hidshim`,
+and approve Windows' administrator prompt. EasyRazer downloads the latest
+[hidshim](https://github.com/janeblower/hidshim) release, checks it against the
+SHA-256 sums published with that release and runs its installer. hidshim copies itself to `Program Files\hidshim`,
 appears among installed apps and can be uninstalled there or in EasyRazer's
 Settings. It signs its user-mode driver on the machine with a certificate whose
 key exists only in memory during signing and trusts that certificate in Windows'

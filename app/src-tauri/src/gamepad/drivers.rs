@@ -11,12 +11,14 @@ static CHANGING: AtomicBool = AtomicBool::new(false);
 
 type Version = [u32; 3];
 
-/// The hidshim release install.ps1 downloads; later releases serve its protocol as well.
+/// The oldest hidshim whose protocol the app speaks.
 const REQUIRED: Version = [0, 1, 0];
 /// The first hidshim with a boot task that brings its pads back after a reboot.
 const BOOT_TASK: Version = [0, 2, 0];
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
+const DOWNLOAD_LIMIT: usize = 16 << 20;
 
 #[derive(serde::Serialize)]
 pub struct Status {
@@ -166,15 +168,77 @@ pub(super) fn restore() -> Receiver<Result<hidshim::Gamepad, String>> {
 }
 
 /// Runs elevated: the installed program when it is new enough, which needs no network,
-/// otherwise the pinned release.
+/// otherwise the latest release.
 pub(super) fn deploy(replace: bool) -> Result<(), String> {
     if replace {
         remove_legacy()?;
     }
     match program() {
         Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, &install_args(boot_task(&exe, Some(version)))),
-        _ => run(include_str!("install.ps1")).map_err(|e| format!("hidshim installation failed: {e}")),
+        _ => install_latest(),
     }
+}
+
+/// Installs without the boot task; the user turns it on in the settings.
+fn install_latest() -> Result<(), String> {
+    let exe = download_latest()?;
+    let stage = Stage::create()?;
+    let path = stage.0.join("hidshim.exe");
+    std::fs::write(&path, exe).map_err(|e| format!("hidshim download: {e}"))?;
+    // hidshim copies itself to Program Files and lists itself among installed apps.
+    run_program(&path, &["install", "--no-autostart"])
+}
+
+/// The latest hidshim.exe, checked against its release's checksums.
+fn download_latest() -> Result<Vec<u8>, String> {
+    let download = |name: &str| {
+        crate::sys::download("github.com", &format!("{RELEASES}{name}"), DOWNLOAD_LIMIT)
+            .map_err(|e| format!("hidshim download: {e}"))
+    };
+    let exe = download("hidshim.exe")?;
+    let sums = String::from_utf8_lossy(&download("SHA256SUMS")?).into_owned();
+    let expected = checksum(&sums, "hidshim.exe").ok_or("hidshim release lists no checksum")?;
+    let actual: String = crate::sys::sha256(&exe).map_err(|e| e.to_string())?.iter().map(|b| format!("{b:02x}")).collect();
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err("hidshim release checksum mismatch".into());
+    }
+    Ok(exe)
+}
+
+/// The checksum a `sha256sum` listing gives the file.
+fn checksum<'a>(sums: &'a str, file: &str) -> Option<&'a str> {
+    sums.lines().find_map(|line| {
+        let (hash, name) = line.trim().split_once(char::is_whitespace)?;
+        (name.trim_start().trim_start_matches('*') == file && hash.len() == 64).then_some(hash)
+    })
+}
+
+/// A fresh directory only administrators can write to, so nobody swaps the checked program
+/// before it runs elevated.
+struct Stage(PathBuf);
+
+impl Stage {
+    fn create() -> Result<Self, String> {
+        let mut token = [0u8; 16];
+        getrandom::fill(&mut token).map_err(|e| e.to_string())?;
+        let name: String = token.iter().map(|b| format!("{b:02x}")).collect();
+        let path = program_files()?.join(format!("EasyRazer.DriverInstall.{name}"));
+        std::fs::create_dir(&path).map_err(|e| format!("hidshim download: {e}"))?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for Stage {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
+/// From the registry, not %ProgramFiles%: the elevated helper inherits the user's environment.
+fn program_files() -> Result<PathBuf, String> {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+    let key = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(r"SOFTWARE\Microsoft\Windows\CurrentVersion", KEY_READ | KEY_WOW64_64KEY)
+        .map_err(|e| e.to_string())?;
+    key.get_value::<String, _>("ProgramFilesDir").map(PathBuf::from).map_err(|e| format!("Program Files: {e}"))
 }
 
 /// An update keeps the boot task as the user set it; a fresh install comes without one.
@@ -240,7 +304,7 @@ fn run(script: &str) -> Result<(), String> {
     let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?;
     let output = Command::new(PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        // PowerShell 7's module path hides Windows PowerShell's own modules, Get-FileHash among them.
+        // PowerShell 7's module path hides Windows PowerShell's own modules.
         .env_remove("PSModulePath")
         .creation_flags(CREATE_NO_WINDOW)
         .output().map_err(|e| e.to_string())?;
@@ -332,25 +396,32 @@ mod tests {
     }
 
     #[test]
-    fn installer_downloads_the_required_release() {
-        let [major, minor, patch] = REQUIRED;
-        assert!(include_str!("install.ps1").contains(&format!("/releases/download/{major}.{minor}.{patch}/hidshim.exe")));
+    #[ignore = "downloads the latest hidshim release"]
+    fn latest_release_matches_its_checksum() {
+        let exe = download_latest().unwrap();
+        assert!(exe.starts_with(b"MZ"));
     }
 
     #[test]
-    fn installer_rejects_an_unverified_download_before_running_it() {
-        let dir = std::env::temp_dir().join(format!("easyrazer-install-check-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let base = "$base = [Environment]::GetFolderPath('ProgramFiles')";
-        assert!(include_str!("install.ps1").contains(base));
-        let script = format!(
-            "function Invoke-WebRequest {{ param([switch]$UseBasicParsing, [int]$TimeoutSec, [string]$Uri, [string]$OutFile) [IO.File]::WriteAllText($OutFile, 'bad download') }}\n{}",
-            include_str!("install.ps1").replace(base, "$base = $env:EASYRAZER_INSTALL_TEST"),
-        );
-        let script = format!("$env:EASYRAZER_INSTALL_TEST = '{}'\n{script}", dir.to_string_lossy().replace('\'', "''"));
-        let error = run(&script).unwrap_err();
-        assert!(error.contains("checksum mismatch"), "{error}");
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
-        std::fs::remove_dir(dir).unwrap();
+    #[ignore = "elevated: creates a directory in Program Files"]
+    fn stage_is_removed_after_use() {
+        let stage = Stage::create().unwrap();
+        let path = stage.0.clone();
+        std::fs::write(path.join("hidshim.exe"), b"MZ").unwrap();
+        assert!(path.starts_with(program_files().unwrap()));
+        drop(stage);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn checksums_are_found_by_file_name() {
+        let hash = "4feaab47a7f75c7fb50c66556dc62ebefdcca8cd4d7221cc81c93293b2d45137";
+        let sums = format!("{}  hidshim-drivers.zip
+{hash}  hidshim.exe
+", "5".repeat(64));
+        assert_eq!(checksum(&sums, "hidshim.exe"), Some(hash));
+        assert_eq!(checksum(&format!("{hash} *hidshim.exe"), "hidshim.exe"), Some(hash));
+        assert_eq!(checksum(&sums, "hidshim"), None);
+        assert_eq!(checksum("abc  hidshim.exe", "hidshim.exe"), None);
     }
 }
