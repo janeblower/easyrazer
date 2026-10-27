@@ -17,7 +17,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
     VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_PAUSE, VK_VOLUME_DOWN,
-    VK_LWIN, VK_RWIN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{WHEEL_DELTA, XBUTTON1, XBUTTON2};
 
@@ -221,15 +221,26 @@ fn emit(out: &[Output], sink: &Sink) {
     // One call per report: a call costs about 0.5 ms however many events it carries.
     send(&inputs);
     // Windows ignores an injected Win+L; the L still goes out, or the Win release opens Start.
-    let win = || [VK_LWIN, VK_RWIN].into_iter().any(sys::key_down);
-    if out.iter().any(|o| matches!(o, Output::Key { key: L, down: true })) && win() {
-        sys::lock_workstation();
+    if out.iter().any(|o| matches!(o, Output::Key { key: L, down: true })) {
+        let win: Vec<u16> = [VK_LWIN, VK_RWIN].into_iter().filter(|&vk| sys::key_down(vk)).collect();
+        let modifiers = [VK_SHIFT, VK_CONTROL, VK_MENU].into_iter().any(sys::key_down);
+        if locks(!win.is_empty(), modifiers) {
+            // Injected keys never reach the lock screen, so a later release would leave Win held there.
+            let up = |vk| keyboard(KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 });
+            send(&win.into_iter().map(up).collect::<Vec<_>>());
+            sys::lock_workstation();
+        }
     }
     for &o in out {
         if !matches!(o, Output::Key { .. } | Output::Mouse { .. } | Output::Media(_)) {
             sink(o);
         }
     }
+}
+
+/// Only a bare Win+L locks; with Shift, Ctrl or Alt it is a shortcut other apps may own.
+fn locks(win: bool, modifiers: bool) -> bool {
+    win && !modifiers
 }
 
 fn send(inputs: &[INPUT]) {
@@ -394,6 +405,13 @@ mod tests {
     #[test]
     fn lock_key_is_l() {
         assert_eq!(razer_core::keymap::by_name("L"), Some(L));
+    }
+
+    #[test]
+    fn only_bare_win_l_locks() {
+        assert!(locks(true, false));
+        assert!(!locks(true, true));
+        assert!(!locks(false, false));
     }
 
     #[test]
