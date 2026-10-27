@@ -33,6 +33,8 @@ pub fn driver_helper(action: &str, args: &[String]) -> Result<(), String> {
         "--gamepad-install" => super::drivers::deploy(false),
         "--gamepad-replace" => super::drivers::deploy(true),
         "--gamepad-uninstall" => super::drivers::remove(),
+        "--gamepad-boot-on" => super::drivers::boot(true),
+        "--gamepad-boot-off" => super::drivers::boot(false),
         _ => Err(format!("unknown gamepad action {action}")),
     };
     channel.send(&ControlMessage::finished(result.as_ref().err().map(String::as_str)), 30_000).map_err(|e| e.to_string())?;

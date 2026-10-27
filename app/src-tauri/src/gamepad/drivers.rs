@@ -13,6 +13,8 @@ type Version = [u32; 3];
 
 /// The hidshim release install.ps1 downloads; later releases serve its protocol as well.
 const REQUIRED: Version = [0, 1, 0];
+/// The first hidshim with a boot task that brings its pads back after a reboot.
+const BOOT_TASK: Version = [0, 2, 0];
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -24,6 +26,8 @@ pub struct Status {
     pub version: Option<String>,
     /// HIDMaestro driver packages are still installed.
     pub legacy: bool,
+    /// Whether hidshim brings its pads back on boot; none when the installed one cannot.
+    pub boot: Option<bool>,
 }
 
 fn parse_version(text: &str) -> Option<Version> {
@@ -83,15 +87,33 @@ fn inf_directory() -> Result<PathBuf, String> {
     Ok(PathBuf::from(root).join("INF"))
 }
 
+/// The boot task as the installed program reports it, which needs no elevation.
+fn boot_task(exe: &Path, version: Option<Version>) -> Option<bool> {
+    if version.is_none_or(|v| v < BOOT_TASK) { return None; }
+    let output = Command::new(exe).arg("autostart").creation_flags(CREATE_NO_WINDOW).output().ok()?;
+    if !output.status.success() { return None; }
+    parse_boot(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_boot(text: &str) -> Option<bool> {
+    match text.trim() {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
+}
+
 pub fn status() -> Result<Status, String> {
     let installed = hidshim::status().map_err(|e| e.to_string())? != hidshim::Status::NotInstalled;
-    let version = program().and_then(|(_, v)| v);
+    let program = program();
+    let version = program.as_ref().and_then(|(_, v)| *v);
     Ok(Status {
         installed,
         // A hand-installed driver has no program to compare; the pad checks its protocol on open.
         ready: installed && version.is_none_or(|v| v >= REQUIRED),
         version: version.map(|v| v.map(|part| part.to_string()).join(".")),
         legacy: !legacy_packages(&inf_directory()?).map_err(|e| e.to_string())?.is_empty(),
+        boot: program.filter(|_| installed).and_then(|(exe, v)| boot_task(&exe, v)),
     })
 }
 
@@ -119,6 +141,12 @@ pub fn install(replace: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Turns hidshim's boot task on or off.
+pub fn set_boot(on: bool) -> Result<(), String> {
+    let _change = Change::start()?;
+    super::process::driver_action(if on { "--gamepad-boot-on" } else { "--gamepad-boot-off" })
+}
+
 pub fn uninstall() -> Result<(), String> {
     let _change = Change::start()?;
     super::process::driver_action("--gamepad-uninstall")?;
@@ -144,24 +172,42 @@ pub(super) fn deploy(replace: bool) -> Result<(), String> {
         remove_legacy()?;
     }
     match program() {
-        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, "install"),
+        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, &install_args(boot_task(&exe, Some(version)))),
         _ => run(include_str!("install.ps1")).map_err(|e| format!("hidshim installation failed: {e}")),
+    }
+}
+
+/// An update keeps the boot task as the user set it; a fresh install comes without one.
+fn install_args(boot: Option<bool>) -> Vec<&'static str> {
+    match boot {
+        Some(true) => vec!["install"],
+        Some(false) => vec!["install", "--no-autostart"],
+        // A hidshim without the boot task knows no such option.
+        None => vec!["install"],
+    }
+}
+
+/// Runs elevated.
+pub(super) fn boot(on: bool) -> Result<(), String> {
+    match program() {
+        Some((exe, Some(version))) if version >= BOOT_TASK => run_program(&exe, &["autostart", if on { "on" } else { "off" }]),
+        _ => Err("Update hidshim to start its driver with Windows".into()),
     }
 }
 
 /// Runs elevated.
 pub(super) fn remove() -> Result<(), String> {
     match program() {
-        Some((exe, _)) => run_program(&exe, "uninstall"),
+        Some((exe, _)) => run_program(&exe, &["uninstall"]),
         None => Err("hidshim was installed by hand; remove it the way it was installed".into()),
     }
 }
 
-fn run_program(exe: &Path, command: &str) -> Result<(), String> {
-    let output = Command::new(exe).arg(command).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string())?;
+fn run_program(exe: &Path, args: &[&str]) -> Result<(), String> {
+    let output = Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("hidshim {command}: {}", error.trim().trim_start_matches("error: ")));
+        return Err(format!("hidshim {}: {}", args[0], error.trim().trim_start_matches("error: ")));
     }
     Ok(())
 }
@@ -265,6 +311,24 @@ mod tests {
         for bad in ["", "0.1", "0.1.0.0", "0.x.0"] {
             assert_eq!(parse_version(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn boot_task_state_is_read_from_the_program_output() {
+        assert_eq!(parse_boot("on
+"), Some(true));
+        assert_eq!(parse_boot("off
+"), Some(false));
+        assert_eq!(parse_boot("usage: hidshim <command>"), None);
+        assert_eq!(boot_task(Path::new("hidshim.exe"), Some([0, 1, 0])), None);
+        assert_eq!(boot_task(Path::new("hidshim.exe"), None), None);
+    }
+
+    #[test]
+    fn updates_keep_the_boot_task_and_fresh_installs_leave_it_out() {
+        assert_eq!(install_args(Some(true)), ["install"]);
+        assert_eq!(install_args(Some(false)), ["install", "--no-autostart"]);
+        assert_eq!(install_args(None), ["install"]);
     }
 
     #[test]

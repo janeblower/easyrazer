@@ -35,7 +35,7 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-uninstall")) {
+    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-uninstall" | "--gamepad-boot-on" | "--gamepad-boot-off")) {
         if let Err(e) = gamepad::driver_helper(&args[0], &args[1..]) {
             eprintln!("hidshim: {e}");
             std::process::exit(1);
@@ -170,6 +170,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::gamepad_config, commands::set_gamepad_config, commands::gamepad_input,
             commands::gamepad_driver, commands::install_gamepad_driver, commands::uninstall_gamepad_driver,
+            commands::set_gamepad_driver_boot,
             commands::status,
             commands::devices,
             commands::rename_device,

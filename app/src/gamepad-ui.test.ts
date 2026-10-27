@@ -6,6 +6,28 @@ import { createI18n } from "vue-i18n";
 import { defaultGamepad } from "./gamepad";
 import en from "./locales/en.json";
 
+test("settings offers the boot switch only when hidshim has a boot task", async () => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+  try {
+    const { default: SettingsTab } = (await server.ssrLoadModule("/src/components/SettingsTab.vue")) as { default: Component };
+    const render = async (boot: boolean | null, bootChanging = false) => {
+      const driverStatus = { installed: true, ready: true, version: "0.2.0", legacy: false, boot };
+      const app = createSSRApp(SettingsTab, { driverStatus, driverOperation: null, driverError: null, bootChanging });
+      app.use(createI18n({ legacy: false, locale: "en", messages: { en } }));
+      return renderToString(app);
+    };
+    const unsupported = await render(null);
+    expect(unsupported.includes(en.settings.driverBoot)).toBe(false);
+    const off = await render(false);
+    expect(off.includes(en.settings.driverBoot)).toBe(true);
+    expect(/role="switch"(?![^>]*checked)[^>]*>/.test(off)).toBe(true);
+    expect(/role="switch"[^>]*checked/.test(await render(true))).toBe(true);
+    expect(/role="switch"[^>]*disabled/.test(await render(true, true))).toBe(true);
+  } finally {
+    await server.close();
+  }
+});
+
 test("settings offers install or uninstall and prevents duplicate driver operations", async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
   try {

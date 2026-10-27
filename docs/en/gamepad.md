@@ -24,7 +24,9 @@ switch takes effect at once, without Apply. Gamepad output starts when both
 driver mode and the switch are on. EasyRazer drives the pad itself, without
 administrator rights. Windows asks for them only when the pad has to be brought
 back, once after each restart of Windows, and only when you turn the gamepad on
-with the switch or Fn+G; starting EasyRazer never asks. If the pad cannot start,
+with the switch or Fn+G; starting EasyRazer never asks. With **Start the driver
+with Windows** on in the settings, hidshim brings the pad back at boot and that
+prompt goes away. If the pad cannot start,
 the editor shows why with a **Retry** button, and the keyboard engine keeps
 running.
 
