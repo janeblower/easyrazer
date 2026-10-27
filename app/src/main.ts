@@ -107,8 +107,8 @@ async function mockBackend() {
   const devSettings = { dev_mode: false, dev_panel: null as unknown, dev_window: null as unknown };
   const gamepads = new Map<string, GamepadConfig>();
   let mockDriver = true;
-  // ?hidmaestro=missing or ?hidmaestro=outdated starts without a usable driver.
-  let mockGamepadDriver = new URLSearchParams(location.search).get("hidmaestro") ?? "ready";
+  // ?driver=missing or ?driver=outdated starts without a usable driver, ?driver=legacy without one but with HIDMaestro.
+  let mockGamepadDriver = new URLSearchParams(location.search).get("driver") ?? "ready";
   let seq = 0;
   const devLog: unknown[] = [];
   const entry = (cmd: string, args: number[], reply: number[] = [], live = true) => {
@@ -137,9 +137,10 @@ async function mockBackend() {
   const info = (cmd: string, help: string, size: number | null, args: [string, string][] = []) => ({ cmd, size, help, args, example: "" });
   const devReplies: Record<string, (a: Record<string, unknown>) => unknown> = {
     gamepad_driver: () => ({
-      installed: mockGamepadDriver !== "missing",
+      installed: mockGamepadDriver === "ready" || mockGamepadDriver === "outdated",
       ready: mockGamepadDriver === "ready",
-      version: mockGamepadDriver === "missing" ? null : mockGamepadDriver === "outdated" ? "1.12.0.2302" : "2.0.0.2201",
+      version: { ready: "0.1.0", outdated: "0.0.9" }[mockGamepadDriver] ?? null,
+      legacy: mockGamepadDriver === "legacy",
     }),
     install_gamepad_driver: async () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));

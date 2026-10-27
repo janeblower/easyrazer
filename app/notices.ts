@@ -114,7 +114,7 @@ function crates(about: About): { groups: Map<string, Group>; notices: Notice[] }
     });
     if (users.length > 0) groups.set(id, { id, name: copies[0].name, users, text: common(copies.map((l) => l.text)) });
   }
-  // Apache-2.0 NOTICE files, and notices of works a crate derives from, such as HIDMaestro's.
+  // Apache-2.0 NOTICE files, and notices of works a crate derives from.
   const notices = about.crates
     .filter((c) => thirdParty(c.package))
     .flatMap((c) =>

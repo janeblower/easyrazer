@@ -853,7 +853,7 @@ version = "0.0.0"
 dependencies = [
  "getrandom 0.3.4",
  "hidapi",
- "hidmaestro-client",
+ "hidshim",
  "open",
  "razer-core",
  "serde",
@@ -1464,9 +1464,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "hidmaestro-client"
+name = "hidshim"
 version = "0.1.0"
-source = "git+https://github.com/janeblower/hidmaestro-client-rust?rev=707d5bc562c299c2e3378be3bde3375ecf5355cc#707d5bc562c299c2e3378be3bde3375ecf5355cc"
+source = "git+https://github.com/janeblower/hidshim?rev=7431aca1c3a1cbdff9fa8158225fe41810860bf2#7431aca1c3a1cbdff9fa8158225fe41810860bf2"
 dependencies = [
  "windows-sys 0.61.2",
 ]

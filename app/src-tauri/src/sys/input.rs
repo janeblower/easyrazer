@@ -36,12 +36,3 @@ pub fn keyboard_repeat(mut delay: u32, mut speed: u32) -> (u32, u32) {
     unsafe { SystemParametersInfoW(SPI_GETKEYBOARDSPEED, 0, (&raw mut speed).cast(), 0) };
     (delay, speed)
 }
-
-/// The buttons of a connected XInput slot.
-#[cfg(test)]
-pub fn xinput_buttons(slot: u32) -> Option<u16> {
-    use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
-    let mut state = XINPUT_STATE::default();
-    // SAFETY: `state` is writable.
-    (unsafe { XInputGetState(slot, &mut state) } == 0).then_some(state.Gamepad.wButtons)
-}

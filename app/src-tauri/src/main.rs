@@ -35,16 +35,9 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-uninstall")) {
-        if let Err(e) = gamepad::driver_helper(&args[1..], args[0] == "--gamepad-uninstall") {
-            eprintln!("HIDMaestro: {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if args.first().is_some_and(|a| a == "--gamepad-helper") {
-        if let Err(e) = gamepad::helper(&args[1..]) {
-            eprintln!("gamepad helper: {e}");
+    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-uninstall")) {
+        if let Err(e) = gamepad::driver_helper(&args[0], &args[1..]) {
+            eprintln!("hidshim: {e}");
             std::process::exit(1);
         }
         return;

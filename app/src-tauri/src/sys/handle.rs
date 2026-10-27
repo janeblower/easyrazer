@@ -1,4 +1,4 @@
-//! Kernel handles: processes, events, mutexes, waits and handle transfer.
+//! Kernel handles: processes, mutexes and waits.
 
 use super::wide;
 use std::io;
@@ -6,7 +6,7 @@ use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHand
 use std::ptr::null_mut;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::DiUninstallDriverW;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, DUPLICATE_CLOSE_SOURCE, DuplicateHandle, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
     WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
@@ -50,12 +50,6 @@ pub fn exit_code(process: BorrowedHandle<'_>) -> io::Result<u32> {
     Ok(code)
 }
 
-#[cfg(test)]
-pub fn process_id(process: BorrowedHandle<'_>) -> u32 {
-    // SAFETY: `process` is borrowed live for the call.
-    unsafe { GetProcessId(process.as_raw_handle()) }
-}
-
 /// Waits up to `ms` for the handle; false on timeout.
 pub fn wait(handle: BorrowedHandle<'_>, ms: u32) -> io::Result<bool> {
     // SAFETY: `handle` is borrowed live for the whole wait.
@@ -75,69 +69,6 @@ pub fn wait_any(handles: &[BorrowedHandle<'_>], ms: u32) -> io::Result<Option<us
         rc if (rc as usize) < WAIT_OBJECT_0 as usize + raw.len() => Ok(Some((rc - WAIT_OBJECT_0) as usize)),
         _ => Err(io::Error::last_os_error()),
     }
-}
-
-/// A handle this process duplicated into another one, not yet handed over.
-#[derive(Clone, Copy)]
-pub struct Remote<'p> {
-    process: BorrowedHandle<'p>,
-    value: usize,
-}
-impl Remote<'_> {
-    /// The handle's value in the other process.
-    pub fn value(&self) -> usize {
-        self.value
-    }
-
-    /// Closes the handle in the other process; false if it was no longer open there.
-    pub fn close(self) -> bool {
-        let mut local = null_mut();
-        // SAFETY: no arguments.
-        let here = unsafe { GetCurrentProcess() };
-        // SAFETY: `value` names a handle in `process`, which is borrowed live; the source closes
-        // there, and the copy here is new and only this call owns it.
-        let ok = unsafe { DuplicateHandle(self.process.as_raw_handle(), self.value as HANDLE, here, &mut local, 0, 0, DUPLICATE_CLOSE_SOURCE) } != 0;
-        if ok {
-            drop(owned(local));
-        }
-        ok
-    }
-}
-
-/// Duplicates a handle into another process.
-pub fn duplicate_into<'p>(source: BorrowedHandle<'_>, process: BorrowedHandle<'p>, access: u32) -> io::Result<Remote<'p>> {
-    let mut target = null_mut();
-    // SAFETY: no arguments.
-    let here = unsafe { GetCurrentProcess() };
-    // SAFETY: `source` and `process` are borrowed live for the call; `target` is writable.
-    if unsafe { DuplicateHandle(here, source.as_raw_handle(), process.as_raw_handle(), &mut target, access, 0, 0) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(Remote { process, value: target as usize })
-}
-
-/// An unnamed auto-reset event.
-#[cfg(test)]
-pub fn event() -> io::Result<OwnedHandle> {
-    // SAFETY: null attributes and name ask for an unnamed event with default security.
-    owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) })
-}
-
-/// A pagefile-backed section, named or not.
-#[cfg(test)]
-pub fn create_mapping(name: Option<&str>, size: u32) -> io::Result<OwnedHandle> {
-    use windows_sys::Win32::System::Memory::{CreateFileMappingW, PAGE_READWRITE};
-    let name = name.map(wide);
-    let name = name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
-    // SAFETY: `name` is null or points into the NUL-terminated buffer above, alive for the call.
-    owned(unsafe { CreateFileMappingW(INVALID_HANDLE_VALUE, std::ptr::null(), PAGE_READWRITE, 0, size, name) })
-}
-
-#[cfg(test)]
-pub fn mapping_exists(name: &str) -> bool {
-    use windows_sys::Win32::System::Memory::{FILE_MAP_READ, OpenFileMappingW};
-    // SAFETY: the name is a NUL-terminated temporary alive for the call.
-    owned(unsafe { OpenFileMappingW(FILE_MAP_READ, 0, wide(name).as_ptr()) }).is_ok()
 }
 
 /// Creates or opens a named mutex without acquiring it; true when it already existed.

@@ -24,36 +24,24 @@ const TIMEOUT: u32 = 30_000;
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ControlMessage {
     Connected,
-    Startup([u64; 3]),
-    StartupError(String),
-    Attached,
-    Cancel,
-    Stop,
     Finished(Option<String>),
 }
 
 impl ControlMessage {
-    pub fn error(error: Option<&str>, startup: bool) -> Self {
-        let error = error.map(|s| {
+    pub fn finished(error: Option<&str>) -> Self {
+        Self::Finished(error.map(|s| {
             let mut end = s.len().min(512);
             while !s.is_char_boundary(end) {
                 end -= 1;
             }
             s[..end].to_owned()
-        });
-        if startup {
-            Self::StartupError(error.unwrap_or_default())
-        } else {
-            Self::Finished(error)
-        }
+        }))
     }
 }
 
 pub struct Channel {
     pub name: String,
     pipe: OwnedHandle,
-    handles: Option<[u64; 3]>,
-    taken: bool,
 }
 
 enum Operation<'a> {
@@ -103,12 +91,7 @@ impl Channel {
         });
         // SAFETY: the converter allocated this descriptor with LocalAlloc; creation copied it.
         unsafe { LocalFree(descriptor) };
-        Ok(Self {
-            name,
-            pipe: pipe?,
-            handles: None,
-            taken: false,
-        })
+        Ok(Self { name, pipe: pipe? })
     }
 
     pub fn open(name: &str, parent: u32) -> io::Result<Self> {
@@ -143,12 +126,7 @@ impl Channel {
         {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self {
-            name: name.into(),
-            pipe,
-            handles: None,
-            taken: false,
-        })
+        Ok(Self { name: name.into(), pipe })
     }
 
     pub fn connect(&mut self, process: BorrowedHandle<'_>) -> io::Result<()> {
@@ -279,46 +257,6 @@ impl Channel {
         serde_json::from_slice(&bytes[..length]).map_err(|_| invalid_message())
     }
 
-    pub fn wait_ready(&mut self, process: BorrowedHandle<'_>) -> io::Result<()> {
-        if self.handles.is_some() || self.taken {
-            return Err(invalid_message());
-        }
-        match self.receive(process, TIMEOUT)? {
-            ControlMessage::Startup(handles) => {
-                self.handles = Some(handles);
-                Ok(())
-            }
-            ControlMessage::StartupError(error) => Err(io::Error::other(error)),
-            _ => Err(invalid_message()),
-        }
-    }
-
-    /// Owns the helper's handles once; the caller acknowledges only after constructing its Writer.
-    ///
-    /// # Safety
-    /// Each value must be a fresh, exclusively delegated handle in this process. The peer must
-    /// never revoke it after publication unless this endpoint explicitly sends Cancel.
-    pub unsafe fn attach(&mut self) -> io::Result<[io::Result<OwnedHandle>; 3]> {
-        let handles = self.handles.take().ok_or_else(invalid_message)?;
-        self.taken = true;
-        Ok(handles.map(|h| {
-            usize::try_from(h)
-                .map_err(|_| invalid_message())
-                .and_then(|h| owned(h as _))
-        }))
-    }
-
-    pub fn stop(&mut self) -> io::Result<()> {
-        self.send(
-            &if self.taken {
-                ControlMessage::Stop
-            } else {
-                ControlMessage::Cancel
-            },
-            0,
-        )
-    }
-
     pub fn result(&mut self, process: BorrowedHandle<'_>) -> io::Result<()> {
         match self.receive(process, TIMEOUT)? {
             ControlMessage::Finished(None) => Ok(()),
@@ -354,45 +292,23 @@ mod tests {
     }
 
     #[test]
-    fn startup_errors_cross_the_control_channel() {
+    fn helper_errors_cross_the_control_channel() {
         let (mut server, mut peer, process) = pair();
-        peer.send(
-            &ControlMessage::StartupError("device setup failed".into()),
-            TIMEOUT,
-        )
-        .unwrap();
-        assert_eq!(
-            server
-                .wait_ready(process.as_handle())
-                .unwrap_err()
-                .to_string(),
-            "device setup failed"
-        );
-    }
-
-    #[test]
-    fn final_reply_does_not_replace_startup_handles() {
-        let (mut server, mut peer, process) = pair();
-        peer.send(&ControlMessage::Startup([123, 456, 789]), TIMEOUT)
-            .unwrap();
-        peer.send(
-            &ControlMessage::Finished(Some("cleanup failed".into())),
-            TIMEOUT,
-        )
-        .unwrap();
-        server.wait_ready(process.as_handle()).unwrap();
-        assert_eq!(server.handles, Some([123, 456, 789]));
+        peer.send(&ControlMessage::finished(Some("install failed")), TIMEOUT).unwrap();
         assert_eq!(
             server.result(process.as_handle()).unwrap_err().to_string(),
-            "cleanup failed"
+            "install failed"
         );
+        let (mut server, mut peer, process) = pair();
+        peer.send(&ControlMessage::finished(None), TIMEOUT).unwrap();
+        server.result(process.as_handle()).unwrap();
     }
 
     #[test]
     fn malformed_and_oversized_messages_are_rejected() {
         for bytes in [
             b"garbage".to_vec(),
-            b"{\"Startup\":[1,2]}".to_vec(),
+            b"{\"Finished\":[1,2]}".to_vec(),
             vec![b'x'; MAX_MESSAGE + 1],
         ] {
             let (mut server, mut peer, process) = pair();
@@ -415,10 +331,10 @@ mod tests {
             server.receive(process.as_handle(), 0).unwrap_err().kind(),
             io::ErrorKind::TimedOut
         );
-        peer.send(&ControlMessage::Attached, TIMEOUT).unwrap();
+        peer.send(&ControlMessage::Finished(None), TIMEOUT).unwrap();
         assert_eq!(
             server.receive(process.as_handle(), TIMEOUT).unwrap(),
-            ControlMessage::Attached
+            ControlMessage::Finished(None)
         );
     }
 
@@ -439,14 +355,14 @@ mod tests {
 
     #[test]
     fn error_text_preserves_utf8_boundaries() {
-        let message = ControlMessage::error(Some(&"я".repeat(300)), false);
+        let message = ControlMessage::finished(Some(&"я".repeat(300)));
         assert_eq!(message, ControlMessage::Finished(Some("я".repeat(256))));
     }
 
     #[test]
     fn escaped_error_text_fits_the_message_limit() {
         let (mut server, mut peer, process) = pair();
-        let message = ControlMessage::error(Some(&"\0".repeat(512)), false);
+        let message = ControlMessage::finished(Some(&"\0".repeat(512)));
         peer.send(&message, TIMEOUT).unwrap();
         assert_eq!(
             server.receive(process.as_handle(), TIMEOUT).unwrap(),
@@ -455,11 +371,11 @@ mod tests {
     }
 
     #[test]
-    fn wrong_message_cannot_start_a_session() {
+    fn wrong_message_is_not_a_result() {
         let (mut server, mut peer, process) = pair();
-        peer.send(&ControlMessage::Finished(None), TIMEOUT).unwrap();
+        peer.send(&ControlMessage::Connected, TIMEOUT).unwrap();
         assert_eq!(
-            server.wait_ready(process.as_handle()).unwrap_err().kind(),
+            server.result(process.as_handle()).unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
     }
@@ -484,14 +400,14 @@ mod tests {
             .transfer(Operation::Read(&mut [0; MAX_MESSAGE]), None, 0)
             .is_ok()
         {}
-        peer.send(&ControlMessage::Attached, TIMEOUT).unwrap();
+        peer.send(&ControlMessage::Finished(None), TIMEOUT).unwrap();
         let mut bytes = [0; MAX_MESSAGE];
         let count = server
             .transfer(Operation::Read(&mut bytes), None, TIMEOUT)
             .unwrap();
         assert_eq!(
             serde_json::from_slice::<ControlMessage>(&bytes[..count]).unwrap(),
-            ControlMessage::Attached
+            ControlMessage::Finished(None)
         );
     }
 

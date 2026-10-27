@@ -155,11 +155,8 @@ const rapidHere = computed(() => driver.value || fwRapid.value);
 // The firmware runs Rapid Trigger, so continuous is one switch for the profile, not per key.
 const fwHw = computed(() => fwRapid.value && !driver.value);
 const crt = computed(() => crtEdit.value ?? crtBase.value);
-const retryGamepad = computed(() => gamepadReady.value && gamepadBase.value.enabled && driver.value && !!gamepadInput.value.error);
 const canApply = computed(
-  () =>
-    (writable.value && (dirty.value > 0 || retryGamepad.value)) ||
-    (editable.value && gamepadReady.value && !!gamepadEdit.value && keyDirty.value === 0),
+  () => (writable.value && dirty.value > 0) || (editable.value && gamepadReady.value && !!gamepadEdit.value && keyDirty.value === 0),
 );
 // Rapid Trigger lives on the host: nothing of it goes to the flash.
 const canSave = computed(
@@ -424,7 +421,7 @@ function editGamepad(config: GamepadConfig) {
   gamepadEdit.value = sameGamepad(config, gamepadBase.value) ? null : config;
 }
 
-// Both packages are installed, but older than the client needs.
+// Installed, but older than the app needs.
 const driverOutdated = computed(() => (gamepadDriver.value?.ready === false ? gamepadDriver.value.version : null));
 
 async function checkGamepadDriver() {
@@ -443,18 +440,30 @@ watch([tab, section, visible], async () => {
   await checkGamepadDriver();
 });
 
-async function changeGamepadDriver(operation: "install" | "uninstall") {
+async function changeGamepadDriver(operation: "install" | "uninstall", replace = false) {
   if (gamepadDriverOperation.value) return;
   gamepadDriverOperation.value = operation;
   gamepadInstallError.value = null;
   try {
-    await invoke(operation === "install" ? "install_gamepad_driver" : "uninstall_gamepad_driver");
+    await (operation === "install" ? invoke("install_gamepad_driver", { replace }) : invoke("uninstall_gamepad_driver"));
   } catch (error) {
     gamepadInstallError.value = String(error);
   } finally {
     await checkGamepadDriver();
     gamepadDriverOperation.value = null;
   }
+}
+
+const replacingLegacy = ref(false);
+
+function installGamepadDriver() {
+  if (gamepadDriver.value?.legacy) replacingLegacy.value = true;
+  else void changeGamepadDriver("install");
+}
+
+function replaceLegacy(remove: boolean) {
+  replacingLegacy.value = false;
+  void changeGamepadDriver("install", remove);
 }
 
 async function loadGamepad(id: string, profile: number | null) {
@@ -475,6 +484,23 @@ async function storeGamepad(config = gamepadEdit.value) {
   if (!ours(id) || loadedProfile !== profile) return;
   gamepadBase.value = config;
   gamepadEdit.value = null;
+}
+
+// The switch takes effect at once and leaves other edits waiting for Apply. Turning the
+// gamepad on may ask for elevation to bring the pad back, as after a reboot.
+async function toggleGamepad(enabled: boolean) {
+  const id = keyboard.value;
+  const profile = loadedProfile;
+  if (!id || profile === null) return;
+  const config = { ...gamepadBase.value, enabled };
+  try {
+    await call("set_gamepad_config", { profile, config }, id);
+    if (!ours(id) || loadedProfile !== profile) return;
+    gamepadBase.value = config;
+    if (gamepadEdit.value) editGamepad({ ...gamepadEdit.value, enabled });
+  } catch (error) {
+    showError(error);
+  }
 }
 
 watch([keyboard, () => status.value?.profile], () => {
@@ -804,7 +830,7 @@ async function write(command: "apply" | "save", done: string) {
   busy.value = true;
   let failed = false;
   try {
-    if (command === "apply") await storeGamepad(gamepadEdit.value ?? (retryGamepad.value ? gamepadBase.value : null));
+    if (command === "apply") await storeGamepad();
     const changes = Object.entries(edits.value).map(([k, mm]) => [Number(k), mm]);
     const rapid = command === "apply" ? rapidEdits.value : null;
     const snapNext = command === "apply" ? snapEdit.value : null;
@@ -873,8 +899,8 @@ async function write(command: "apply" | "save", done: string) {
 
 // In HW mode the firmware plays only macros in its flash.
 async function apply() {
-  if (keyDirty.value === 0 && (gamepadEdit.value || retryGamepad.value)) {
-    const config = gamepadEdit.value ?? gamepadBase.value;
+  if (keyDirty.value === 0 && gamepadEdit.value) {
+    const config = gamepadEdit.value;
     busy.value = true;
     try {
       await storeGamepad(config);
@@ -1179,7 +1205,9 @@ onUnmounted(() => {
               :driver-operation="gamepadDriverOperation"
               :install-error="gamepadInstallError"
               @update="editGamepad"
-              @install="changeGamepadDriver('install')"
+              @toggle="toggleGamepad"
+              @retry="toggleGamepad(true)"
+              @install="installGamepadDriver"
               @driver="setMode(true)"
             />
           </template>
@@ -1279,9 +1307,16 @@ onUnmounted(() => {
           :driver-status="gamepadDriver"
           :driver-operation="gamepadDriverOperation"
           :driver-error="gamepadInstallError"
-          @install="changeGamepadDriver('install')"
+          @install="installGamepadDriver"
           @uninstall="changeGamepadDriver('uninstall')"
         />
+        <ModalDialog v-if="replacingLegacy" :title="$t('gamepad.legacyTitle')" @cancel="replacingLegacy = false">
+          <p>{{ $t("gamepad.legacyText") }}</p>
+          <template #actions>
+            <button @click="replaceLegacy(false)">{{ $t("gamepad.legacyKeep") }}</button>
+            <button class="primary" autofocus @click="replaceLegacy(true)">{{ $t("gamepad.legacyRemove") }}</button>
+          </template>
+        </ModalDialog>
         <ConfirmWrite v-if="asking" @yes="onConfirm" @no="asking = false" />
         <ConfirmWrite
           v-if="macrosToWrite.length > 0"

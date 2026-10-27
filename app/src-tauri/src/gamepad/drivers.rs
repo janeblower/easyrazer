@@ -1,36 +1,52 @@
+//! hidshim, the driver behind the gamepad, and HIDMaestro, the one earlier versions used.
+
 use std::io;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 
 static CHANGING: AtomicBool = AtomicBool::new(false);
 
-type Version = [u32; 4];
+type Version = [u32; 3];
 
-/// The driver the bundled client is built for; later drivers serve its protocol as well.
-const REQUIRED: Version = [2, 0, 0, 2201];
+/// The hidshim release install.ps1 downloads; later releases serve its protocol as well.
+const REQUIRED: Version = [0, 1, 0];
+const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(serde::Serialize)]
 pub struct Status {
     pub installed: bool,
     pub ready: bool,
-    /// The older of the two packages' versions, once both are installed.
+    /// The installed hidshim's version, when it was installed as a program.
     pub version: Option<String>,
+    /// HIDMaestro driver packages are still installed.
+    pub legacy: bool,
 }
 
-/// The version half of a `DriverVer = date,version` value.
-fn driver_version(value: &str) -> Option<Version> {
-    let (_, version) = value.split_once(',')?;
-    let mut parts = [0; 4];
-    for (part, text) in parts.iter_mut().zip(version.split('.')) {
-        *part = text.trim().parse().ok()?;
+fn parse_version(text: &str) -> Option<Version> {
+    let mut parts = [0; 3];
+    let mut split = text.trim().split('.');
+    for part in &mut parts {
+        *part = split.next()?.parse().ok()?;
     }
-    Some(parts)
+    split.next().is_none().then_some(parts)
 }
 
-/// The driver store keeps older packages next to newer ones, and Windows binds the newest,
-/// so each component counts at its highest version.
-fn packages(directory: &Path) -> io::Result<(Vec<PathBuf>, Option<Version>)> {
-    let (mut main, mut xusb) = (None, None);
+/// The installed program, from a key only administrators can write: the elevated helper runs it.
+fn program() -> Option<(PathBuf, Option<Version>)> {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+    let key = winreg::RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(UNINSTALL_KEY, KEY_READ | KEY_WOW64_64KEY).ok()?;
+    let location: String = key.get_value("InstallLocation").ok()?;
+    let exe = Path::new(&location).join("hidshim.exe");
+    let version = key.get_value::<String, _>("DisplayVersion").ok().and_then(|v| parse_version(&v));
+    exe.is_file().then_some((exe, version))
+}
+
+/// HIDMaestro's driver packages, by the catalogs its installer names.
+fn legacy_packages(directory: &Path) -> io::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(directory)? {
         let Ok(entry) = entry else { continue };
@@ -45,35 +61,21 @@ fn packages(directory: &Path) -> io::Result<(Vec<PathBuf>, Option<Version>)> {
         } else {
             String::from_utf8_lossy(&bytes).into_owned()
         };
-        let (mut section, mut component, mut found) = (false, None, None);
-        for line in content.lines() {
+        let mut section = false;
+        let ours = content.lines().any(|line| {
             let line = line.split(';').next().unwrap_or_default().trim();
             if line.starts_with('[') {
                 section = line.eq_ignore_ascii_case("[Version]");
-                continue;
+                return false;
             }
-            if !section { continue; }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            let Some((key, value)) = line.split_once('=').filter(|_| section) else { return false };
             let key = key.trim().to_ascii_lowercase();
-            let value = value.trim().trim_matches('"').to_ascii_lowercase();
-            if key == "catalogfile" || key.starts_with("catalogfile.") {
-                component = match value.as_str() {
-                    "hidmaestro.cat" => Some(false),
-                    "hidmaestro_xusb.cat" => Some(true),
-                    _ => component,
-                };
-            }
-            if key == "driverver" {
-                found = driver_version(&value);
-            }
-        }
-        if let Some(companion) = component {
-            paths.push(path);
-            let best = if companion { &mut xusb } else { &mut main };
-            *best = (*best).max(found);
-        }
+            (key == "catalogfile" || key.starts_with("catalogfile."))
+                && matches!(value.trim().trim_matches('"').to_ascii_lowercase().as_str(), "hidmaestro.cat" | "hidmaestro_xusb.cat")
+        });
+        if ours { paths.push(path); }
     }
-    Ok((paths, main.zip(xusb).map(|(main, xusb)| main.min(xusb))))
+    Ok(paths)
 }
 
 fn inf_directory() -> Result<PathBuf, String> {
@@ -82,23 +84,22 @@ fn inf_directory() -> Result<PathBuf, String> {
 }
 
 pub fn status() -> Result<Status, String> {
-    let (paths, version) = packages(&inf_directory()?).map_err(|e| e.to_string())?;
+    let installed = hidshim::status().map_err(|e| e.to_string())? != hidshim::Status::NotInstalled;
+    let version = program().and_then(|(_, v)| v);
     Ok(Status {
-        installed: !paths.is_empty(),
-        ready: version.is_some_and(|v| v >= REQUIRED),
+        installed,
+        // A hand-installed driver has no program to compare; the pad checks its protocol on open.
+        ready: installed && version.is_none_or(|v| v >= REQUIRED),
         version: version.map(|v| v.map(|part| part.to_string()).join(".")),
+        legacy: !legacy_packages(&inf_directory()?).map_err(|e| e.to_string())?.is_empty(),
     })
-}
-
-pub fn installed() -> Result<bool, String> {
-    Ok(status()?.ready)
 }
 
 struct Change;
 impl Change {
     fn start() -> Result<Self, String> {
         if CHANGING.swap(true, Ordering::SeqCst) {
-            return Err("HIDMaestro installation or removal is already running".into());
+            return Err("hidshim installation or removal is already running".into());
         }
         Ok(Self)
     }
@@ -107,36 +108,80 @@ impl Drop for Change {
     fn drop(&mut self) { CHANGING.store(false, Ordering::SeqCst); }
 }
 
-pub fn install() -> Result<(), String> {
+/// Installs or updates hidshim, or brings its pad back after a reboot. `replace` removes
+/// HIDMaestro first.
+pub fn install(replace: bool) -> Result<(), String> {
     let _change = Change::start()?;
-    super::process::install()?;
-    if !installed()? { return Err("HIDMaestro driver packages were not installed".into()); }
+    super::process::driver_action(if replace { "--gamepad-replace" } else { "--gamepad-install" })?;
+    if hidshim::status().map_err(|e| e.to_string())? != hidshim::Status::Ready {
+        return Err("hidshim was installed, but its pad is not running".into());
+    }
     Ok(())
 }
 
 pub fn uninstall() -> Result<(), String> {
     let _change = Change::start()?;
-    super::process::uninstall()?;
-    if status()?.installed { return Err("Some HIDMaestro driver packages are still installed".into()); }
+    super::process::driver_action("--gamepad-uninstall")?;
+    if status()?.installed { return Err("hidshim is still installed".into()); }
     Ok(())
 }
 
+/// Brings the pad back with one elevation prompt and opens it.
+pub(super) fn restore() -> Receiver<Result<hidshim::Gamepad, String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = install(false).and_then(|()| hidshim::Gamepad::open().map_err(|e| e.to_string()));
+        let _ = tx.send(result);
+        crate::wake::wake();
+    });
+    rx
+}
+
+/// Runs elevated: the installed program when it is new enough, which needs no network,
+/// otherwise the pinned release.
+pub(super) fn deploy(replace: bool) -> Result<(), String> {
+    if replace {
+        remove_legacy()?;
+    }
+    match program() {
+        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, "install"),
+        _ => run(include_str!("install.ps1")).map_err(|e| format!("hidshim installation failed: {e}")),
+    }
+}
+
+/// Runs elevated.
 pub(super) fn remove() -> Result<(), String> {
+    match program() {
+        Some((exe, _)) => run_program(&exe, "uninstall"),
+        None => Err("hidshim was installed by hand; remove it the way it was installed".into()),
+    }
+}
+
+fn run_program(exe: &Path, command: &str) -> Result<(), String> {
+    let output = Command::new(exe).arg(command).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("hidshim {command}: {}", error.trim().trim_start_matches("error: ")));
+    }
+    Ok(())
+}
+
+fn remove_legacy() -> Result<(), String> {
     let (owner, existed) = crate::sys::create_mutex("Global\\HIDMaestroRustController0").map_err(|e| e.to_string())?;
     if existed {
-        return Err("Disable the gamepad before uninstalling HIDMaestro".into());
+        return Err("Close programs that use HIDMaestro before removing it".into());
     }
     let mut reboot = false;
-    for path in packages(&inf_directory()?).map_err(|e| e.to_string())?.0 {
+    for path in legacy_packages(&inf_directory()?).map_err(|e| e.to_string())? {
         reboot |= crate::sys::uninstall_driver(&path).map_err(|e| format!("HIDMaestro removal: {e}"))?;
     }
     run(UNTRUST).map_err(|e| format!("HIDMaestro certificate removal: {e}"))?;
     drop(owner);
-    if reboot { return Err("Restart Windows to finish uninstalling HIDMaestro".into()); }
+    if reboot { return Err("Restart Windows to finish removing HIDMaestro, then install hidshim".into()); }
     Ok(())
 }
 
-/// The installer's signing certificate is trusted only while its drivers are installed.
+/// HIDMaestro's installer trusted its signing certificate only while its drivers were installed.
 const UNTRUST: &str = r#"$ErrorActionPreference = 'Stop'
 foreach ($name in @('My', 'Root', 'TrustedPublisher')) {
     Get-ChildItem "Cert:\LocalMachine\$name" | Where-Object Subject -eq 'CN=HIDMaestroTestCert' | ForEach-Object {
@@ -145,19 +190,13 @@ foreach ($name in @('My', 'Root', 'TrustedPublisher')) {
     }
 }"#;
 
-pub(super) fn deploy() -> Result<(), String> {
-    run(include_str!("install.ps1")).map_err(|e| format!("HIDMaestro installation failed: {e}"))
-}
-
 fn run(script: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
     let root = std::env::var_os("SystemRoot").ok_or("SystemRoot is missing")?;
-    let output = Command::new(std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
+    let output = Command::new(PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         // PowerShell 7's module path hides Windows PowerShell's own modules, Get-FileHash among them.
         .env_remove("PSModulePath")
-        .creation_flags(0x08000000)
+        .creation_flags(CREATE_NO_WINDOW)
         .output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
@@ -172,7 +211,7 @@ mod tests {
     #[test]
     fn installation_and_removal_cannot_overlap() {
         let change = Change::start().unwrap();
-        assert!(install().is_err());
+        assert!(install(false).is_err());
         assert!(uninstall().is_err());
         drop(change);
         assert!(Change::start().is_ok());
@@ -180,92 +219,69 @@ mod tests {
 
     #[test]
     #[ignore = "explicit elevated test reserves the controller lease without removing drivers"]
-    fn removal_refuses_an_active_controller() {
-        let before = packages(&inf_directory().unwrap()).unwrap().0;
+    fn legacy_removal_refuses_an_active_controller() {
+        let before = legacy_packages(&inf_directory().unwrap()).unwrap();
         let (owner, _) = crate::sys::create_mutex("Global\\HIDMaestroRustController0").unwrap();
-        let error = remove().unwrap_err();
-        assert!(error.contains("Disable the gamepad"), "{error}");
-        assert_eq!(packages(&inf_directory().unwrap()).unwrap().0, before);
+        let error = remove_legacy().unwrap_err();
+        assert!(error.contains("Close programs"), "{error}");
+        assert_eq!(legacy_packages(&inf_directory().unwrap()).unwrap(), before);
         drop(owner);
     }
 
     #[test]
-    fn references_in_comments_do_not_identify_driver_packages() {
+    fn references_in_comments_do_not_identify_legacy_packages() {
         let dir = std::env::temp_dir().join(format!("easyrazer-comment-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for (file, dll) in [("oem1.inf", "hidmaestro.dll"), ("oem2.inf", "hmxinput.dll")] {
-            std::fs::write(dir.join(file), format!("DriverVer=10/19/2026,2.0.0.2201\n; hidmaestro {dll}\nCatalogFile=another.cat")).unwrap();
+            std::fs::write(dir.join(file), format!("[Version]\n; hidmaestro {dll} hidmaestro.cat\nCatalogFile=another.cat")).unwrap();
         }
-        let detected = packages(&dir).unwrap();
+        let detected = legacy_packages(&dir).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
-        assert!(detected.0.is_empty());
+        assert!(detected.is_empty());
     }
 
     #[test]
-    fn an_unreadable_entry_does_not_hide_the_packages() {
-        let dir = std::env::temp_dir().join(format!("easyrazer-unreadable-check-{}", std::process::id()));
+    fn legacy_packages_are_found_by_catalog_in_any_encoding() {
+        let dir = std::env::temp_dir().join(format!("easyrazer-legacy-check-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("oem0.inf")).unwrap();
         std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer=10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro.cat").unwrap();
-        std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro_xusb.cat").unwrap();
-        let detected = packages(&dir);
-        std::fs::remove_dir_all(dir).unwrap();
-        assert_eq!(detected.unwrap().1, Some(REQUIRED));
-    }
-
-    #[test]
-    fn detection_reports_the_older_of_both_driver_packages() {
-        let dir = std::env::temp_dir().join(format!("easyrazer-driver-check-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(packages(&dir).unwrap().1, None);
-        std::fs::write(dir.join("oem1.inf"), "[Version]\nDriverVer = 10/19/2026,2.0.0.2201\nCatalogFile=hidmaestro.cat").unwrap();
-        assert_eq!(packages(&dir).unwrap().1, None);
-        std::fs::write(dir.join("oem2.inf"), "[Version]\nDriverVer=10/13/2026,1.11.0.0\nCatalogFile=hidmaestro_xusb.cat").unwrap();
-        let (paths, version) = packages(&dir).unwrap();
-        assert_eq!(paths.len(), 2);
-        assert_eq!(version, Some([1, 11, 0, 0]));
         let mut bytes = vec![0xff, 0xfe];
-        bytes.extend("[Version]\nDriverVer = 10/19/2026,2.0.0.2201\r\nCatalogFile = hidmaestro_xusb.cat".encode_utf16().flat_map(u16::to_le_bytes));
+        bytes.extend("[Version]\r\nCatalogFile = \"HIDMaestro_xusb.cat\"".encode_utf16().flat_map(u16::to_le_bytes));
         std::fs::write(dir.join("oem2.inf"), bytes).unwrap();
-        assert_eq!(packages(&dir).unwrap().1, Some(REQUIRED));
+        std::fs::write(dir.join("oem3.inf"), "[Strings]\nCatalogFile=hidmaestro.cat").unwrap();
+        std::fs::write(dir.join("hidmaestro.inf"), "[Version]\nCatalogFile=hidmaestro.cat").unwrap();
+        let mut detected = legacy_packages(&dir).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
+        detected.sort();
+        let names: Vec<_> = detected.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["oem1.inf", "oem2.inf"]);
     }
 
     #[test]
-    fn a_newer_package_outranks_an_older_one_left_in_the_store() {
-        let dir = std::env::temp_dir().join(format!("easyrazer-driver-newer-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        for (file, version, catalog) in [
-            ("oem1.inf", "1.12.0.2302", "hidmaestro.cat"),
-            ("oem2.inf", "1.12.0.2302", "hidmaestro_xusb.cat"),
-            ("oem3.inf", "2.1.0.0", "hidmaestro.cat"),
-            ("oem4.inf", "2.0.1.5", "hidmaestro_xusb.cat"),
-        ] {
-            std::fs::write(dir.join(file), format!("[Version]\nDriverVer=10/30/2026,{version}\nCatalogFile={catalog}")).unwrap();
+    fn program_versions_compare_by_number() {
+        assert_eq!(parse_version("0.1.0"), Some(REQUIRED));
+        assert!(parse_version("0.10.0").unwrap() > REQUIRED);
+        assert!(parse_version("0.0.9").unwrap() < REQUIRED);
+        for bad in ["", "0.1", "0.1.0.0", "0.x.0"] {
+            assert_eq!(parse_version(bad), None, "{bad}");
         }
-        let detected = packages(&dir).unwrap().1;
-        std::fs::remove_dir_all(dir).unwrap();
-        assert_eq!(detected, Some([2, 0, 1, 5]));
-        assert!(detected.unwrap() > REQUIRED);
     }
 
     #[test]
-    fn driver_versions_compare_by_number() {
-        assert_eq!(driver_version("10/19/2026, 2.0.0.2201"), Some(REQUIRED));
-        assert_eq!(driver_version("10/13/2026,1.12.0.2302"), Some([1, 12, 0, 2302]));
-        assert!(driver_version("10/13/2026,1.12.0.2302").unwrap() < REQUIRED);
-        assert!(driver_version("01/01/2027,2.0.0.10000").unwrap() > REQUIRED);
-        assert_eq!(driver_version("10/19/2026,2.0"), Some([2, 0, 0, 0]));
-        assert_eq!(driver_version("10/19/2026"), None);
-        assert_eq!(driver_version("10/19/2026,two"), None);
+    fn installer_downloads_the_required_release() {
+        let [major, minor, patch] = REQUIRED;
+        assert!(include_str!("install.ps1").contains(&format!("/releases/download/{major}.{minor}.{patch}/hidshim.exe")));
     }
 
     #[test]
-    fn installer_rejects_an_unverified_download_before_deployment() {
+    fn installer_rejects_an_unverified_download_before_running_it() {
         let dir = std::env::temp_dir().join(format!("easyrazer-install-check-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let base = "$base = [Environment]::GetFolderPath('ProgramFiles')";
+        assert!(include_str!("install.ps1").contains(base));
         let script = format!(
             "function Invoke-WebRequest {{ param([switch]$UseBasicParsing, [int]$TimeoutSec, [string]$Uri, [string]$OutFile) [IO.File]::WriteAllText($OutFile, 'bad download') }}\n{}",
-            include_str!("install.ps1").replace("$env:ProgramFiles", "$env:EASYRAZER_INSTALL_TEST"),
+            include_str!("install.ps1").replace(base, "$base = $env:EASYRAZER_INSTALL_TEST"),
         );
         let script = format!("$env:EASYRAZER_INSTALL_TEST = '{}'\n{script}", dir.to_string_lossy().replace('\'', "''"));
         let error = run(&script).unwrap_err();

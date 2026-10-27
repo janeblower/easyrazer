@@ -148,7 +148,8 @@ pub struct Device {
     engine: Option<EngineHandle>,
     /// Injected keys cannot reach the focused window, so the firmware types meanwhile.
     blocked: bool,
-    gamepad_attempted: Option<(u32, crate::gamepad::Config)>,
+    /// The user turned the gamepad on, which may ask for elevation to bring the pad back.
+    gamepad_requested: bool,
     gamepad: Arc<Mutex<crate::gamepad::Runtime>>,
     /// What profile 0 holds; `None` once the firmware reloaded it from the startup slot.
     ram: Option<Snapshot>,
@@ -186,7 +187,7 @@ impl Device {
             restore_error: None,
             engine: None,
             blocked: false,
-            gamepad_attempted: None,
+            gamepad_requested: false,
             gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())),
             ram: None,
             startup: None,
@@ -537,13 +538,14 @@ impl Device {
         let spec = self.last_spec.or_else(|| devices::by_pid(self.data().pid)).ok_or_else(|| self.msg("backend.noKeyboard"))?;
         config.validate(spec.layout)?;
         let previous = self.gamepad_config();
+        let requested = config.enabled;
         self.data_mut()?.loaded_mut().ok_or("No active profile")?.gamepad = config;
         if let Err(e) = self.save() {
             self.data_mut()?.loaded_mut().unwrap().gamepad = previous;
             self.publish();
             return Err(e);
         }
-        self.gamepad_attempted = None;
+        self.gamepad_requested = requested;
         self.sync_engine();
         Ok(())
     }
@@ -1043,7 +1045,6 @@ impl Device {
         if on {
             self.writable()?;
         }
-        self.gamepad_attempted = None;
         self.data_mut()?.driver_mode = on;
         self.sync_engine();
         if on && self.engine.is_none() {
@@ -1076,16 +1077,15 @@ impl Device {
         let mut cfg = engine_config(self.scale(), &thresholds, &self.bindings(), &p.data.hypershift, &p.rapid, &p.snap_tap, engine::repeat_timing());
         cfg.macros = self.data().macros.iter().map(|(&id, m)| (id, m.events.clone())).collect();
         let (profile, gamepad) = (p.id, p.gamepad.clone());
-        let launch = self.gamepad_attempted.as_ref() != Some(&(profile, gamepad.clone()));
-        if gamepad.enabled { self.gamepad_attempted = Some((profile, gamepad.clone())); }
+        let request = std::mem::take(&mut self.gamepad_requested);
         if let Some(e) = &self.engine {
-            e.set_config(cfg, profile, gamepad, launch);
+            e.set_config(cfg, profile, gamepad, request);
             return;
         }
         let Some(sink) = self.sink.clone() else { return };
         let (t, _) = self.control.as_ref().unwrap();
         // Readers first: if they cannot open, the keyboard never leaves hardware mode.
-        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink, profile, gamepad, launch, self.gamepad.clone())
+        let started = EngineHandle::start(&self.api, self.unit.as_ref().unwrap(), cfg, sink, profile, gamepad, request, self.gamepad.clone())
             .and_then(|h| control::set_driver_mode(t).map(|()| h).map_err(|e| e.to_string()));
         match started {
             Ok(h) => {
@@ -1098,9 +1098,9 @@ impl Device {
                 self.restore();
             }
             Err(e) => {
-                // A helper launched for this engine has nobody to feed it; the retry starts it again.
+                // A pad opened for this engine has nobody to feed it; the retry opens it again.
                 self.gamepad.lock().unwrap_or_else(|e| e.into_inner()).stop();
-                self.gamepad_attempted = None;
+                self.gamepad_requested |= request;
                 self.restore_error = Some(i18n::tf(&self.lang(), "backend.engine", &[("error", &e)]));
                 wake::retry();
             }
@@ -1533,7 +1533,7 @@ mod tests {
     fn writes_skip_the_synapse_check_when_watching_is_off() {
         let settings = Settings { watch_synapse: false, ..Default::default() };
         let api = HidApi::new().unwrap();
-        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_attempted: None, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false, lighting_delegated: false };
+        let mut d = Device { api, control: None, unit: None, id: None, log: Arc::new(Log::default()), synapse: true, backed_up: BTreeSet::new(), shared: Arc::new(Mutex::new(settings)), data: DeviceData::default(), last_spec: None, restore_error: None, engine: None, blocked: false, gamepad_requested: false, gamepad: Arc::new(Mutex::new(crate::gamepad::Runtime::new())), ram: None, startup: None, synced: false, menu: None, sink: None, progress: None, previewed: false, lighting_delegated: false };
         assert!(!d.check_synapse());
         assert!(!d.synapse);
     }
