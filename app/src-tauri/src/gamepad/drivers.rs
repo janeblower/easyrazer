@@ -11,10 +11,9 @@ static CHANGING: AtomicBool = AtomicBool::new(false);
 
 type Version = [u32; 3];
 
-/// The oldest hidshim whose protocol the app speaks.
-const REQUIRED: Version = [0, 1, 0];
-/// The first hidshim with a boot task that brings its pads back after a reboot.
-const BOOT_TASK: Version = [0, 2, 0];
+/// The oldest hidshim the app supports: the first that shares its pads between programs and
+/// brings them back on boot.
+const REQUIRED: Version = [0, 2, 0];
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
@@ -91,7 +90,7 @@ fn inf_directory() -> Result<PathBuf, String> {
 
 /// The boot task as the installed program reports it, which needs no elevation.
 fn boot_task(exe: &Path, version: Option<Version>) -> Option<bool> {
-    if version.is_none_or(|v| v < BOOT_TASK) { return None; }
+    if version.is_none_or(|v| v < REQUIRED) { return None; }
     let output = Command::new(exe).arg("autostart").creation_flags(CREATE_NO_WINDOW).output().ok()?;
     if !output.status.success() { return None; }
     parse_boot(&String::from_utf8_lossy(&output.stdout))
@@ -174,7 +173,7 @@ pub(super) fn deploy(replace: bool) -> Result<(), String> {
         remove_legacy()?;
     }
     match program() {
-        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, &install_args(boot_task(&exe, Some(version)))),
+        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, install_args(boot_task(&exe, Some(version)) == Some(true))),
         _ => install_latest(),
     }
 }
@@ -242,19 +241,14 @@ fn program_files() -> Result<PathBuf, String> {
 }
 
 /// An update keeps the boot task as the user set it; a fresh install comes without one.
-fn install_args(boot: Option<bool>) -> Vec<&'static str> {
-    match boot {
-        Some(true) => vec!["install"],
-        Some(false) => vec!["install", "--no-autostart"],
-        // A hidshim without the boot task knows no such option.
-        None => vec!["install"],
-    }
+fn install_args(boot: bool) -> &'static [&'static str] {
+    if boot { &["install"] } else { &["install", "--no-autostart"] }
 }
 
 /// Runs elevated.
 pub(super) fn boot(on: bool) -> Result<(), String> {
     match program() {
-        Some((exe, Some(version))) if version >= BOOT_TASK => run_program(&exe, &["autostart", if on { "on" } else { "off" }]),
+        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, &["autostart", if on { "on" } else { "off" }]),
         _ => Err("Update hidshim to start its driver with Windows".into()),
     }
 }
@@ -351,9 +345,9 @@ mod tests {
 
     #[test]
     fn program_versions_compare_by_number() {
-        assert_eq!(parse_version("0.1.0"), Some(REQUIRED));
+        assert_eq!(parse_version("0.2.0"), Some(REQUIRED));
         assert!(parse_version("0.10.0").unwrap() > REQUIRED);
-        assert!(parse_version("0.0.9").unwrap() < REQUIRED);
+        assert!(parse_version("0.1.9").unwrap() < REQUIRED);
         for bad in ["", "0.1", "0.1.0.0", "0.x.0"] {
             assert_eq!(parse_version(bad), None, "{bad}");
         }
@@ -372,9 +366,8 @@ mod tests {
 
     #[test]
     fn updates_keep_the_boot_task_and_fresh_installs_leave_it_out() {
-        assert_eq!(install_args(Some(true)), ["install"]);
-        assert_eq!(install_args(Some(false)), ["install", "--no-autostart"]);
-        assert_eq!(install_args(None), ["install"]);
+        assert_eq!(install_args(true), ["install"]);
+        assert_eq!(install_args(false), ["install", "--no-autostart"]);
     }
 
     #[test]

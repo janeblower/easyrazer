@@ -140,7 +140,7 @@ async function mockBackend() {
     gamepad_driver: () => ({
       installed: mockGamepadDriver === "ready" || mockGamepadDriver === "outdated",
       ready: mockGamepadDriver === "ready",
-      version: { ready: "0.1.0", outdated: "0.0.9" }[mockGamepadDriver] ?? null,
+      version: { ready: "0.2.0", outdated: "0.1.0" }[mockGamepadDriver] ?? null,
       legacy: mockGamepadDriver === "legacy",
       boot: mockGamepadDriver === "ready" ? mockGamepadBoot : null,
     }),
