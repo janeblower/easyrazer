@@ -7,28 +7,26 @@ and Q/E to the left/right triggers. Existing empty layouts receive these default
 once; custom assignments and later clearing of assignments are preserved.
 
 The editor, including the controller preview, is inactive in hardware mode
-and until both HIDMaestro driver packages are installed. Click **Install
-HIDMaestro** in the tab and approve Windows' administrator prompt. EasyRazer
-downloads the pinned upstream **v2.0.0** x64 release, verifies its SHA-256,
-and installs both driver packages, version **2.0.0.2201**, in the background.
-An animated indicator stays visible during download and installation; errors
-leave the install button available to retry. Installation uses the upstream
-signing tools: it creates a HIDMaestro code-signing certificate, trusts it in
-Windows' local-machine Root and TrustedPublisher stores and deletes its private
-key once the drivers are signed. Uninstalling HIDMaestro in Settings removes the
-certificate from these stores. It does not change Secure Boot or test-signing
-settings. Launch EasyRazer normally; the experimental
-`--gamepad-test` flag is no longer used.
+and until the hidshim driver is installed. Click **Install hidshim** in the tab
+and approve Windows' administrator prompt. EasyRazer downloads the pinned
+[hidshim](https://github.com/janeblower/hidshim) **0.1.0** release, verifies its
+SHA-256 and runs its installer. hidshim copies itself to `Program Files\hidshim`,
+appears among installed apps and can be uninstalled there or in EasyRazer's
+Settings. It signs its user-mode driver on the machine with a certificate whose
+key exists only in memory during signing and trusts that certificate in Windows'
+local-machine Root and TrustedPublisher stores; uninstalling removes it. It does
+not change Secure Boot or test-signing settings. If HIDMaestro, which earlier
+versions used, is still installed, EasyRazer offers to remove it first.
 
 Enable driver mode to receive live key depth. Select a controller control and
-assign a keyboard key, then apply the changes. Gamepad output starts when both
-driver mode and the gamepad profile switch are enabled. Only the controller
-helper requests administrator rights, and Windows asks each time it starts:
-when EasyRazer starts with the gamepad enabled in the active profile (autostart
-included) and each time Apply or Fn+G turns the gamepad on. A failed controller
-start leaves the keyboard engine running; apply the configuration again to
-retry. The watcher does not repeatedly request elevation
-after a failure.
+assign a keyboard key, then apply the changes. The **Enabled in this profile**
+switch takes effect at once, without Apply. Gamepad output starts when both
+driver mode and the switch are on. EasyRazer drives the pad itself, without
+administrator rights. Windows asks for them only when the pad has to be brought
+back, once after each restart of Windows, and only when you turn the gamepad on
+with the switch or Fn+G; starting EasyRazer never asks. If the pad cannot start,
+the editor shows why with a **Retry** button, and the keyboard engine keeps
+running.
 
 Fn+G toggles the gamepad in the active profile immediately, without pressing
 Apply. EasyRazer binds it in every profile once; like Snap Tap's Fn+LShift, it
@@ -40,7 +38,7 @@ stick clicks, bumpers and the D-pad activate at depth 128. Assigned keys are
 suppressed in both keyboard layers, except for EasyRazer's own Fn switches
 (next profile, Snap Tap, gamepad), and Snap Tap groups containing them are
 suspended while gamepad output is enabled. These keys remain suppressed if the
-helper fails; disable the gamepad switch to restore their keyboard bindings.
+pad fails to start; disable the gamepad switch to restore their keyboard bindings.
 
 Each stick direction and trigger has a **Maximum depth** slider beside its
 assignment. At the default 100%, full output requires full reported key travel;
@@ -54,19 +52,10 @@ mode, disconnecting the keyboard or closing EasyRazer releases keyboard keys
 and closes that keyboard's virtual controller. While the focused window does not
 accept injected keys, such as an app running as administrator, the controller
 holds neutral and resumes when focus returns. After the keyboard reconnects or
-Synapse closes, apply the configuration again to restart the controller.
+Synapse closes, the controller comes back by itself.
 Live capture remains available in driver mode with the gamepad switch disabled.
 The app requests depth snapshots only while the editor is visible.
 
-Input is submitted directly to HIDMaestro shared memory from the keyboard
-reader. The helper watches the app process so a crash also triggers cleanup.
-Disabling the gamepad neutralizes input and closes the writer before signaling
-the helper to stop. Cleanup is checked without blocking the keyboard reader or
-the interface. A new helper cannot start while the previous helper is stopping;
-apply again once cleanup finishes if a restart was requested during that time.
-Cleanup errors are shown in the editor.
-
-The pinned HIDMaestro XUSB driver can retain shared mappings after a controller
-disappears from XInput if another process holds cached XInput handles without
-polling again. A new controller may then fail to start until that process
-releases its handles. Compatibility with individual games is not verified.
+The keyboard reader submits input straight to the driver, and the pad
+disappears from games as soon as EasyRazer closes or crashes. Compatibility with
+individual games is not verified.

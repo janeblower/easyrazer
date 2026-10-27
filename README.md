@@ -64,7 +64,7 @@ Full comparison and the reasoning behind it: [how it works](docs/en/how-it-works
 
 Details and caveats: [user guide](docs/en/usage.md).
 
-Experimental: [test an analog gamepad through HIDMaestro](docs/en/gamepad.md).
+Experimental: [an analog gamepad through hidshim](docs/en/gamepad.md).
 
 ## Supported keyboards
 
