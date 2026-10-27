@@ -48,7 +48,9 @@ fn blocked(own: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    sys::integrity(process).is_some_and(|l| l > own)
+    // A same-user app at our level always shows its token; an elevated Electron app, such as
+    // VS Code run as administrator, hides it.
+    sys::integrity(process).is_none_or(|l| l > own)
 }
 
 #[cfg(test)]
