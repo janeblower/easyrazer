@@ -100,7 +100,7 @@ impl Config {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Input {
     pub depth: Vec<u8>,
     pub running: bool,

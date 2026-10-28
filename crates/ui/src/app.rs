@@ -1,136 +1,270 @@
-//! The main window: a snapshot of the backend's state, kept fresh by its events.
+//! The main window: what the backend last told about the keyboard, the edits on top of it,
+//! and the screens that show both.
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use easyrazer_backend::api::KeyView;
 use easyrazer_backend::boards::DevicesView;
-use easyrazer_backend::device::Status;
+use easyrazer_backend::device::{MacroState, ProfilesView, Status};
 use easyrazer_backend::settings::CloseAction;
-use easyrazer_backend::{Backend, Event, i18n};
-use egui::{CornerRadius, RichText, Stroke, ViewportCommand};
+use easyrazer_backend::{Backend, Event, api, i18n};
+use egui::ViewportCommand;
 
-use crate::icons::{self, Icon};
-use crate::status::{self, Kind};
-use crate::theme;
-use crate::tray::{self, Tray};
+use crate::dialogs::Dialog;
+use crate::gamepad::GamepadState;
 use crate::instance::ACTIVATE_REQUESTED;
+use crate::jobs::{Done, Jobs};
+use crate::keys::model::KeyEdits;
+use crate::tray::{self, Tray};
+use crate::{shell, theme};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tab {
     Keys,
     Lighting,
     Settings,
 }
 
-const TABS: [(Tab, &str); 3] = [(Tab::Keys, "tabs.keys"), (Tab::Lighting, "tabs.lighting"), (Tab::Settings, "tabs.settings")];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+    Actuation,
+    Bindings,
+    Macros,
+    Gamepad,
+}
+
+/// Where an edit lives, to open it from the status bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Actuation,
+    Bindings,
+    Gamepad,
+    Macros,
+    Lighting,
+}
+
+/// How long an error not tied to a tab stays on screen.
+const ERROR_SHOWN: Duration = Duration::from_secs(10);
 
 pub struct App {
-    backend: Arc<Backend>,
+    pub jobs: Jobs,
+    done: Receiver<Done>,
     events: Receiver<Event>,
-    tray: Tray,
+    pub tray: Tray,
     /// Read by the event pump: key depth is dropped while nobody sees it.
     visible: Arc<AtomicBool>,
-    lang: String,
-    tab: Tab,
-    devices: DevicesView,
-    selected: Option<String>,
-    status: Option<Status>,
-    progress: Option<(usize, usize)>,
-    error: String,
-    /// Latest depth per key of the selected keyboard; drawn once a frame.
-    depth: BTreeMap<u8, u8>,
+    pub lang: String,
+    pub tab: Tab,
+    pub section: Section,
+    /// The keyboard the window shows; every keyboard call is about one keyboard.
+    pub keyboard: Option<String>,
+    pub devices: Option<DevicesView>,
+    pub status: Option<Status>,
+    pub layout: Vec<KeyView>,
+    /// Kept when the keyboard is unplugged, so the map does not jump to another board.
+    pub layout_model: Option<String>,
+    pub profiles: Option<ProfilesView>,
+    pub macro_state: Option<MacroState>,
+    pub busy: bool,
+    /// The backend sends a status only when something changed, so one dropped while busy would be lost.
+    pub missed: bool,
+    /// Reads done, reads in all.
+    pub progress: Option<(usize, usize)>,
+    pub message: String,
+    app_error: Option<(String, Instant)>,
+    /// Profile the baseline was read from, and the connection and profile of that read.
+    pub loaded_profile: Option<u32>,
+    pub loaded_key: Option<(bool, Option<u32>)>,
+    pub keys: KeyEdits,
+    /// Live depth of the shown keyboard's keys, 0..255.
+    pub depth: [u8; 256],
+    pub gamepad: GamepadState,
+    pub dialogs: Vec<Dialog>,
+    pub shell: shell::State,
     quitting: bool,
 }
 
 impl App {
     pub fn new(backend: Arc<Backend>, events: Receiver<Event>, tray: Tray, ctx: &egui::Context, shown: bool) -> Self {
-        icons::install(ctx);
+        crate::icons::install(ctx);
         let visible = Arc::new(AtomicBool::new(shown));
         let events = pump(events, ctx.clone(), visible.clone());
-        let devices = backend.devices();
-        let selected = devices.last.clone().or_else(|| devices.devices.first().map(|d| d.id.clone()));
-        let status = selected.is_some().then(|| backend.status(selected.clone()));
-        // Everything the first connect reports now reaches the window.
-        backend.window_ready();
-        Self {
+        let (jobs, done) = Jobs::new(backend.clone(), ctx.clone());
+        let mut app = Self {
             lang: backend.lang(),
-            backend,
+            jobs,
+            done,
             events,
             tray,
             visible,
             tab: Tab::Keys,
-            devices,
-            selected,
-            status,
+            section: Section::Actuation,
+            keyboard: None,
+            devices: None,
+            status: None,
+            // Before anything that takes the device lock: a connect can hold it for the whole read.
+            layout: api::layout(None),
+            layout_model: None,
+            profiles: None,
+            macro_state: None,
+            busy: false,
+            missed: false,
             progress: None,
-            error: String::new(),
-            depth: BTreeMap::new(),
+            message: String::new(),
+            app_error: None,
+            loaded_profile: None,
+            loaded_key: None,
+            keys: KeyEdits::default(),
+            depth: [0; 256],
+            gamepad: GamepadState::default(),
+            dialogs: Vec::new(),
+            shell: shell::State::default(),
             quitting: false,
-        }
+        };
+        app.start();
+        app
     }
 
-    fn t(&self, key: &str) -> String {
+    fn start(&mut self) {
+        let b = self.jobs.backend();
+        let settings = b.app_settings();
+        if !settings.autostart_offered {
+            self.dialogs.push(Dialog::Autostart);
+        }
+        // The tray and backend messages follow the stored language.
+        if settings.language.is_none() {
+            let _ = b.set_language(i18n::system_language().to_string());
+        }
+        self.lang = b.lang();
+        self.tray.retitle(&self.lang);
+        b.window_ready();
+        self.load_devices();
+        self.load_macros();
+    }
+
+    pub fn t(&self, key: &str) -> String {
         i18n::t(&self.lang, key)
     }
 
-    fn ours(&self, id: Option<&str>) -> bool {
-        id.is_some() && id == self.selected.as_deref()
+    pub fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
+        i18n::tf(&self.lang, key, args)
+    }
+
+    pub fn ours(&self, id: Option<&str>) -> bool {
+        id == self.keyboard.as_deref()
+    }
+
+    /// Errors not tied to a tab; shown over whatever tab is open.
+    pub fn show_error(&mut self, e: impl Into<String>) {
+        self.app_error = Some((e.into(), Instant::now()));
+    }
+
+    pub fn app_error(&self) -> &str {
+        self.app_error.as_ref().map_or("", |(e, _)| e.as_str())
+    }
+
+    pub fn online(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| s.device)
+    }
+
+    pub fn writable(&self) -> bool {
+        self.online() && !self.status.as_ref().is_some_and(|s| s.synapse) && !self.busy
+    }
+
+    /// An offline keyboard still has its profiles, which live in the app.
+    pub fn editable(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| !s.synapse) && !self.busy
+    }
+
+    pub fn driver(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| s.driver_mode)
+    }
+
+    pub fn fw_rapid(&self) -> bool {
+        self.status.as_ref().and_then(|s| s.analog).is_some_and(|a| a.firmware_rapid)
+    }
+
+    /// Rapid Trigger and Snap Tap work now: on the host in driver mode, or in the keyboard's firmware.
+    pub fn rapid_here(&self) -> bool {
+        self.driver() || self.fw_rapid()
+    }
+
+    /// The firmware runs Rapid Trigger, so continuous is one switch for the profile, not per key.
+    pub fn fw_hw(&self) -> bool {
+        self.fw_rapid() && !self.driver()
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible.load(Ordering::Relaxed)
     }
 
     fn on_event(&mut self, e: Event) {
         match e {
-            Event::Status(s) => {
-                if self.selected.is_none() {
-                    self.selected = s.id.clone();
+            Event::Status(s) => self.on_status(s),
+            Event::Devices => self.load_devices(),
+            Event::KeyDepth { id, key, depth, .. } if self.ours(Some(&id)) => self.depth[key as usize] = depth,
+            Event::ReadProgress { id, done, total, key } => {
+                // The first keyboard attaches, and reads, before its `devices` event arrives.
+                if self.keyboard.is_none() {
+                    self.load_devices();
                 }
-                if s.id.is_none() || self.ours(s.id.as_deref()) {
-                    if let Some(err) = &s.error {
-                        self.error = err.clone();
+                if self.ours(Some(&id)) {
+                    self.progress = Some((done, total));
+                    if let Some((k, mm)) = key {
+                        self.keys.baseline.insert(k, mm);
                     }
-                    self.status = Some(s);
                 }
             }
-            Event::Devices => {
-                self.devices = self.backend.devices();
-                if self.selected.is_none() {
-                    self.selected = self.devices.last.clone().or_else(|| self.devices.devices.first().map(|d| d.id.clone()));
+            Event::SnapTap { id, on } if self.ours(Some(&id)) => {
+                self.keys.snap_base.enabled = on;
+                if let Some(mut s) = self.keys.snap_edit.clone() {
+                    s.enabled = on;
+                    self.keys.set_snap(s);
                 }
             }
-            Event::KeyDepth { id, key, depth, .. } if self.ours(Some(&id)) => {
-                self.depth.insert(key, depth);
+            Event::GamepadEnabled { id, profile, enabled } if self.ours(Some(&id)) && self.loaded_profile == Some(profile) => {
+                self.gamepad.base.enabled = enabled;
+                if let Some(mut c) = self.gamepad.edit.clone() {
+                    c.enabled = enabled;
+                    self.gamepad.set(c);
+                }
             }
-            Event::ReadProgress { id, done, total, .. } if self.ours(Some(&id)) => {
-                self.progress = (done < total).then_some((done, total));
+            Event::HidLog { id, entry } => crate::dev::on_log(self, id, entry),
+            Event::SettingsChanged => {
+                self.tray.sync_autostart();
+                crate::dev::on_settings(self);
             }
-            Event::SettingsChanged => self.tray.sync_autostart(),
             Event::LanguageChanged => {
-                self.lang = self.backend.lang();
+                self.lang = self.jobs.backend().lang();
                 self.tray.retitle(&self.lang);
             }
-            Event::Error(message) => self.error = message,
+            Event::Error(message) => self.show_error(message),
             _ => {}
         }
     }
 
-    fn show(&mut self, ctx: &egui::Context) {
+    pub fn show(&mut self, ctx: &egui::Context) {
         self.visible.store(true, Ordering::Relaxed);
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
     }
 
-    fn hide(&mut self, ctx: &egui::Context) {
+    /// To the tray: the edits go, as they would with the window, and so does any lighting preview.
+    pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible.store(false, Ordering::Relaxed);
-        self.depth.clear();
+        self.depth = [0; 256];
+        crate::changes::revert_all(self);
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
-        if let Err(e) = self.backend.drop_previews() {
-            self.error = e;
+        if let Err(e) = self.jobs.backend().drop_previews() {
+            self.show_error(e);
         }
     }
 
-    fn quit(&mut self, ctx: &egui::Context) {
+    pub fn quit(&mut self, ctx: &egui::Context) {
         self.quitting = true;
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
@@ -139,8 +273,8 @@ impl App {
         match a {
             tray::Action::Show => self.show(ctx),
             tray::Action::Autostart => {
-                if let Err(e) = self.backend.set_autostart(self.tray.autostart_checked()) {
-                    self.error = i18n::tf(&self.lang, "backend.autostart", &[("error", &e)]);
+                if let Err(e) = self.jobs.backend().set_autostart(self.tray.autostart_checked()) {
+                    self.show_error(self.tf("backend.autostart", &[("error", &e)]));
                 }
             }
             tray::Action::Quit => self.quit(ctx),
@@ -151,87 +285,21 @@ impl App {
         if self.quitting || !ctx.input(|i| i.viewport().close_requested()) {
             return;
         }
-        match self.backend.close_action() {
+        match self.jobs.backend().close_action() {
             CloseAction::Exit => self.quitting = true,
-            // Asking needs the dialogs of the next phase; until then the window goes to the tray.
-            CloseAction::Tray | CloseAction::Ask => {
+            CloseAction::Ask => {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-                self.hide(ctx);
+                self.dialogs.push(Dialog::Close { remember: false });
+            }
+            CloseAction::Tray => {
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                if crate::changes::has_unapplied(self) {
+                    self.dialogs.push(Dialog::Hiding);
+                } else {
+                    self.hide(ctx);
+                }
             }
         }
-    }
-
-    fn tabs(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for (tab, key) in TABS {
-                let on = self.tab == tab;
-                let text = RichText::new(self.t(key)).color(if on { theme::TEXT } else { theme::MUTED });
-                let button = egui::Button::new(text)
-                    .fill(if on { theme::BG } else { theme::PANEL })
-                    .stroke(Stroke::NONE)
-                    .corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 });
-                let r = ui.add(button);
-                if on {
-                    let rect = r.rect;
-                    ui.painter().hline(rect.x_range(), rect.bottom() - 1.0, Stroke::new(2.0, theme::ACCENT));
-                }
-                if r.clicked() {
-                    self.tab = tab;
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.mode(ui));
-        });
-    }
-
-    /// The HW / Driver switch: who types, the keyboard or the app.
-    fn mode(&mut self, ui: &mut egui::Ui) {
-        let Some(s) = &self.status else { return };
-        let (id, driver, writable) = (s.id.clone(), s.driver_mode, s.device && !s.synapse);
-        ui.add_enabled_ui(writable, |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            for (on, icon, key) in [(true, Icon::rust, "mode.driver"), (false, Icon::chip, "mode.hw")] {
-                let color = match (driver == on, on) {
-                    (false, _) => theme::MUTED,
-                    (true, true) => theme::DRIVER,
-                    (true, false) => theme::ACCENT,
-                };
-                let r = ui.add(egui::Button::image(icons::image(icon, 28.0, color)).min_size(egui::vec2(52.0, 34.0)));
-                let r = r.on_hover_text(self.t("mode.hint")).on_hover_text(self.t(key));
-                if r.clicked() && driver != on
-                    && let Some(id) = &id
-                {
-                    if let Err(e) = self.backend.set_driver_mode(id, on) {
-                        self.error = e;
-                    }
-                    self.status = Some(self.backend.status(Some(id.clone())));
-                }
-            }
-        });
-    }
-
-    fn status_line(&self, ui: &mut egui::Ui) {
-        let name = self.devices.devices.iter().find(|d| self.ours(Some(&d.id))).map(|d| d.name.as_str());
-        let input = status::Input {
-            status: self.status.as_ref(),
-            progress: self.progress,
-            unsupported: self.devices.unsupported,
-            name,
-            message: "",
-            error: &self.error,
-        };
-        let (kind, text) = status::line(&self.lang, &input);
-        let (fill, color) = match kind {
-            Kind::Info => (theme::PANEL, theme::TEXT),
-            Kind::Warn => (theme::WARN_BG, theme::WARN),
-            Kind::Ok => (theme::PANEL, theme::ACCENT),
-        };
-        egui::Frame::new().fill(fill).corner_radius(theme::RADIUS).inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 34.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.label(RichText::new(text).color(color));
-            });
-        });
     }
 }
 
@@ -246,15 +314,28 @@ impl eframe::App for App {
         while let Ok(e) = self.events.try_recv() {
             self.on_event(e);
         }
+        while let Ok(done) = self.done.try_recv() {
+            done(self);
+        }
+        if let Some((_, at)) = &self.app_error {
+            match ERROR_SHOWN.checked_sub(at.elapsed()) {
+                Some(left) => ctx.request_repaint_after(left),
+                None => self.app_error = None,
+            }
+        }
         self.on_close(ctx);
+        crate::gamepad::poll(self);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        crate::dev::panel(self, ui);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(16)).show(ui, |ui| {
-            ui.set_max_width(1121.0);
-            self.tabs(ui);
-            self.status_line(ui);
+            egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                ui.set_max_width(1121.0);
+                shell::ui(self, ui);
+            });
         });
+        crate::dialogs::show(self, ui.ctx());
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

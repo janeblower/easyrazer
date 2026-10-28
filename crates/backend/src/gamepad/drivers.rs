@@ -18,7 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
 const DOWNLOAD_LIMIT: usize = 16 << 20;
 
-#[derive(serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Status {
     pub installed: bool,
     pub ready: bool,
