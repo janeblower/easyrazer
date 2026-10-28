@@ -15,7 +15,7 @@ unsafe extern "system" fn no_alt_menu_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp:
 /// Stops a lone Alt from opening the window menu; Alt+Space still opens the system menu.
 ///
 /// `hwnd` is a window handle value; Windows rejects one that names no window of this thread.
-pub fn no_alt_menu(hwnd: *mut std::ffi::c_void) {
+pub fn no_alt_menu(hwnd: isize) {
     // SAFETY: Windows rejects a bad `hwnd`; `no_alt_menu_proc` matches SUBCLASSPROC and lives for the program.
-    unsafe { SetWindowSubclass(hwnd, Some(no_alt_menu_proc), 1, 0) };
+    unsafe { SetWindowSubclass(hwnd as HWND, Some(no_alt_menu_proc), 1, 0) };
 }

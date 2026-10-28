@@ -851,6 +851,19 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "easyrazer"
 version = "0.0.0"
 dependencies = [
+ "easyrazer-backend",
+ "razer-core",
+ "serde",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+]
+
+[[package]]
+name = "easyrazer-backend"
+version = "0.0.0"
+dependencies = [
  "getrandom 0.3.4",
  "hidapi",
  "hidshim",
@@ -858,10 +871,6 @@ dependencies = [
  "razer-core",
  "serde",
  "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
 ]

@@ -130,6 +130,12 @@ pub struct Runtime {
     open: fn() -> io::Result<Gamepad>,
 }
 
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Runtime {
     pub fn new() -> Self {
         Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None, open: Gamepad::open }
