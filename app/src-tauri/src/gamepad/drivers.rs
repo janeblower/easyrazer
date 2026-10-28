@@ -11,9 +11,8 @@ static CHANGING: AtomicBool = AtomicBool::new(false);
 
 type Version = [u32; 3];
 
-/// The oldest hidshim the app supports: the first that shares its pads between programs and
-/// brings them back on boot.
-const REQUIRED: Version = [0, 2, 0];
+/// The oldest hidshim the app supports: the first that takes reports through shared memory.
+const REQUIRED: Version = [0, 3, 0];
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
@@ -345,9 +344,9 @@ mod tests {
 
     #[test]
     fn program_versions_compare_by_number() {
-        assert_eq!(parse_version("0.2.0"), Some(REQUIRED));
+        assert_eq!(parse_version("0.3.0"), Some(REQUIRED));
         assert!(parse_version("0.10.0").unwrap() > REQUIRED);
-        assert!(parse_version("0.1.9").unwrap() < REQUIRED);
+        assert!(parse_version("0.2.9").unwrap() < REQUIRED);
         for bad in ["", "0.1", "0.1.0.0", "0.x.0"] {
             assert_eq!(parse_version(bad), None, "{bad}");
         }

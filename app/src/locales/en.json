@@ -80,7 +80,7 @@
   "gamepad": {
     "checkingDriver": "Checking hidshim…",
     "driverMissing": "The gamepad needs the hidshim driver.",
-    "driverOutdated": "hidshim {version} is installed; the gamepad needs 0.2.0 or later.",
+    "driverOutdated": "hidshim {version} is installed; the gamepad needs 0.3.0 or later.",
     "driverOutdatedShort": "Outdated ({version})",
     "update": "Update hidshim",
     "install": "Install hidshim",

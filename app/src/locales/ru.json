@@ -80,7 +80,7 @@
   "gamepad": {
     "checkingDriver": "Проверка hidshim…",
     "driverMissing": "Для геймпада нужен драйвер hidshim.",
-    "driverOutdated": "Установлен hidshim {version}, для геймпада нужна версия 0.2.0 или новее.",
+    "driverOutdated": "Установлен hidshim {version}, для геймпада нужна версия 0.3.0 или новее.",
     "driverOutdatedShort": "Устарел ({version})",
     "update": "Обновить hidshim",
     "install": "Установить hidshim",

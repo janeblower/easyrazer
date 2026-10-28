@@ -1465,8 +1465,8 @@ dependencies = [
 
 [[package]]
 name = "hidshim"
-version = "0.2.0"
-source = "git+https://github.com/janeblower/hidshim?tag=0.2.0#abf38b05fe267640eff1b85dcd94b375eb99fc63"
+version = "0.3.0"
+source = "git+https://github.com/janeblower/hidshim?tag=0.3.0#d8f17347734db0055e9ea84701482cc5d78153e0"
 dependencies = [
  "windows-sys 0.61.2",
 ]
