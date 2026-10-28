@@ -26,6 +26,7 @@ pub enum Dialog {
     About(about::About),
     /// HIDMaestro from an earlier version is still installed.
     LegacyDriver,
+    UninstallDriver,
 }
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
@@ -183,6 +184,14 @@ fn ask(app: &mut App, ctx: &egui::Context, d: Dialog) -> Option<Dialog> {
                 Answer::Open => return Some(Dialog::LegacyDriver),
                 Answer::Pick(remove) => crate::gamepad::change_driver(app, crate::gamepad::DriverOp::Install, remove),
                 Answer::Cancel => {}
+            }
+        }
+        Dialog::UninstallDriver => {
+            let (text, yes, no) = (t("gamepad.uninstallText"), t("gamepad.uninstall"), t("profiles.cancel"));
+            match widgets::modal(ctx, "uninstall", &t("gamepad.uninstallTitle"), |ui| widgets::para(ui, &text), |ui| yes_no(ui, &yes, &no)) {
+                Answer::Open => return Some(Dialog::UninstallDriver),
+                Answer::Pick(true) => crate::gamepad::change_driver(app, crate::gamepad::DriverOp::Uninstall, false),
+                _ => {}
             }
         }
     }

@@ -17,6 +17,11 @@ fn lookup(lang: &str, key: &str) -> Option<&'static str> {
     key.split('.').try_fold(tables().get(lang)?, |v, k| v.get(k))?.as_str()
 }
 
+/// The languages the app speaks, each with its own name for itself.
+pub fn languages() -> Vec<(&'static str, String)> {
+    tables().keys().map(|l| (*l, t(l, "language.name"))).collect()
+}
+
 pub fn known(lang: &str) -> bool {
     tables().contains_key(lang)
 }

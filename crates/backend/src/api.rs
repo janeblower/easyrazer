@@ -149,7 +149,7 @@ impl From<Written> for WriteResult {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AppSettings {
     pub autostart: bool,
     pub close_action: CloseAction,
