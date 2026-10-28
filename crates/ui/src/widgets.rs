@@ -57,7 +57,7 @@ pub fn link(ui: &mut Ui, text: impl Into<String>, color: Color32) -> Response {
 }
 
 /// Segmented buttons; the chosen one is outlined, not filled — a fill is kept for Apply.
-pub fn segments<T: Copy + PartialEq>(ui: &mut Ui, items: &[(T, String)], selected: T, enabled: bool) -> Option<T> {
+pub fn segments<T: Clone + PartialEq>(ui: &mut Ui, items: &[(T, String)], selected: T, enabled: bool) -> Option<T> {
     let mut picked = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -71,7 +71,7 @@ pub fn segments<T: Copy + PartialEq>(ui: &mut Ui, items: &[(T, String)], selecte
                 .stroke(Stroke::new(1.0, if on { theme::ACCENT } else { theme::LINE }))
                 .fill(if on { theme::KEY } else { theme::PANEL });
             if ui.add_enabled(enabled, b).clicked() && !on {
-                picked = Some(*value);
+                picked = Some(value.clone());
             }
         }
     });

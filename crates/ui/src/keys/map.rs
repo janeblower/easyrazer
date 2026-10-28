@@ -99,8 +99,7 @@ fn is_read(layout: &[KeyView], key: u8, loaded: Option<usize>) -> bool {
     layout.iter().filter(|k| k.key.editable).position(|k| k.key.key == key).is_none_or(|i| i < n)
 }
 
-pub fn show(app: &App, ui: &mut Ui, props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState) -> Response {
-    let layout = &app.layout;
+pub fn show(app: &App, ui: &mut Ui, layout: &[KeyView], props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState) -> Response {
     let size = bounds(layout);
     let scale = if props.fit && size.x > 0.0 { (ui.available_width() / size.x).min(1.0) } else { 1.0 };
     let (outer, response) = ui.allocate_exact_size(vec2(ui.available_width().max(size.x * scale), size.y * scale), Sense::click_and_drag());
@@ -110,9 +109,9 @@ pub fn show(app: &App, ui: &mut Ui, props: &Props, selection: &mut BTreeSet<u8>,
     let keys: Vec<&KeyView> = layout.iter().filter(|k| k.key.shape != Shape::Ring).collect();
     let rings: Vec<&KeyView> = layout.iter().filter(|k| k.key.shape == Shape::Ring).collect();
 
-    pointer(app, ui, &response, props, selection, state, origin, scale);
+    pointer(layout, ui, &response, props, selection, state, origin, scale);
     if response.has_focus() {
-        keyboard(app, ui, props, selection, state);
+        keyboard(layout, ui, props, selection, state);
     }
 
     for r in &rings {
@@ -128,7 +127,7 @@ pub fn show(app: &App, ui: &mut Ui, props: &Props, selection: &mut BTreeSet<u8>,
     }
     let focused = response.has_focus().then(|| focusable(layout, selection, state)).flatten();
     for k in &keys {
-        paint_key(app, &painter, k, props, selection, origin, scale, opacity, focused == Some(k.key.key));
+        paint_key(app, layout, &painter, k, props, selection, origin, scale, opacity, focused == Some(k.key.key));
     }
     if let Some(r) = rings.iter().find(|r| Some(r.key.key) == focused) {
         painter.rect_stroke(ring_rect(&r.key, origin, scale).expand(4.0), 10.0, Stroke::new(2.0, theme::ACCENT), StrokeKind::Outside);
@@ -147,11 +146,11 @@ pub fn show(app: &App, ui: &mut Ui, props: &Props, selection: &mut BTreeSet<u8>,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_key(app: &App, painter: &egui::Painter, k: &KeyView, props: &Props, selection: &BTreeSet<u8>, origin: Pos2, scale: f32, opacity: f32, focused: bool) {
+fn paint_key(app: &App, layout: &[KeyView], painter: &egui::Painter, k: &KeyView, props: &Props, selection: &BTreeSet<u8>, origin: Pos2, scale: f32, opacity: f32, focused: bool) {
     let key = k.key.key;
     let rect = cap_rect(&k.key, origin, scale);
     let selected = selection.contains(&key);
-    let read = is_read(&app.layout, key, props.loaded);
+    let read = is_read(layout, key, props.loaded);
     let painted = props.colors.is_some();
     let live = painted || (k.key.editable && read);
     let radius = if k.key.shape == Shape::Round { CornerRadius::same((rect.height().min(rect.width()) / 2.0) as u8) } else { CornerRadius::same(theme::RADIUS) };
@@ -271,14 +270,14 @@ fn title(app: &App, key: u8, props: &Props) -> Option<String> {
     props.unsaved.contains(&key).then(|| app.t("actuation.unsavedKey"))
 }
 
-fn editable_at(app: &App, pos: Pos2, origin: Pos2, scale: f32) -> Option<u8> {
-    let hit = app.layout.iter().find(|k| k.key.shape != Shape::Ring && cap_rect(&k.key, origin, scale).contains(pos));
-    let hit = hit.or_else(|| app.layout.iter().find(|k| k.key.shape == Shape::Ring && on_ring(&k.key, Rect::from_center_size(pos, Vec2::ZERO), origin, scale)));
+fn editable_at(layout: &[KeyView], pos: Pos2, origin: Pos2, scale: f32) -> Option<u8> {
+    let hit = layout.iter().find(|k| k.key.shape != Shape::Ring && cap_rect(&k.key, origin, scale).contains(pos));
+    let hit = hit.or_else(|| layout.iter().find(|k| k.key.shape == Shape::Ring && on_ring(&k.key, Rect::from_center_size(pos, Vec2::ZERO), origin, scale)));
     hit.filter(|k| k.key.editable).map(|k| k.key.key)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pointer(app: &App, ui: &Ui, response: &Response, props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState, origin: Pos2, scale: f32) {
+fn pointer(layout: &[KeyView], ui: &Ui, response: &Response, props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState, origin: Pos2, scale: f32) {
     let ctrl = ui.input(|i| i.modifiers.command);
     if response.drag_started() {
         state.start = response.interact_pointer_pos();
@@ -294,7 +293,7 @@ fn pointer(app: &App, ui: &Ui, response: &Response, props: &Props, selection: &m
     if response.drag_stopped() {
         if let Some(b) = state.band.take() {
             let mut next = if state.additive { selection.clone() } else { BTreeSet::new() };
-            for k in app.layout.iter().filter(|k| k.key.editable) {
+            for k in layout.iter().filter(|k| k.key.editable) {
                 let hit = if k.key.shape == Shape::Ring { on_ring(&k.key, b, origin, scale) } else { cap_rect(&k.key, origin, scale).intersects(b) };
                 if hit {
                     next.insert(k.key.key);
@@ -308,7 +307,7 @@ fn pointer(app: &App, ui: &Ui, response: &Response, props: &Props, selection: &m
         response.request_focus();
         let additive = ctrl && !props.single;
         let mut next = if additive { selection.clone() } else { BTreeSet::new() };
-        if let Some(k) = response.interact_pointer_pos().and_then(|p| editable_at(app, p, origin, scale)) {
+        if let Some(k) = response.interact_pointer_pos().and_then(|p| editable_at(layout, p, origin, scale)) {
             state.cursor = Some(k);
             if additive && next.contains(&k) {
                 next.remove(&k);
@@ -329,8 +328,7 @@ fn focusable(layout: &[KeyView], selection: &BTreeSet<u8>, state: &MapState) -> 
     all.iter().copied().find(|k| selection.contains(k)).or(all.first().copied())
 }
 
-fn keyboard(app: &App, ui: &Ui, props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState) {
-    let layout = &app.layout;
+fn keyboard(layout: &[KeyView], ui: &Ui, props: &Props, selection: &mut BTreeSet<u8>, state: &mut MapState) {
     let Some(from) = focusable(layout, selection, state).and_then(|k| layout.iter().find(|v| v.key.key == k)) else { return };
     let multi = !props.single;
     let nav: Vec<&LayoutKey> = layout.iter().filter(|k| k.key.editable && k.key.shape != Shape::Ring).map(|k| &k.key).collect();

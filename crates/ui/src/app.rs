@@ -87,6 +87,7 @@ pub struct App {
     pub map: crate::keys::map::MapState,
     pub keys_view: crate::keys::View,
     pub macros: crate::keys::macros::Editor,
+    pub lighting: crate::lighting::Lighting,
     /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
     pub lead: (u8, u8, bool, u8),
     quitting: bool,
@@ -130,6 +131,7 @@ impl App {
             map: Default::default(),
             keys_view: Default::default(),
             macros: Default::default(),
+            lighting: Default::default(),
             lead: (0, 0, false, 0),
             quitting: false,
         };
@@ -356,6 +358,7 @@ impl eframe::App for App {
         }
         self.on_close(ctx);
         crate::gamepad::poll(self);
+        crate::lighting::tick(self);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
