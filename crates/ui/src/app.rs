@@ -85,6 +85,10 @@ pub struct App {
     pub dialogs: Vec<Dialog>,
     pub shell: shell::State,
     pub map: crate::keys::map::MapState,
+    pub keys_view: crate::keys::View,
+    pub macros: crate::keys::macros::Editor,
+    /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
+    pub lead: (u8, u8, bool, u8),
     quitting: bool,
 }
 
@@ -124,10 +128,32 @@ impl App {
             dialogs: Vec::new(),
             shell: shell::State::default(),
             map: Default::default(),
+            keys_view: Default::default(),
+            macros: Default::default(),
+            lead: (0, 0, false, 0),
             quitting: false,
         };
         app.start();
+        #[cfg(debug_assertions)]
+        app.open_view(&std::env::var("EASYRAZER_VIEW").unwrap_or_default());
         app
+    }
+
+    /// Debug builds open on the tab and section named like `keys/macros`, for screenshots.
+    #[cfg(debug_assertions)]
+    fn open_view(&mut self, view: &str) {
+        let (tab, section) = view.split_once('/').unwrap_or((view, ""));
+        self.tab = match tab {
+            "lighting" => Tab::Lighting,
+            "settings" => Tab::Settings,
+            _ => Tab::Keys,
+        };
+        self.section = match section {
+            "bindings" => Section::Bindings,
+            "macros" => Section::Macros,
+            "gamepad" => Section::Gamepad,
+            _ => Section::Actuation,
+        };
     }
 
     fn start(&mut self) {
@@ -207,7 +233,10 @@ impl App {
         match e {
             Event::Status(s) => self.on_status(s),
             Event::Devices => self.load_devices(),
-            Event::KeyDepth { id, key, depth, .. } if self.ours(Some(&id)) => self.depth[key as usize] = depth,
+            Event::KeyDepth { id, key, depth, travel, down } if self.ours(Some(&id)) => {
+                self.depth[key as usize] = depth;
+                self.lead = (depth, travel, down, key);
+            }
             Event::ReadProgress { id, done, total, key } => {
                 // The first keyboard attaches, and reads, before its `devices` event arrives.
                 if self.keyboard.is_none() {
