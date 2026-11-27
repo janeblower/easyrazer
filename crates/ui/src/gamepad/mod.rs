@@ -70,6 +70,9 @@ impl GamepadState {
 
 /// Every frame: keeps the live input and the driver status fresh while they are on screen.
 pub fn poll(app: &mut App) {
+    if !easyrazer_backend::gamepad::AVAILABLE {
+        return;
+    }
     let key = (app.keyboard.clone(), app.status.as_ref().and_then(|s| s.profile));
     if app.gamepad.input_for.as_ref() != Some(&key) {
         app.gamepad.input_for = Some(key);

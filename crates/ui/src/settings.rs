@@ -56,7 +56,9 @@ pub fn ui(app: &mut App, ui: &mut Ui) {
     widgets::card(ui, |ui| {
         app_group(app, ui, &s);
         keyboard_group(app, ui, &s);
-        driver_group(app, ui);
+        if easyrazer_backend::gamepad::AVAILABLE {
+            driver_group(app, ui);
+        }
         ui.add_space(8.0);
         egui::Frame::new().stroke(Stroke::new(1.0, theme::WRITE_LINE)).corner_radius(theme::RADIUS).inner_margin(egui::Margin::symmetric(12, 4)).show(ui, |ui| {
             ui.set_width(ui.available_width());

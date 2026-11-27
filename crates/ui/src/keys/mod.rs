@@ -38,7 +38,7 @@ pub fn open_section(app: &mut App, s: Section) {
 
 pub fn ui(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        let items: Vec<(Section, String)> = SECTIONS.iter().map(|(s, k)| (*s, app.t(k))).collect();
+        let items: Vec<(Section, String)> = SECTIONS.iter().filter(|(s, _)| *s != Section::Gamepad || easyrazer_backend::gamepad::AVAILABLE).map(|(s, k)| (*s, app.t(k))).collect();
         if let Some(s) = widgets::segments(ui, &items, app.section, true) {
             open_section(app, s);
         }

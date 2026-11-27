@@ -9,7 +9,7 @@ name = "easyrazer"
 path = "src/main.rs"
 
 [dependencies]
-easyrazer-backend = { path = "../backend" }
+easyrazer-backend = { path = "../backend", default-features = false }
 razer-core = { path = "../core" }
 egui = "0.37"
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "accesskit", "clipboard"] }
@@ -23,6 +23,7 @@ serde_json = "1"
 winresource = "0.1.34"
 
 [features]
-default = ["glow"]
+default = ["glow", "gamepad"]
+gamepad = ["easyrazer-backend/gamepad"]
 glow = ["eframe/glow"]
 wgpu = ["eframe/wgpu"]
