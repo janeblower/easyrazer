@@ -107,6 +107,11 @@ pub fn on_log(app: &mut App, id: String, entry: Entry) {
 pub fn on_settings(app: &mut App) {
     if mode(app) && app.dev.registry.is_empty() {
         app.dev.registry = api::dev_commands();
+        let s = app.jobs.backend().app_settings();
+        app.dev.console.restore(s.dev_recent);
+        if let Some(v) = &s.dev_traffic {
+            app.dev.traffic.restore(v);
+        }
         reload_log(app);
     }
 }

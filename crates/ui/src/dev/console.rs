@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use egui::{RichText, Ui};
 use razer_core::logged::Entry;
+use easyrazer_backend::settings::DEV_RECENT_MAX;
 use razer_core::registry::{CommandInfo, Flash};
 
 use super::{hex, is_error};
@@ -13,7 +14,6 @@ use crate::theme;
 
 /// `packet::ARGS_LEN`.
 const ARGS_LEN: usize = 80;
-const RECENT_MAX: usize = 20;
 
 pub type Registry = BTreeMap<String, CommandInfo>;
 
@@ -154,6 +154,10 @@ pub struct Console {
 }
 
 impl Console {
+    pub fn restore(&mut self, recent: Vec<String>) {
+        self.recent = recent;
+    }
+
     fn print(&mut self, kind: Kind, text: impl Into<String>, seq: Option<u64>) {
         self.out.push((kind, text.into(), seq));
     }
@@ -162,9 +166,12 @@ impl Console {
 fn send(app: &mut App, p: Parsed, text: String) {
     let c = &mut app.dev.console;
     c.recent.retain(|r| *r != text);
-    c.recent.insert(0, text);
-    c.recent.truncate(RECENT_MAX);
+    c.recent.insert(0, text.clone());
+    c.recent.truncate(DEV_RECENT_MAX);
     c.line.clear();
+    if let Err(e) = app.jobs.backend().add_dev_recent(text) {
+        app.show_error(e);
+    }
     let Some(id) = app.keyboard.clone() else { return };
     app.jobs.run(move |b| b.dev_exchange(&id, p.class, p.id, p.size, &p.args), |app, r: Result<Entry, String>| match r {
         Ok(e) => {

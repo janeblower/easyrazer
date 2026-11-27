@@ -1,5 +1,6 @@
 //! The traffic log: every exchange with the keyboard, filtered, and the one picked in detail.
 
+use easyrazer_backend::settings::DevTraffic;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use razer_core::logged::Entry;
@@ -8,7 +9,7 @@ use super::{hex, is_error, is_write, name_of};
 use crate::app::App;
 use crate::theme;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Show {
     All,
     Reads,
@@ -89,6 +90,25 @@ pub struct Traffic {
     columns: Vec<Col>,
 }
 
+impl Traffic {
+    /// Names nobody knows any more are skipped; an empty column list keeps the default.
+    pub fn restore(&mut self, v: &DevTraffic) {
+        let columns: Vec<Col> = COLUMNS.into_iter().filter(|c| v.columns.iter().any(|n| n == c.key())).collect();
+        if !columns.is_empty() {
+            self.columns = columns;
+        }
+        if let Some((s, _)) = SHOWS.iter().find(|(_, k)| *k == v.show) {
+            self.show = *s;
+        }
+        self.background = v.background;
+    }
+
+    pub fn view(&self) -> DevTraffic {
+        let show = SHOWS.iter().find(|(s, _)| *s == self.show).map_or("all", |(_, k)| k);
+        DevTraffic { columns: self.columns.iter().map(|c| c.key().to_string()).collect(), show: show.into(), background: self.background }
+    }
+}
+
 impl Default for Traffic {
     fn default() -> Self {
         Self {
@@ -130,6 +150,17 @@ pub fn dump(bytes: &[u8]) -> Vec<String> {
 }
 
 pub fn ui(app: &mut App, ui: &mut Ui) {
+    let before = app.dev.traffic.view();
+    shown(app, ui);
+    let after = app.dev.traffic.view();
+    if after != before
+        && let Err(e) = app.jobs.backend().set_dev_traffic(after)
+    {
+        app.show_error(e);
+    }
+}
+
+fn shown(app: &mut App, ui: &mut Ui) {
     let t = &mut app.dev.traffic;
     let source = t.frozen.clone().unwrap_or_else(|| app.dev.log.clone());
     let cleared = t.cleared_at;
@@ -359,6 +390,17 @@ mod tests {
         assert_eq!(visible(&all, 350.0), vec![Col::Time, Col::Name, Col::Status]);
         assert_eq!(visible(&[], 10.0), vec![Col::Name]);
         assert_eq!(visible(&[Col::Reply], 2000.0), vec![Col::Name, Col::Reply]);
+    }
+
+    #[test]
+    fn the_view_survives_a_restart_and_unknown_names_are_skipped() {
+        let mut t = Traffic { columns: vec![Col::Name, Col::Reply], show: Show::Errors, background: true, ..Default::default() };
+        let mut back = Traffic::default();
+        back.restore(&t.view());
+        assert_eq!((back.columns, back.show, back.background), (vec![Col::Name, Col::Reply], Show::Errors, true));
+        t = Traffic::default();
+        t.restore(&DevTraffic { columns: vec!["nope".into()], show: "nope".into(), background: false });
+        assert_eq!((t.columns, t.show), (Traffic::default().columns, Show::All));
     }
 
     #[test]
