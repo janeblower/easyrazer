@@ -14,12 +14,42 @@ type Version = [u32; 3];
 /// The oldest hidshim the app supports: the first that takes reports through shared memory,
 /// and on ARM64 the first with a driver for it.
 const REQUIRED: Version = if cfg!(target_arch = "aarch64") { [0, 4, 0] } else { [0, 3, 0] };
+/// The hidshim minor this build speaks to, the one its `hidshim` dependency is tagged with.
+/// Its patches install in place; a new minor may change the protocol, so it comes with a
+/// new EasyRazer that pins it.
+const PINNED: [u32; 2] = [0, 4];
 /// The release asset with the driver built in for this build's architecture.
 const RELEASE_EXE: &str = if cfg!(target_arch = "aarch64") { "hidshim-arm64.exe" } else { "hidshim.exe" };
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
+const RELEASES_API: &str = "/repos/janeblower/hidshim/releases?per_page=100";
+const RELEASES_LIMIT: usize = 1 << 20;
 const DOWNLOAD_LIMIT: usize = 16 << 20;
+
+/// From the oldest supported up to, not into, the minor after the pinned one.
+fn supported(v: Version) -> bool {
+    v >= REQUIRED && v < [PINNED[0], PINNED[1] + 1, 0]
+}
+
+#[derive(serde::Deserialize)]
+struct Release {
+    tag_name: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+}
+
+/// The newest published release of the pinned minor.
+fn pick(releases: &[Release]) -> Option<String> {
+    releases
+        .iter()
+        .filter(|r| !r.draft && !r.prerelease)
+        .filter_map(|r| Some((parse_version(&r.tag_name)?, &r.tag_name)))
+        .filter(|(v, _)| v[..2] == PINNED && supported(*v))
+        .max_by_key(|(v, _)| *v)
+        .map(|(_, tag)| tag.clone())
+}
 
 pub use super::DriverStatus as Status;
 
@@ -82,7 +112,7 @@ fn inf_directory() -> Result<PathBuf, String> {
 
 /// The boot task as the installed program reports it, which needs no elevation.
 fn boot_task(exe: &Path, version: Option<Version>) -> Option<bool> {
-    if version.is_none_or(|v| v < REQUIRED) { return None; }
+    if !version.is_some_and(supported) { return None; }
     let output = Command::new(exe).arg("autostart").creation_flags(CREATE_NO_WINDOW).output().ok()?;
     if !output.status.success() { return None; }
     parse_boot(&String::from_utf8_lossy(&output.stdout))
@@ -103,7 +133,7 @@ pub fn status() -> Result<Status, String> {
     Ok(Status {
         installed,
         // A hand-installed driver has no program to compare; the pad checks its protocol on open.
-        ready: installed && version.is_none_or(|v| v >= REQUIRED),
+        ready: installed && version.is_none_or(supported),
         version: version.map(|v| v.map(|part| part.to_string()).join(".")),
         legacy: !legacy_packages(&inf_directory()?).map_err(|e| e.to_string())?.is_empty(),
         boot: program.filter(|_| installed).and_then(|(exe, v)| boot_task(&exe, v)),
@@ -165,7 +195,7 @@ pub(super) fn deploy(replace: bool) -> Result<(), String> {
         remove_legacy()?;
     }
     match program() {
-        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, install_args(boot_task(&exe, Some(version)) == Some(true))),
+        Some((exe, Some(version))) if supported(version) => run_program(&exe, install_args(boot_task(&exe, Some(version)) == Some(true))),
         _ => install_latest(),
     }
 }
@@ -180,10 +210,13 @@ fn install_latest() -> Result<(), String> {
     run_program(&path, &["install", "--no-autostart"])
 }
 
-/// The latest hidshim.exe, checked against its release's checksums.
+/// hidshim.exe of the newest release of the pinned minor, checked against its release's checksums.
 fn download_latest() -> Result<Vec<u8>, String> {
+    let list = crate::sys::download("api.github.com", RELEASES_API, RELEASES_LIMIT).map_err(|e| format!("hidshim releases: {e}"))?;
+    let releases: Vec<Release> = serde_json::from_slice(&list).map_err(|e| format!("hidshim releases: {e}"))?;
+    let tag = pick(&releases).ok_or_else(|| format!("hidshim has no release {}.{}.x", PINNED[0], PINNED[1]))?;
     let download = |name: &str| {
-        crate::sys::download("github.com", &format!("{RELEASES}{name}"), DOWNLOAD_LIMIT)
+        crate::sys::download("github.com", &format!("/janeblower/hidshim/releases/download/{tag}/{name}"), DOWNLOAD_LIMIT)
             .map_err(|e| format!("hidshim download: {e}"))
     };
     let exe = download(RELEASE_EXE)?;
@@ -240,7 +273,7 @@ fn install_args(boot: bool) -> &'static [&'static str] {
 /// Runs elevated.
 pub(super) fn boot(on: bool) -> Result<(), String> {
     match program() {
-        Some((exe, Some(version))) if version >= REQUIRED => run_program(&exe, &["autostart", if on { "on" } else { "off" }]),
+        Some((exe, Some(version))) if supported(version) => run_program(&exe, &["autostart", if on { "on" } else { "off" }]),
         _ => Err("Update hidshim to start its driver with Windows".into()),
     }
 }
@@ -335,6 +368,31 @@ mod tests {
         assert_eq!(names, ["oem1.inf", "oem2.inf"]);
     }
 
+    fn release(tag: &str, prerelease: bool) -> Release {
+        Release { tag_name: tag.into(), draft: false, prerelease }
+    }
+
+    #[test]
+    fn patches_of_the_pinned_minor_are_taken_and_later_minors_are_not() {
+        let next = format!("{}.{}.0", PINNED[0], PINNED[1] + 1);
+        let patch = format!("{}.{}.10", PINNED[0], PINNED[1]);
+        let releases = [release(&next, false), release(&patch, false), release(&format!("{}.{}.2", PINNED[0], PINNED[1]), false), release("nightly", true)];
+        assert_eq!(pick(&releases), Some(patch.clone()));
+        assert!(supported(parse_version(&patch).unwrap()));
+        assert!(!supported(parse_version(&next).unwrap()), "a newer minor may speak another protocol");
+        assert_eq!(pick(&[release(&next, false)]), None);
+        assert_eq!(pick(&[release(&format!("{}.{}.11", PINNED[0], PINNED[1]), true)]), None, "pre-releases are skipped");
+    }
+
+    #[test]
+    fn the_pin_matches_the_hidshim_dependency() {
+        let manifest = include_str!("../../Cargo.toml");
+        let line = manifest.lines().find(|l| l.starts_with("hidshim")).unwrap();
+        let tag = line.split("tag = \"").nth(1).and_then(|t| t.split('"').next()).unwrap();
+        let v = parse_version(tag).unwrap();
+        assert_eq!(v[..2], PINNED, "bump PINNED together with the hidshim tag");
+    }
+
     #[test]
     fn program_versions_compare_by_number() {
         assert_eq!(parse_version("0.3.0"), Some(REQUIRED));
@@ -363,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "downloads the latest hidshim release"]
+    #[ignore = "downloads the newest hidshim release of the pinned minor"]
     fn latest_release_matches_its_checksum() {
         let exe = download_latest().unwrap();
         assert!(exe.starts_with(b"MZ"));
