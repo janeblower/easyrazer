@@ -88,6 +88,8 @@ pub struct App {
     pub keys_view: crate::keys::View,
     pub macros: crate::keys::macros::Editor,
     pub lighting: crate::lighting::Lighting,
+    pub settings_view: Option<easyrazer_backend::api::AppSettings>,
+    pub settings_message: String,
     /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
     pub lead: (u8, u8, bool, u8),
     quitting: bool,
@@ -132,6 +134,8 @@ impl App {
             keys_view: Default::default(),
             macros: Default::default(),
             lighting: Default::default(),
+            settings_view: None,
+            settings_message: String::new(),
             lead: (0, 0, false, 0),
             quitting: false,
         };
@@ -268,6 +272,7 @@ impl App {
             Event::HidLog { id, entry } => crate::dev::on_log(self, id, entry),
             Event::SettingsChanged => {
                 self.tray.sync_autostart();
+                crate::settings::reload(self);
                 crate::dev::on_settings(self);
             }
             Event::LanguageChanged => {
