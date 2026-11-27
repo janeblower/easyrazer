@@ -11,8 +11,11 @@ static CHANGING: AtomicBool = AtomicBool::new(false);
 
 type Version = [u32; 3];
 
-/// The oldest hidshim the app supports: the first that takes reports through shared memory.
-const REQUIRED: Version = [0, 3, 0];
+/// The oldest hidshim the app supports: the first that takes reports through shared memory,
+/// and on ARM64 the first with a driver for it.
+const REQUIRED: Version = if cfg!(target_arch = "aarch64") { [0, 4, 0] } else { [0, 3, 0] };
+/// The release asset with the driver built in for this build's architecture.
+const RELEASE_EXE: &str = if cfg!(target_arch = "aarch64") { "hidshim-arm64.exe" } else { "hidshim.exe" };
 const UNINSTALL_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\hidshim";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
@@ -183,9 +186,9 @@ fn download_latest() -> Result<Vec<u8>, String> {
         crate::sys::download("github.com", &format!("{RELEASES}{name}"), DOWNLOAD_LIMIT)
             .map_err(|e| format!("hidshim download: {e}"))
     };
-    let exe = download("hidshim.exe")?;
+    let exe = download(RELEASE_EXE)?;
     let sums = String::from_utf8_lossy(&download("SHA256SUMS")?).into_owned();
-    let expected = checksum(&sums, "hidshim.exe").ok_or("hidshim release lists no checksum")?;
+    let expected = checksum(&sums, RELEASE_EXE).ok_or("hidshim release lists no checksum")?;
     let actual: String = crate::sys::sha256(&exe).map_err(|e| e.to_string())?.iter().map(|b| format!("{b:02x}")).collect();
     if !actual.eq_ignore_ascii_case(expected) {
         return Err("hidshim release checksum mismatch".into());
