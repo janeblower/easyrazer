@@ -1,6 +1,7 @@
 //! The virtual gamepad: its config per profile, its live input and the hidshim driver.
 
 pub mod model;
+mod shape;
 pub mod tab;
 
 use std::time::{Duration, Instant};
@@ -34,6 +35,9 @@ pub struct GamepadState {
     pub driver_op: Option<DriverOp>,
     pub install_error: Option<String>,
     pub boot_changing: bool,
+    /// The control waiting for a key press, and the depth it was armed with.
+    pub capture: Option<&'static str>,
+    pub previous: Vec<u8>,
     polling: bool,
     next_poll: Option<Instant>,
     /// What the last driver check was made for; a change of tab or section checks again.
@@ -47,11 +51,11 @@ impl GamepadState {
     }
 
     pub fn set(&mut self, config: Config) {
-        self.edit = (config != self.base).then_some(config);
+        self.edit = (!model::same(&config, &self.base)).then_some(config);
     }
 
     pub fn take(&mut self, config: Config) {
-        if self.edit.as_ref() == Some(&config) {
+        if self.edit.as_ref().is_some_and(|e| model::same(e, &config)) {
             self.edit = None;
         }
         self.base = config;

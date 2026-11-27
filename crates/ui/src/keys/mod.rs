@@ -47,8 +47,11 @@ pub fn ui(app: &mut App, ui: &mut Ui) {
         }
     });
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input() && app.dialogs.is_empty() {
-        app.keys.selection.clear();
-        app.gamepad.selected = None;
+        // A capture takes the first Esc.
+        if app.gamepad.capture.take().is_none() {
+            app.keys.selection.clear();
+            app.gamepad.selected = None;
+        }
     }
     match app.section {
         Section::Macros => macros::ui(app, ui),
