@@ -16,6 +16,10 @@
     "source": "Исходный код доступен на {github}.",
     "close": "Закрыть"
   },
+  "startup": {
+    "failed": "EasyRazer не смог открыть окно: {error}",
+    "glPack": "На Windows on ARM для OpenGL нужен пакет «OpenCL, OpenGL и Vulkan Compatibility Pack» из Microsoft Store. Открыть его страницу?"
+  },
   "updates": {
     "auto": "Проверять обновления",
     "autoHint": "При запуске и раз в день смотреть на GitHub, не вышла ли новая версия",

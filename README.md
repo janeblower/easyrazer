@@ -97,6 +97,19 @@ untested models? Reports are very welcome.
 2. Quit Synapse completely, including its tray icon.
 3. Run `EasyRazer.exe`.
 
+Other builds in the same release:
+
+| File | For |
+|---|---|
+| `EasyRazer.exe` | x64, with the virtual gamepad |
+| `EasyRazer-x64-no-gamepad.exe` | x64, without the gamepad and its hidshim driver |
+| `EasyRazer-arm64.exe` | Windows on ARM, without the gamepad |
+| `EasyRazer-arm64-gamepad-experimental.exe` | Windows on ARM, with the gamepad; experimental, not yet tested on hardware |
+
+On Windows on ARM the window needs OpenGL, which comes with the
+[OpenCL, OpenGL and Vulkan Compatibility Pack](https://apps.microsoft.com/detail/9nqpsl29bfff)
+from the Microsoft Store. Without it EasyRazer says so at start and offers the link.
+
 Nightly builds from `master` are published as the
 [`nightly`](https://github.com/janeblower/easyrazer/releases/tag/nightly) pre-release.
 

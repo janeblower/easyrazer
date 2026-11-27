@@ -173,6 +173,8 @@ pub enum Link {
     Repo,
     License,
     LatestRelease,
+    /// OpenGL on Windows on ARM comes from this Store package.
+    GlCompatibilityPack,
 }
 
 #[derive(Serialize)]
@@ -208,6 +210,7 @@ pub fn open_link(link: Link) -> Result<(), String> {
         Link::Repo => "https://github.com/janeblower/easyrazer",
         Link::License => "https://github.com/janeblower/easyrazer/blob/master/LICENSE",
         Link::LatestRelease => "https://github.com/janeblower/easyrazer/releases/latest",
+        Link::GlCompatibilityPack => "https://apps.microsoft.com/detail/9nqpsl29bfff",
     })
     .map_err(|e| e.to_string())
 }
