@@ -1,0 +1,71 @@
+name: build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+
+      - run: cargo test --workspace --locked
+      - run: cargo test --locked -p easyrazer-backend -p easyrazer-ui --no-default-features --features easyrazer-ui/glow
+      - run: cargo run --locked -p easyrazer-licenses -- LICENSES.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licenses
+          path: LICENSES.txt
+
+  build:
+    needs: check
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - asset: EasyRazer.exe
+            target: x86_64-pc-windows-msvc
+            features: ""
+          - asset: EasyRazer-x64-no-gamepad.exe
+            target: x86_64-pc-windows-msvc
+            features: --no-default-features --features glow
+          - asset: EasyRazer-arm64.exe
+            target: aarch64-pc-windows-msvc
+            features: --no-default-features --features glow
+          # Experimental until the ARM64 hidshim driver has run on hardware.
+          - asset: EasyRazer-arm64-gamepad-experimental.exe
+            target: aarch64-pc-windows-msvc
+            features: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.asset }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: licenses
+
+      # Windows file version must be numeric, so nightlies keep the Cargo.toml placeholder.
+      - run: |
+          export EASYRAZER_LICENSES="$PWD/LICENSES.txt"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            export EASYRAZER_VERSION="$GITHUB_REF_NAME"
+          fi
+          cargo build --release --locked -p easyrazer-ui --target ${{ matrix.target }} ${{ matrix.features }}
+          mv target/${{ matrix.target }}/release/easyrazer.exe "${{ matrix.asset }}"
+        shell: bash
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}

@@ -13,39 +13,35 @@ concurrency: release-${{ github.ref }}
 
 jobs:
   build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: actions/download-artifact@v8
         with:
-          tool: cargo-about
-
-      - run: cargo test --workspace --locked
-
-      - run: cargo run --locked -p easyrazer-licenses -- LICENSES.txt
-
-      # Windows file version must be numeric, so nightlies keep the Cargo.toml placeholder.
-      - run: |
-          export EASYRAZER_LICENSES="$PWD/LICENSES.txt"
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            export EASYRAZER_VERSION="$GITHUB_REF_NAME"
-          fi
-          cargo build --release --locked -p easyrazer-ui
-        shell: bash
-
+          path: dist
+          merge-multiple: true
       - name: Publish
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: >-
+            `EasyRazer.exe` is the build for most PCs (x64, with the virtual gamepad).
+            `EasyRazer-x64-no-gamepad.exe` leaves out the gamepad and its hidshim driver.
+            `EasyRazer-arm64.exe` is for Windows on ARM and needs the OpenCL, OpenGL and Vulkan
+            Compatibility Pack from the Microsoft Store.
+            `EasyRazer-arm64-gamepad-experimental.exe` adds the gamepad on ARM; its driver
+            has not been tested on hardware yet.
         run: |
-          mv target/release/easyrazer.exe EasyRazer.exe
+          cd dist
           if [ "$GITHUB_REF_TYPE" = tag ]; then
-            gh release create "$GITHUB_REF_NAME" EasyRazer.exe LICENSES.txt --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+              --notes "$NOTES" --generate-notes
           else
             # Recreated on every merge so the pre-release stays at the top of the list.
-            gh release delete nightly --cleanup-tag --yes || true
-            gh release create nightly EasyRazer.exe LICENSES.txt --prerelease --target "$GITHUB_SHA" \
-              --title "Nightly ${GITHUB_SHA::7}" --generate-notes
+            gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+            gh release create nightly * --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "Nightly ${GITHUB_SHA::7}" --notes "$NOTES" --generate-notes
           fi
