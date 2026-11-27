@@ -156,6 +156,7 @@ pub struct AppSettings {
     pub watch_synapse: bool,
     pub confirm_write: bool,
     pub autostart_offered: bool,
+    pub check_updates: bool,
     pub language: Option<String>,
     pub dev_mode: bool,
     pub dev_log_size: usize,
@@ -171,6 +172,7 @@ pub struct AppSettings {
 pub enum Link {
     Repo,
     License,
+    LatestRelease,
 }
 
 #[derive(Serialize)]
@@ -205,8 +207,14 @@ pub fn open_link(link: Link) -> Result<(), String> {
     open::that_detached(match link {
         Link::Repo => "https://github.com/janeblower/easyrazer",
         Link::License => "https://github.com/janeblower/easyrazer/blob/master/LICENSE",
+        Link::LatestRelease => "https://github.com/janeblower/easyrazer/releases/latest",
     })
     .map_err(|e| e.to_string())
+}
+
+/// The tag of the latest release on GitHub.
+pub fn latest_release() -> Result<String, String> {
+    crate::updates::latest()
 }
 
 pub fn gamepad_driver() -> Result<gamepad::drivers::Status, String> {
@@ -521,6 +529,7 @@ impl Backend {
             watch_synapse: s.watch_synapse,
             confirm_write: s.confirm_write,
             autostart_offered: s.autostart_offered,
+            check_updates: s.check_updates,
             language: s.language,
             dev_mode: s.dev_mode,
             dev_log_size: s.dev_log_size,
@@ -553,6 +562,12 @@ impl Backend {
 
     pub fn close_action(&self) -> CloseAction {
         self.settings().close_action
+    }
+
+    pub fn set_check_updates(&self, on: bool) -> Result<(), String> {
+        self.update_settings(|s| s.check_updates = on)?;
+        self.emit(Event::SettingsChanged);
+        Ok(())
     }
 
     pub fn set_watch_synapse(&self, on: bool) -> Result<(), String> {

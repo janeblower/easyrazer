@@ -19,6 +19,7 @@ mod status;
 mod text;
 mod theme;
 mod tray;
+mod updates;
 mod widgets;
 
 use easyrazer_backend::{Backend, autostart, device};

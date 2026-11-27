@@ -9,6 +9,7 @@ use crate::app::App;
 use crate::dialogs::Dialog;
 use crate::gamepad::{self, DriverOp};
 use crate::icons::{self, Icon};
+use crate::text::VERSION;
 use crate::{theme, widgets};
 
 /// The settings as last read; read again after every change and on `SettingsChanged`.
@@ -97,6 +98,18 @@ fn app_group(app: &mut App, ui: &mut Ui, s: &AppSettings) {
     row(ui, &app.t("settings.autostart"), Some(&app.t("settings.hints.autostart")), |ui| {
         if let Some(on) = switch(ui, s.autostart, true) {
             set(app, move |b| b.set_autostart(on));
+        }
+    });
+    row(ui, &app.t("updates.auto"), Some(&app.t("updates.autoHint")), |ui| {
+        if let Some(on) = switch(ui, s.check_updates, true) {
+            set(app, move |b| b.set_check_updates(on));
+        }
+    });
+    let status = crate::updates::status(app);
+    row(ui, &app.tf("updates.version", &[("version", VERSION)]), status.as_deref(), |ui| {
+        let checking = crate::updates::checking(app);
+        if widgets::button(ui, app.t(if checking { "updates.checking" } else { "updates.check" }), !checking).clicked() {
+            crate::updates::check(app);
         }
     });
 }

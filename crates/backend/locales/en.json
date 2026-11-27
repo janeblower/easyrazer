@@ -16,6 +16,19 @@
     "source": "Source code is available on {github}.",
     "close": "Close"
   },
+  "updates": {
+    "auto": "Check for updates",
+    "autoHint": "At start and once a day, look on GitHub for a new version",
+    "version": "Version {version}",
+    "check": "Check now",
+    "checking": "Checking…",
+    "upToDate": "This is the latest version",
+    "available": "Version {version} is out",
+    "devBuild": "This is a development build; the latest release is {version}",
+    "failed": "Could not check: {error}",
+    "download": "Download",
+    "dismiss": "Hide"
+  },
   "common": {
     "selectAll": "Select all",
     "clearSelection": "Clear selection",

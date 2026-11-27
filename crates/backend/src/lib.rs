@@ -21,6 +21,7 @@ mod stored;
 #[allow(unsafe_code)]
 pub mod sys;
 mod transfer;
+pub mod updates;
 mod wake;
 mod wheel;
 
