@@ -403,7 +403,9 @@ impl eframe::App for App {
         }
         crate::dev::panel(self, ui);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(16)).show(ui, |ui| {
-            egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+            // The window is never narrower than the page, so a sideways scroll only ever shows a
+            // half-pixel of overflow.
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 ui.set_max_width(1121.0);
                 shell::ui(self, ui);
             });
