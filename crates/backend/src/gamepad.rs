@@ -1,13 +1,41 @@
+//! The virtual gamepad. Profiles keep its layout in every build; the pad itself and its
+//! hidshim driver exist only with the `gamepad` feature.
+
+#[cfg(feature = "gamepad")]
 use hidshim::{Buttons, Gamepad, State};
 use razer_core::binding::{Action, UNIQUE};
 use razer_core::layout::{self, Board};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+#[cfg(feature = "gamepad")]
 use std::io;
+#[cfg(feature = "gamepad")]
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+#[cfg(feature = "gamepad")]
 mod process;
+#[cfg(feature = "gamepad")]
 pub mod drivers;
+#[cfg(not(feature = "gamepad"))]
+mod absent;
+#[cfg(not(feature = "gamepad"))]
+pub use absent::{Runtime, driver_helper, drivers};
+
+/// This build drives a virtual gamepad.
+pub const AVAILABLE: bool = cfg!(feature = "gamepad");
+
+/// What the window shows about the hidshim driver.
+#[derive(Clone, Debug, Serialize)]
+pub struct DriverStatus {
+    pub installed: bool,
+    pub ready: bool,
+    /// The installed hidshim's version, when it was installed as a program.
+    pub version: Option<String>,
+    /// HIDMaestro driver packages are still installed.
+    pub legacy: bool,
+    /// Whether hidshim brings its pads back on boot; none when the installed one cannot.
+    pub boot: Option<bool>,
+}
 
 pub const CONTROLS: [&str; 24] = [
     "left_up", "left_down", "left_left", "left_right", "left_click",
@@ -58,7 +86,8 @@ impl Config {
     }
 
     pub fn configure(&self, cfg: &mut razer_core::rapid::Config) {
-        if !self.enabled { return; }
+        // Without a pad the keys bound to it keep typing.
+        if !self.enabled || !AVAILABLE { return; }
         for &key in self.bindings.values() {
             cfg.bind[key as usize] = Some(Action::Disabled);
             // The app's own switches stay: a gamepad on G must not lose Fn+G.
@@ -69,6 +98,7 @@ impl Config {
         cfg.snap.retain(|g| !g.keys.iter().any(|k| self.bindings.values().any(|v| v == k)));
     }
 
+    #[cfg(feature = "gamepad")]
     fn output(&self, depth: &[u8; 256]) -> State {
         let value = |id: &str| {
             let raw = self.bindings.get(id).map_or(0, |&k| u32::from(depth[k as usize]));
@@ -111,15 +141,18 @@ impl Default for Input {
     fn default() -> Self { Self { depth: vec![0; 256], running: false, error: None } }
 }
 
+#[cfg(feature = "gamepad")]
 struct Session {
     pad: Gamepad,
     previous: State,
 }
 
+#[cfg(feature = "gamepad")]
 impl Drop for Session {
     fn drop(&mut self) { let _ = self.pad.submit(&State::default()); }
 }
 
+#[cfg(feature = "gamepad")]
 pub struct Runtime {
     pub config: Config,
     pub profile: u32,
@@ -130,12 +163,14 @@ pub struct Runtime {
     open: fn() -> io::Result<Gamepad>,
 }
 
+#[cfg(feature = "gamepad")]
 impl Default for Runtime {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "gamepad")]
 impl Runtime {
     pub fn new() -> Self {
         Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None, open: Gamepad::open }
@@ -240,11 +275,12 @@ impl Runtime {
     }
 }
 
+#[cfg(feature = "gamepad")]
 pub fn driver_helper(action: &str, args: &[String]) -> Result<(), String> {
     process::driver_helper(action, args)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "gamepad"))]
 mod editor_tests {
     use super::*;
 

@@ -18,17 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RELEASES: &str = "/janeblower/hidshim/releases/latest/download/";
 const DOWNLOAD_LIMIT: usize = 16 << 20;
 
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct Status {
-    pub installed: bool,
-    pub ready: bool,
-    /// The installed hidshim's version, when it was installed as a program.
-    pub version: Option<String>,
-    /// HIDMaestro driver packages are still installed.
-    pub legacy: bool,
-    /// Whether hidshim brings its pads back on boot; none when the installed one cannot.
-    pub boot: Option<bool>,
-}
+pub use super::DriverStatus as Status;
 
 fn parse_version(text: &str) -> Option<Version> {
     let mut parts = [0; 3];

@@ -136,6 +136,9 @@ cargo run -p easyrazer-ui              # отладочная сборка
 cargo build --release -p easyrazer-ui  # target\release\easyrazer.exe
 ```
 
+Без виртуального геймпада и его драйвера hidshim:
+`cargo build --release -p easyrazer-ui --no-default-features --features glow`.
+
 Сторонние лицензии в окне «О программе» показывает только сборка, сделанная с ними:
 установите cargo-about (`cargo install cargo-about --locked --features cli`), выполните
 `cargo run -p easyrazer-licenses -- LICENSES.txt` и соберите с переменной

@@ -135,6 +135,9 @@ cargo run -p easyrazer-ui              # debug build
 cargo build --release -p easyrazer-ui  # target\release\easyrazer.exe
 ```
 
+Without the virtual gamepad and its hidshim driver:
+`cargo build --release -p easyrazer-ui --no-default-features --features glow`.
+
 The About window lists third-party licenses only in a build made with them: install
 cargo-about (`cargo install cargo-about --locked --features cli`), run
 `cargo run -p easyrazer-licenses -- LICENSES.txt` and build with `EASYRAZER_LICENSES`

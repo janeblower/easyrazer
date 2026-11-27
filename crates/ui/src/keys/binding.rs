@@ -214,7 +214,7 @@ pub fn card(app: &mut App, ui: &mut Ui, title: &str, key: Option<u8>, action: Op
             let name = |s: &System| app_t(&app.lang, &format!("bindings.system.{}", tag(s)));
             let taken = taken(app, key);
             egui::ComboBox::from_id_salt(("system", hypershift)).selected_text(name(&s)).width(240.0).show_ui(ui, |ui| {
-                for x in SYSTEM {
+                for x in SYSTEM.into_iter().filter(|x| *x != System::GamepadToggle || easyrazer_backend::gamepad::AVAILABLE) {
                     let mut text = name(&x);
                     if let Some(c) = taken.iter().find(|(t, _)| *t == x).map(|(_, c)| c) {
                         text = format!("{text}  — {c}");
