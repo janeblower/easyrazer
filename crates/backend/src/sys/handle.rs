@@ -39,8 +39,10 @@ pub fn current_process() -> BorrowedHandle<'static> {
 /// Hands this process's resident pages back to Windows; they come back as they are touched.
 /// In the tray that is mostly the graphics driver, which cannot be unloaded while it runs.
 pub fn trim_working_set() {
-    // SAFETY: the pseudo-handle needs no closing; `usize::MAX` for both sizes asks for a trim.
-    unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
+    // SAFETY: no arguments; the pseudo-handle needs no closing.
+    let process = unsafe { GetCurrentProcess() };
+    // SAFETY: `process` is this process; `usize::MAX` for both sizes asks for a trim.
+    unsafe { SetProcessWorkingSetSize(process, usize::MAX, usize::MAX) };
 }
 
 pub fn open_process(pid: u32, access: u32) -> io::Result<OwnedHandle> {

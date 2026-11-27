@@ -172,7 +172,11 @@ fn send(app: &mut App, p: Parsed, text: String) {
     if let Err(e) = app.jobs.backend().add_dev_recent(text) {
         app.show_error(e);
     }
-    let Some(id) = app.keyboard.clone() else { return };
+    let Some(id) = app.keyboard.clone() else {
+        let none = app.t("dev.noDevice");
+        app.dev.console.print(Kind::Error, none, None);
+        return;
+    };
     app.jobs.run(move |b| b.dev_exchange(&id, p.class, p.id, p.size, &p.args), |app, r: Result<Entry, String>| match r {
         Ok(e) => {
             app.dev.from_console.insert(e.seq);
@@ -273,8 +277,11 @@ fn take_keys(ui: &Ui, focused: bool, esc_ours: bool) -> Keys {
         return Keys::default();
     }
     ui.input_mut(|i| {
+        // A held Enter repeats, and one key press must never both ask and answer a flash write.
+        let fresh_enter = i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if modifiers.is_none()));
         let mut take = |k| i.consume_key(egui::Modifiers::NONE, k);
-        Keys { up: take(egui::Key::ArrowUp), down: take(egui::Key::ArrowDown), tab: take(egui::Key::Tab), enter: take(egui::Key::Enter), esc: esc_ours && take(egui::Key::Escape) }
+        let enter = take(egui::Key::Enter) && fresh_enter;
+        Keys { up: take(egui::Key::ArrowUp), down: take(egui::Key::ArrowDown), tab: take(egui::Key::Tab), enter, esc: esc_ours && take(egui::Key::Escape) }
     })
 }
 
@@ -313,6 +320,8 @@ fn input(app: &mut App, ui: &mut Ui) {
     }
     let blurred = had_focus && !edit.has_focus() && !c.popup_hovered;
     if pending {
+        // No list is drawn while a question waits, so nothing can be hovered.
+        c.popup_hovered = false;
         // The question holds the line as it was sent.
         c.line = before;
         if keys.enter {
@@ -354,6 +363,7 @@ fn suggestions(app: &mut App, ui: &mut Ui, keys: &Keys, id: egui::Id, at: egui::
         cursor_to_end(ui.ctx(), id, &c.line);
     }
     if keys.enter {
+        c.popup_hovered = false;
         match next.filter(|n| c.list_open && accepts(&c.line, n, c.navigated, &app.dev.registry)) {
             Some(n) => {
                 c.line = n;
