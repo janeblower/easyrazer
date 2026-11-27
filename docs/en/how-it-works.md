@@ -6,7 +6,8 @@
 
 Measured on the same PC: Synapse 4.0.827 right after launch, EasyRazer 0.10.0 in the
 tray in HW mode. The window is drawn through OpenGL; the graphics driver stays loaded in the
-tray, but its pages go back to Windows a few seconds after the window hides.
+tray; in HW mode its pages go back to Windows a few seconds after the window hides. Driver
+mode keeps them, so a key press never waits for memory.
 
 | | Synapse 4 | EasyRazer |
 |---|---|---|

@@ -52,8 +52,6 @@ const ERROR_SHOWN: Duration = Duration::from_secs(10);
 /// and a start in the tray has read the keyboard.
 const TRIM_AFTER: Duration = Duration::from_secs(5);
 const TRIM_AFTER_START: Duration = Duration::from_secs(20);
-/// The backend's threads touch pages again in the tray, so the trim repeats.
-const TRIM_EVERY: Duration = Duration::from_secs(10 * 60);
 
 pub struct App {
     pub jobs: Jobs,
@@ -341,12 +339,11 @@ impl App {
             ctx.request_repaint_after(left);
             return;
         }
-        if self.is_visible() {
-            self.trim_at = None;
-            return;
+        self.trim_at = None;
+        // Driver mode types from this process: its pages stay where a key press finds them.
+        if !self.is_visible() && !self.driver() {
+            easyrazer_backend::sys::trim_working_set();
         }
-        easyrazer_backend::sys::trim_working_set();
-        self.trim_at = Some(Instant::now() + TRIM_EVERY);
     }
 
     fn on_close(&mut self, ctx: &egui::Context) {
