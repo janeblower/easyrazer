@@ -106,22 +106,22 @@ pub struct LightingState {
     pub custom: Option<BTreeMap<u8, Rgb>>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ProfileView {
-    id: u32,
-    name: String,
-    slot: Option<u8>,
+    pub id: u32,
+    pub name: String,
+    pub slot: Option<u8>,
     /// Differs from its slot.
-    unsaved: bool,
+    pub unsaved: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ProfilesView {
-    profiles: Vec<ProfileView>,
-    loaded: Option<u32>,
+    pub profiles: Vec<ProfileView>,
+    pub loaded: Option<u32>,
     /// The slot the keyboard starts with without the app.
-    startup: Option<u8>,
-    free_slot: bool,
+    pub startup: Option<u8>,
+    pub free_slot: bool,
 }
 
 pub struct Device {

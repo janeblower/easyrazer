@@ -36,7 +36,7 @@ pub struct DeviceEntry {
     pub driver_mode: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DevicesView {
     pub devices: Vec<DeviceEntry>,
     /// PID of a Razer keyboard without a description.

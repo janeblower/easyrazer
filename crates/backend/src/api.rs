@@ -58,7 +58,7 @@ pub fn lock(d: &Mutex<Device>) -> MutexGuard<'_, Device> {
     d.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct KeyView {
     /// Key name from `keymap`, empty for lighting zones.
     pub name: &'static str,

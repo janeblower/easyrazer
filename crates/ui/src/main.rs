@@ -1,21 +1,34 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 
+mod about;
 mod app;
+mod changes;
+mod dev;
+mod dialogs;
+mod gamepad;
 mod icons;
 mod instance;
+mod jobs;
+mod keys;
+mod lighting;
+mod session;
+mod settings;
+mod shell;
 mod status;
+mod text;
 mod theme;
 mod tray;
+mod widgets;
 
-use easyrazer_backend::{Backend, autostart, device, gamepad};
+use easyrazer_backend::{Backend, autostart, device};
 
 const ICON: &[u8] = include_bytes!("../../../app/src-tauri/icons/128x128.png");
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-uninstall" | "--gamepad-boot-on" | "--gamepad-boot-off")) {
-        if let Err(e) = gamepad::driver_helper(&args[0], &args[1..]) {
+        if let Err(e) = easyrazer_backend::gamepad::driver_helper(&args[0], &args[1..]) {
             eprintln!("hidshim: {e}");
             std::process::exit(1);
         }

@@ -11,6 +11,9 @@ egui = "0.37"
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "accesskit", "clipboard"] }
 egui_extras = { version = "0.37", features = ["svg"] }
 tray-icon = "0.26"
+rfd = "0.17"
+serde = "1"
+serde_json = "1"
 
 [features]
 default = ["glow"]

@@ -11,6 +11,13 @@ pub const LINE: Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
 pub const TEXT: Color32 = Color32::from_rgb(0xe8, 0xe8, 0xe8);
 pub const MUTED: Color32 = Color32::from_rgb(0x8a, 0x8a, 0x8a);
 pub const DRIVER: Color32 = Color32::from_rgb(0xd7, 0x54, 0x11);
+pub const INK: Color32 = Color32::from_rgb(0x0b, 0x0b, 0x0b);
+pub const KEY_OFF: Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a);
+pub const HS: Color32 = Color32::from_rgb(0x2c, 0xb8, 0xe8);
+pub const EDITED: Color32 = Color32::from_rgb(0xd6, 0xa0, 0x2c);
+pub const WRITE: Color32 = Color32::from_rgb(0xff, 0xb0, 0x70);
+pub const WRITE_LINE: Color32 = Color32::from_rgb(0x8a, 0x5a, 0x20);
+pub const DEV: Color32 = Color32::from_rgb(0xa8, 0x7c, 0xf0);
 pub const ACCENT: Color32 = Color32::from_rgb(0x44, 0xd6, 0x2c);
 pub const WARN: Color32 = Color32::from_rgb(0xff, 0xcf, 0x7a);
 pub const WARN_BG: Color32 = Color32::from_rgb(0x3a, 0x2a, 0x10);
@@ -21,6 +28,9 @@ pub const RADIUS: u8 = 6;
 /// Bundled, so the look does not depend on the fonts a system has.
 const REGULAR: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
 const SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
+/// Subsets of Noto Sans Symbols 2 and Noto Sans Math: the symbols the window uses that Inter lacks.
+const SYMBOLS: &[u8] = include_bytes!("../assets/fonts/NotoSansSymbols2-Subset.ttf");
+const MATH: &[u8] = include_bytes!("../assets/fonts/NotoSansMath-Subset.ttf");
 
 pub fn bold() -> FontFamily {
     FontFamily::Name("bold".into())
@@ -37,8 +47,15 @@ fn fonts() -> FontDefinitions {
     let mut f = FontDefinitions::default();
     f.font_data.insert("inter".into(), Arc::new(FontData::from_static(REGULAR)));
     f.font_data.insert("inter-semibold".into(), Arc::new(FontData::from_static(SEMIBOLD)));
-    // egui's own fonts stay behind Inter for the symbols it lacks.
-    f.families.entry(FontFamily::Proportional).or_default().insert(0, "inter".into());
+    f.font_data.insert("symbols".into(), Arc::new(FontData::from_static(SYMBOLS)));
+    f.font_data.insert("math".into(), Arc::new(FontData::from_static(MATH)));
+    // egui's own fonts stay behind for the emoji.
+    let proportional = f.families.entry(FontFamily::Proportional).or_default();
+    for (i, name) in ["inter", "symbols", "math"].into_iter().enumerate() {
+        proportional.insert(i, name.into());
+    }
+    let monospace = f.families.entry(FontFamily::Monospace).or_default();
+    monospace.extend(["symbols".to_string(), "math".to_string()]);
     let mut bold = vec!["inter-semibold".to_string()];
     bold.extend(f.families[&FontFamily::Proportional].iter().skip(1).cloned());
     f.families.insert(self::bold(), bold);

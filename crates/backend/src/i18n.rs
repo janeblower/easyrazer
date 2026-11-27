@@ -21,6 +21,11 @@ pub fn known(lang: &str) -> bool {
     tables().contains_key(lang)
 }
 
+/// The language a first start picks: the user's Windows language when the app has it.
+pub fn system_language() -> &'static str {
+    if crate::sys::user_locale().to_lowercase().starts_with("ru") { "ru" } else { FALLBACK }
+}
+
 /// Text for a dotted `key`; an unknown language or key falls back to English, then to the key.
 pub fn t(lang: &str, key: &str) -> String {
     lookup(lang, key).or_else(|| lookup(FALLBACK, key)).unwrap_or(key).to_string()
