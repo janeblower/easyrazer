@@ -22,6 +22,9 @@ mod tray;
 mod updates;
 mod widgets;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use easyrazer_backend::{Backend, autostart, device};
 
 const ICON: &[u8] = include_bytes!("../assets/icon.png");
@@ -57,17 +60,51 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     let shutdown = backend.clone();
-    let result = eframe::run_native(
+    let started = Arc::new(AtomicBool::new(false));
+    let created = started.clone();
+    // eframe panics, not errs, when OpenGL has no usable configuration.
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| eframe::run_native(
         "EasyRazer",
         options,
         Box::new(move |cc| {
+            created.store(true, Ordering::Relaxed);
             theme::install(&cc.egui_ctx);
             let tray = tray::Tray::new(&icon, &backend.lang(), &cc.egui_ctx).map_err(|e| e.to_string())?;
             instance.on_activate(cc.egui_ctx.clone());
             backend.start(shown);
             Ok(Box::new(app::App::new(backend, events, tray, &cc.egui_ctx, shown)))
         }),
-    );
+    )));
     shutdown.shutdown();
-    result
+    let opened = started.load(Ordering::Relaxed);
+    match run {
+        Ok(Err(e)) if !opened => {
+            startup_failed(&shutdown.lang(), &e.to_string());
+            Err(e)
+        }
+        Ok(result) => result,
+        Err(panic) if !opened => {
+            let text = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
+            startup_failed(&shutdown.lang(), &text);
+            std::process::exit(1);
+        }
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+/// Built without a console, the exe would otherwise end without a word.
+fn startup_failed(lang: &str, error: &str) {
+    use easyrazer_backend::{api, i18n};
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    let mut text = i18n::tf(lang, "startup.failed", &[("error", error)]);
+    // Windows on ARM has OpenGL only through a Store package.
+    let arm = cfg!(target_arch = "aarch64");
+    if arm {
+        text = format!("{text}\n\n{}", i18n::t(lang, "startup.glPack"));
+    }
+    let dialog = MessageDialog::new().set_level(MessageLevel::Error).set_title("EasyRazer").set_description(text);
+    let buttons = if arm { MessageButtons::YesNo } else { MessageButtons::Ok };
+    if dialog.set_buttons(buttons).show() == MessageDialogResult::Yes {
+        let _ = api::open_link(api::Link::GlCompatibilityPack);
+    }
 }
