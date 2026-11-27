@@ -10,6 +10,11 @@ pub const KEY: Color32 = Color32::from_rgb(0x2a, 0x2a, 0x2a);
 pub const LINE: Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
 pub const TEXT: Color32 = Color32::from_rgb(0xe8, 0xe8, 0xe8);
 pub const MUTED: Color32 = Color32::from_rgb(0x8a, 0x8a, 0x8a);
+/// A tab or a segment not picked: lighter than MUTED, so it does not read as disabled.
+pub const IDLE_TEXT: Color32 = Color32::from_rgb(0xb4, 0xb4, 0xb4);
+/// Under the pointer: a step up from PANEL, below KEY.
+pub const HOVER: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+pub const LINE_HOVER: Color32 = Color32::from_rgb(0x4c, 0x4c, 0x4c);
 pub const DRIVER: Color32 = Color32::from_rgb(0xd7, 0x54, 0x11);
 pub const INK: Color32 = Color32::from_rgb(0x0b, 0x0b, 0x0b);
 pub const KEY_OFF: Color32 = Color32::from_rgb(0x1a, 0x1a, 0x1a);
@@ -19,6 +24,9 @@ pub const WRITE: Color32 = Color32::from_rgb(0xff, 0xb0, 0x70);
 pub const WRITE_LINE: Color32 = Color32::from_rgb(0x8a, 0x5a, 0x20);
 pub const DEV: Color32 = Color32::from_rgb(0xa8, 0x7c, 0xf0);
 pub const ACCENT: Color32 = Color32::from_rgb(0x44, 0xd6, 0x2c);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0x5c, 0xe0, 0x46);
+pub const ACCENT_PRESS: Color32 = Color32::from_rgb(0x38, 0xb8, 0x22);
+pub const WRITE_HOVER: Color32 = Color32::from_rgb(0x2a, 0x1c, 0x0e);
 pub const WARN: Color32 = Color32::from_rgb(0xff, 0xcf, 0x7a);
 pub const WARN_BG: Color32 = Color32::from_rgb(0x3a, 0x2a, 0x10);
 pub const ERROR: Color32 = Color32::from_rgb(0xe0, 0x44, 0x3c);

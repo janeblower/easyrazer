@@ -23,10 +23,49 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) -> Response {
     ui.label(RichText::new(text).small().color(theme::MUTED))
 }
 
+/// A button's fill, text and outline at rest, under the pointer and pressed.
+pub struct Look {
+    pub fill: [Color32; 3],
+    pub text: [Color32; 3],
+    pub stroke: [Stroke; 3],
+}
+
+impl Look {
+    /// A tab or segment not picked.
+    pub fn idle(stroke: bool) -> Self {
+        let line = |c| if stroke { Stroke::new(1.0, c) } else { Stroke::NONE };
+        Self { fill: [theme::PANEL, theme::HOVER, theme::KEY], text: [theme::IDLE_TEXT, theme::TEXT, theme::TEXT], stroke: [line(theme::LINE), line(theme::LINE_HOVER), line(theme::LINE_HOVER)] }
+    }
+
+    /// The same in every state.
+    pub fn fixed(fill: Color32, text: Color32, stroke: Stroke) -> Self {
+        Self { fill: [fill; 3], text: [text; 3], stroke: [stroke; 3] }
+    }
+}
+
+/// Adds widgets drawn in `look`. An explicit fill or text color would stay the same whatever
+/// the pointer does, so the look goes into the visuals of each state instead.
+pub fn with_look<R>(ui: &mut Ui, look: &Look, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        let v = ui.visuals_mut();
+        v.override_text_color = None;
+        let w = &mut v.widgets;
+        // A disabled widget is drawn as noninteractive, then faded.
+        for (state, i) in [(&mut w.noninteractive, 0), (&mut w.inactive, 0), (&mut w.hovered, 1), (&mut w.active, 2)] {
+            state.weak_bg_fill = look.fill[i];
+            state.bg_fill = look.fill[i];
+            state.fg_stroke.color = look.text[i];
+            state.bg_stroke = look.stroke[i];
+        }
+        add(ui)
+    })
+    .inner
+}
+
 /// The one filled button of a group: what the user most likely wants.
 pub fn primary(ui: &mut Ui, text: impl Into<String>, enabled: bool) -> Response {
-    let b = egui::Button::new(RichText::new(text).color(theme::INK).strong()).fill(theme::ACCENT).stroke(Stroke::NONE);
-    ui.add_enabled(enabled, b)
+    let look = Look { fill: [theme::ACCENT, theme::ACCENT_HOVER, theme::ACCENT_PRESS], text: [theme::INK; 3], stroke: [Stroke::NONE; 3] };
+    with_look(ui, &look, |ui| ui.add_enabled(enabled, egui::Button::new(RichText::new(text).strong())))
 }
 
 pub fn button(ui: &mut Ui, text: impl Into<String>, enabled: bool) -> Response {
@@ -40,11 +79,10 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tip: &str, enabled: bool, color: Col
 
 /// Puts something into the keyboard's flash: drawn apart, since flash wears out.
 pub fn write_button(ui: &mut Ui, tip: &str, enabled: bool) -> Response {
-    let b = egui::Button::image(icons::image(Icon::write, 18.0, theme::WRITE))
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(1.0, theme::WRITE_LINE))
-        .min_size(Vec2::new(34.0, 32.0));
-    ui.add_enabled(enabled, b).on_hover_text(tip)
+    let b = egui::Button::image(icons::image(Icon::write, 18.0, theme::WRITE)).min_size(Vec2::new(34.0, 32.0));
+    let line = Stroke::new(1.0, theme::WRITE_LINE);
+    let look = Look { fill: [Color32::TRANSPARENT, theme::WRITE_HOVER, theme::WRITE_HOVER], text: [theme::WRITE; 3], stroke: [line, Stroke::new(1.0, theme::WRITE), Stroke::new(1.0, theme::WRITE)] };
+    with_look(ui, &look, |ui| ui.add_enabled(enabled, b)).on_hover_text(tip)
 }
 
 /// A text button without a frame, like a link.
@@ -66,11 +104,9 @@ pub fn segments<T: Clone + PartialEq>(ui: &mut Ui, items: &[(T, String)], select
             let on = *value == selected;
             let r = theme::RADIUS;
             let corners = CornerRadius { nw: if i == 0 { r } else { 0 }, sw: if i == 0 { r } else { 0 }, ne: if i == last { r } else { 0 }, se: if i == last { r } else { 0 } };
-            let b = egui::Button::new(RichText::new(text).color(if on { theme::TEXT } else { theme::MUTED }))
-                .corner_radius(corners)
-                .stroke(Stroke::new(1.0, if on { theme::ACCENT } else { theme::LINE }))
-                .fill(if on { theme::KEY } else { theme::PANEL });
-            if ui.add_enabled(enabled, b).clicked() && !on {
+            let look = if on { Look::fixed(theme::KEY, theme::TEXT, Stroke::new(1.0, theme::ACCENT)) } else { Look::idle(true) };
+            let b = egui::Button::new(text.as_str()).corner_radius(corners);
+            if with_look(ui, &look, |ui| ui.add_enabled(enabled, b)).clicked() && !on {
                 picked = Some(value.clone());
             }
         }
@@ -152,4 +188,40 @@ pub fn modal<T>(ctx: &egui::Context, id: &str, title: &str, body: impl FnOnce(&m
 /// Text that wraps inside a dialog.
 pub fn para(ui: &mut Ui, text: impl Into<String>) {
     ui.add(egui::Label::new(RichText::new(text).color(theme::TEXT)).wrap());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fills of the rectangles a frame painted.
+    fn fills(ctx: &egui::Context, pointer: Option<egui::Pos2>) -> Vec<Color32> {
+        let mut input = egui::RawInput::default();
+        if let Some(p) = pointer {
+            input.events.push(egui::Event::PointerMoved(p));
+        }
+        let mut out = ctx.run_ui(input, |ui| {
+            with_look(ui, &Look::idle(false), |ui| ui.add(egui::Button::new("tab")));
+        });
+        out.textures_delta.clear();
+        out.shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) => Some(r.fill),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tab_lightens_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let at_rest = fills(&ctx, None);
+        assert!(at_rest.contains(&theme::PANEL) && !at_rest.contains(&theme::HOVER), "{at_rest:?}");
+        // egui finds what is hovered from the last frame's layout.
+        let pointer = Some(egui::pos2(12.0, 12.0));
+        fills(&ctx, pointer);
+        let hovered = fills(&ctx, pointer);
+        assert!(hovered.contains(&theme::HOVER), "{hovered:?}");
+    }
 }

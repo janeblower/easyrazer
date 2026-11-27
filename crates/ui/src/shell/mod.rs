@@ -41,12 +41,9 @@ fn nav(app: &mut App, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.x = 4.0;
         for (tab, key) in TABS {
             let on = app.tab == tab;
-            let text = RichText::new(app.t(key)).color(if on { theme::TEXT } else { theme::MUTED });
-            let button = egui::Button::new(text)
-                .fill(if on { theme::BG } else { theme::PANEL })
-                .stroke(Stroke::NONE)
-                .corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 });
-            let r = ui.add(button);
+            let look = if on { widgets::Look::fixed(theme::BG, theme::TEXT, Stroke::NONE) } else { widgets::Look::idle(false) };
+            let button = egui::Button::new(app.t(key)).corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 });
+            let r = widgets::with_look(ui, &look, |ui| ui.add(button));
             if on {
                 ui.painter().hline(r.rect.x_range(), r.rect.bottom() - 1.0, Stroke::new(2.0, theme::ACCENT));
             }
