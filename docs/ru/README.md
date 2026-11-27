@@ -98,6 +98,19 @@
 2. Полностью закройте Synapse, включая значок в трее.
 3. Запустите `EasyRazer.exe`.
 
+Другие сборки в том же релизе:
+
+| Файл | Для чего |
+|---|---|
+| `EasyRazer.exe` | x64, с виртуальным геймпадом |
+| `EasyRazer-x64-no-gamepad.exe` | x64, без геймпада и его драйвера hidshim |
+| `EasyRazer-arm64.exe` | Windows on ARM, без геймпада |
+| `EasyRazer-arm64-gamepad-experimental.exe` | Windows on ARM, с геймпадом; экспериментальная, на железе ещё не проверена |
+
+На Windows on ARM окну нужен OpenGL, он ставится пакетом
+[OpenCL, OpenGL и Vulkan Compatibility Pack](https://apps.microsoft.com/detail/9nqpsl29bfff)
+из Microsoft Store. Без него EasyRazer при запуске скажет об этом и предложит ссылку.
+
 Ночные сборки из `master` выходят пре-релизом
 [`nightly`](https://github.com/janeblower/easyrazer/releases/tag/nightly).
 
