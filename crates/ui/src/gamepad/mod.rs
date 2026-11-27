@@ -16,6 +16,7 @@ use crate::dialogs::Dialog;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DriverOp {
     Install,
+    Update,
     Uninstall,
 }
 
@@ -33,6 +34,8 @@ pub struct GamepadState {
     pub input: Option<Input>,
     pub driver: Option<drivers::Status>,
     pub driver_op: Option<DriverOp>,
+    /// A newer patch of the installed hidshim, from the update check.
+    pub driver_update: Option<String>,
     pub install_error: Option<String>,
     pub boot_changing: bool,
     /// The control waiting for a key press, and the depth it was armed with.
@@ -65,6 +68,11 @@ impl GamepadState {
     /// Installed, but older than the app needs.
     pub fn outdated(&self) -> Option<&str> {
         self.driver.as_ref().filter(|d| !d.ready).and_then(|d| d.version.as_deref())
+    }
+
+    /// A newer patch for a driver that works as it is.
+    pub fn update(&self) -> Option<&str> {
+        self.driver_update.as_deref().filter(|_| self.driver.as_ref().is_some_and(|d| d.ready && d.version.is_some()))
     }
 }
 
@@ -135,13 +143,15 @@ pub fn change_driver(app: &mut App, op: DriverOp, replace: bool) {
     app.gamepad.driver_op = Some(op);
     app.gamepad.install_error = None;
     app.jobs.run(
-        move |_| match op {
+        move |b| match op {
             DriverOp::Install => api::install_gamepad_driver(replace),
+            DriverOp::Update => b.update_gamepad_driver(),
             DriverOp::Uninstall => api::uninstall_gamepad_driver(),
         },
         |app, r| {
-            if let Err(e) = r {
-                app.gamepad.install_error = Some(e);
+            match r {
+                Ok(()) => app.gamepad.driver_update = None,
+                Err(e) => app.gamepad.install_error = Some(e),
             }
             app.gamepad.driver_op = None;
             check_driver(app);

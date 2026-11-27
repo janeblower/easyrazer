@@ -160,6 +160,8 @@ pub struct Runtime {
     session: Option<Session>,
     pending: Option<Receiver<Result<Gamepad, String>>>,
     error: Option<String>,
+    /// hidshim is being replaced; the pad stays closed until `resume`.
+    held: bool,
     open: fn() -> io::Result<Gamepad>,
 }
 
@@ -173,7 +175,7 @@ impl Default for Runtime {
 #[cfg(feature = "gamepad")]
 impl Runtime {
     pub fn new() -> Self {
-        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None, open: Gamepad::open }
+        Self { config: Config::default(), profile: 0, depth: [0; 256], session: None, pending: None, error: None, held: false, open: Gamepad::open }
     }
 
     /// Opens the pad when it is enabled. `request` means the user just turned it on, which may
@@ -190,7 +192,7 @@ impl Runtime {
             self.error = None;
             return;
         }
-        if self.session.is_some() || self.pending.is_some() {
+        if self.held || self.session.is_some() || self.pending.is_some() {
             return;
         }
         match (self.open)() {
@@ -267,6 +269,17 @@ impl Runtime {
     pub fn suspend(&mut self) {
         self.neutral();
         self.session = None;
+    }
+
+    /// Closes the pad for a driver update and keeps it closed.
+    pub fn hold(&mut self) {
+        self.stop();
+        self.held = true;
+    }
+
+    pub fn resume(&mut self) {
+        self.held = false;
+        self.configure(self.profile, self.config.clone(), false);
     }
 
     pub fn input(&mut self) -> Input {
@@ -349,6 +362,16 @@ mod editor_tests {
         assert_eq!(custom.bindings, [("left_up".into(), 37)].into());
         let cleared: Config = serde_json::from_str(r#"{"bindings":{}}"#).unwrap();
         assert!(cleared.bindings.is_empty());
+    }
+
+    #[test]
+    fn a_held_pad_stays_closed_until_resumed() {
+        let mut runtime = offline();
+        runtime.hold();
+        runtime.configure(1, Config { enabled: true, ..Default::default() }, true);
+        assert!(runtime.pending.is_none() && runtime.input().error.is_none());
+        runtime.resume();
+        assert!(runtime.input().error.is_some(), "resuming opens the pad again");
     }
 
     #[test]

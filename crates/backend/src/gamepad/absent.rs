@@ -23,6 +23,14 @@ pub mod drivers {
     pub fn uninstall() -> Result<(), String> {
         Err(MISSING.into())
     }
+
+    pub fn update(_release: impl FnOnce()) -> Result<(), String> {
+        Err(MISSING.into())
+    }
+
+    pub fn available_update() -> Result<Option<String>, String> {
+        Err(MISSING.into())
+    }
 }
 
 pub fn driver_helper(_action: &str, _args: &[String]) -> Result<(), String> {
@@ -67,6 +75,10 @@ impl Runtime {
     pub fn suspend(&mut self) {
         self.neutral();
     }
+
+    pub fn hold(&mut self) {}
+
+    pub fn resume(&mut self) {}
 
     pub fn input(&mut self) -> Input {
         let error = self.config.enabled.then(|| MISSING.to_string());

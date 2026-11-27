@@ -163,6 +163,7 @@ fn driver_group(app: &mut App, ui: &mut Ui) {
     let outdated = app.gamepad.outdated().map(str::to_string);
     let state = match (op, &status, &outdated) {
         (Some(DriverOp::Install), _, _) => app.t("gamepad.installing"),
+        (Some(DriverOp::Update), _, _) => app.t("gamepad.updating"),
         (Some(DriverOp::Uninstall), _, _) => app.t("gamepad.uninstalling"),
         (None, None, _) => app.t("gamepad.checkingDriver"),
         (None, _, Some(v)) => app.tf("gamepad.driverOutdatedShort", &[("version", v)]),
@@ -185,6 +186,10 @@ fn driver_group(app: &mut App, ui: &mut Ui) {
     if status.as_ref().is_some_and(|d| d.legacy) {
         ui.label(RichText::new(app.t("gamepad.legacyInstalled")).small().color(theme::WARN));
     }
+    let update = app.gamepad.update().map(str::to_string);
+    if let Some(v) = &update {
+        ui.label(RichText::new(app.tf("gamepad.updateAvailable", &[("version", v)])).small().color(theme::ACCENT));
+    }
     // Under the text: half a window is too narrow for both buttons beside it.
     ui.horizontal(|ui| {
         if outdated.is_some() {
@@ -192,6 +197,9 @@ fn driver_group(app: &mut App, ui: &mut Ui) {
             if ui.add_enabled(op.is_none(), b).clicked() {
                 gamepad::install(app);
             }
+        }
+        if update.is_some() && widgets::primary(ui, app.t("gamepad.updatePatch"), op.is_none()).clicked() {
+            gamepad::change_driver(app, DriverOp::Update, false);
         }
         let label = app.t(if installed { "gamepad.uninstall" } else { "gamepad.install" });
         let b = egui::Button::image_and_text(icons::image(Icon::shield, 16.0, theme::TEXT), label);

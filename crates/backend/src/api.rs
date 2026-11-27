@@ -236,6 +236,11 @@ pub fn uninstall_gamepad_driver() -> Result<(), String> {
     gamepad::drivers::uninstall()
 }
 
+/// A newer hidshim patch than the installed one.
+pub fn gamepad_driver_update() -> Result<Option<String>, String> {
+    gamepad::drivers::available_update()
+}
+
 impl Backend {
     pub fn new() -> Result<(Arc<Self>, Receiver<Event>), String> {
         let (events, rx) = mpsc::channel();
@@ -678,6 +683,16 @@ impl Backend {
     pub fn gamepad_input(&self, id: &str) -> Result<gamepad::Input, String> {
         let dev = self.device(id)?;
         Ok(lock(&dev).gamepad_input())
+    }
+
+    /// Updates hidshim with every pad closed and opens them again afterwards: the update
+    /// removes an open pad from under its holder.
+    pub fn update_gamepad_driver(&self) -> Result<(), String> {
+        let pads: Vec<_> = self.boards.all().into_iter().map(|(_, d)| lock(&d).gamepad()).collect();
+        let each = |f: fn(&mut gamepad::Runtime)| pads.iter().for_each(|p| f(&mut p.lock().unwrap_or_else(|e| e.into_inner())));
+        let result = gamepad::drivers::update(|| each(gamepad::Runtime::hold));
+        each(gamepad::Runtime::resume);
+        result
     }
 
     fn report_error(&self, d: &Mutex<Device>, e: &str) {
