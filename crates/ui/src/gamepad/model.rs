@@ -81,6 +81,8 @@ pub fn captured_key(previous: &[u8], depth: &[u8], keys: &[u8]) -> Option<u8> {
 }
 
 const VIEW: Vec2 = vec2(800.0, 690.0);
+/// The footer under every tab, with the gap above it.
+const FOOTER: f32 = 50.0;
 const SHELL: &str = "M267 252 Q207 256 170 294 Q132 333 108 409 Q73 518 92 613 Q99 655 126 654 Q142 654 165 632 L251 585 Q270 567 303 567 L497 567 Q530 567 549 585 L635 632 Q658 654 674 654 Q701 655 708 613 Q727 518 692 409 Q668 333 630 294 Q593 256 533 252 Q400 240 267 252 Z";
 const SHOULDER: &str = "M158 142 C193 140 225 136 251 128 C264 140 279 148 299 146 V211 H265 C210 211 170 188 158 142 Z M164 299 C166 276 180 260 204 250 C231 237 250 236 267 247 C278 254 287 254 301 254 V340 H164 Z";
 const TRIGGER: &str = "M159 136 L159 92 Q160 47 193 44 Q239 40 249 124 Z";
@@ -118,8 +120,10 @@ fn look(selected: bool, pressed: bool, hovered: bool) -> (Color32, Stroke) {
 
 /// Draws the controller; returns the control clicked this frame.
 pub fn show(ui: &mut Ui, config: &Config, depth: &[u8], selected: Option<&str>, enabled: bool) -> Option<&'static str> {
-    let avail = ui.available_size();
-    let scale = (avail.x / VIEW.x).min((avail.y.max(360.0)) / VIEW.y);
+    // In the page's scroll area the height left is unbounded; the controller takes what is
+    // still in view, less the footer, so the tab fits the window the Actuation tab sets.
+    let visible = ui.clip_rect().bottom() - ui.cursor().top() - FOOTER;
+    let scale = (ui.available_width() / VIEW.x).min(visible.max(360.0) / VIEW.y);
     let (rect, response) = ui.allocate_exact_size(VIEW * scale, if enabled { Sense::click() } else { Sense::hover() });
     let v = View { origin: rect.min, scale };
     let p = ui.painter_at(rect.expand(8.0));

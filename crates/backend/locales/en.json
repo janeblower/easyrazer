@@ -329,7 +329,7 @@
     "devMode": "Developer mode",
     "unverifiedWrites": "Write to unverified keyboards",
     "driverBoot": "Start the driver with Windows",
-    "groups": { "app": "App", "keyboard": "Keyboard", "gamepad": "Virtual gamepad", "dev": "For developers" },
+    "groups": { "app": "App", "updates": "Updates", "keyboard": "Keyboard", "gamepad": "Virtual gamepad", "dev": "For developers" },
     "hints": {
       "onClose": "In the tray EasyRazer keeps watching the keyboard and restores the lighting after a reconnect.",
       "autostart": "EasyRazer starts in the tray and restores the lighting. Driver mode works only while the app is running.",

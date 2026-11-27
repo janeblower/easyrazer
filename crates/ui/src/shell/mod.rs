@@ -24,7 +24,7 @@ pub struct State {
 const TABS: [(Tab, &str); 3] = [(Tab::Keys, "tabs.keys"), (Tab::Lighting, "tabs.lighting"), (Tab::Settings, "tabs.settings")];
 
 pub fn ui(app: &mut App, ui: &mut Ui) {
-    ui.spacing_mut().item_spacing.y = 16.0;
+    ui.spacing_mut().item_spacing.y = 14.0;
     nav(app, ui);
     crate::updates::banner(app, ui);
     status_line(app, ui);
