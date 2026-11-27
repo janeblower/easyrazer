@@ -17,6 +17,9 @@ jobs:
         with:
           tool: cargo-about
 
+      # Lints the crates deny fail the build; the rest stay warnings.
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked --no-default-features --features easyrazer-ui/glow
       - run: cargo test --workspace --locked
       - run: cargo test --locked -p easyrazer-backend -p easyrazer-ui --no-default-features --features easyrazer-ui/glow
       - run: cargo run --locked -p easyrazer-licenses -- LICENSES.txt
