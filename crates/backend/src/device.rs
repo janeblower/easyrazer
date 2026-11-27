@@ -518,6 +518,10 @@ impl Device {
         self.data().loaded_profile().map(|p| p.gamepad.clone()).unwrap_or_default()
     }
 
+    pub fn gamepad(&self) -> Arc<Mutex<crate::gamepad::Runtime>> {
+        self.gamepad.clone()
+    }
+
     pub fn gamepad_input(&self) -> crate::gamepad::Input {
         self.engine.as_ref().map(|e| e.gamepad_input()).unwrap_or_default()
     }

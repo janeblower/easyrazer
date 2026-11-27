@@ -31,7 +31,7 @@ const ICON: &[u8] = include_bytes!("../assets/icon.png");
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-uninstall" | "--gamepad-boot-on" | "--gamepad-boot-off")) {
+    if args.first().is_some_and(|a| matches!(a.as_str(), "--gamepad-install" | "--gamepad-replace" | "--gamepad-update" | "--gamepad-uninstall" | "--gamepad-boot-on" | "--gamepad-boot-off")) {
         if let Err(e) = easyrazer_backend::gamepad::driver_helper(&args[0], &args[1..]) {
             eprintln!("hidshim: {e}");
             std::process::exit(1);

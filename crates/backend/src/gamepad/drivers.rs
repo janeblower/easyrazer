@@ -177,6 +177,42 @@ pub fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
+/// Replaces hidshim with the newest patch of the pinned minor. `release` closes the app's pads
+/// first, once no other installation can start.
+pub fn update(release: impl FnOnce()) -> Result<(), String> {
+    let _change = Change::start()?;
+    release();
+    super::process::driver_action("--gamepad-update")?;
+    if hidshim::status().map_err(|e| e.to_string())? != hidshim::Status::Ready {
+        return Err("hidshim was updated, but its pad is not running".into());
+    }
+    Ok(())
+}
+
+/// A newer patch than the hidshim installed as a program; none for a hand-installed one.
+pub fn available_update() -> Result<Option<String>, String> {
+    let installed = program().and_then(|(_, v)| v).filter(|v| supported(*v));
+    if installed.is_none() {
+        return Ok(None);
+    }
+    Ok(newer(installed, latest_patch()?))
+}
+
+fn newer(installed: Option<Version>, latest: Option<String>) -> Option<String> {
+    let installed = installed.filter(|v| supported(*v))?;
+    latest.filter(|tag| parse_version(tag).is_some_and(|v| v > installed))
+}
+
+/// The newest release tag of the pinned minor.
+pub fn latest_patch() -> Result<Option<String>, String> {
+    Ok(pick(&releases()?))
+}
+
+fn releases() -> Result<Vec<Release>, String> {
+    let list = crate::sys::download("api.github.com", RELEASES_API, RELEASES_LIMIT).map_err(|e| format!("hidshim releases: {e}"))?;
+    serde_json::from_slice(&list).map_err(|e| format!("hidshim releases: {e}"))
+}
+
 /// Brings the pad back with one elevation prompt and opens it.
 pub(super) fn restore() -> Receiver<Result<hidshim::Gamepad, String>> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -196,25 +232,27 @@ pub(super) fn deploy(replace: bool) -> Result<(), String> {
     }
     match program() {
         Some((exe, Some(version))) if supported(version) => run_program(&exe, install_args(boot_task(&exe, Some(version)) == Some(true))),
-        _ => install_latest(),
+        _ => install_latest(false),
     }
 }
 
-/// Installs without the boot task; the user turns it on in the settings.
-fn install_latest() -> Result<(), String> {
+/// Runs elevated: the latest release over the installed one, which keeps its boot task.
+pub(super) fn upgrade() -> Result<(), String> {
+    install_latest(program().and_then(|(exe, v)| boot_task(&exe, v)) == Some(true))
+}
+
+fn install_latest(boot: bool) -> Result<(), String> {
     let exe = download_latest()?;
     let stage = Stage::create()?;
     let path = stage.0.join("hidshim.exe");
     std::fs::write(&path, exe).map_err(|e| format!("hidshim download: {e}"))?;
     // hidshim copies itself to Program Files and lists itself among installed apps.
-    run_program(&path, &["install", "--no-autostart"])
+    run_program(&path, install_args(boot))
 }
 
 /// hidshim.exe of the newest release of the pinned minor, checked against its release's checksums.
 fn download_latest() -> Result<Vec<u8>, String> {
-    let list = crate::sys::download("api.github.com", RELEASES_API, RELEASES_LIMIT).map_err(|e| format!("hidshim releases: {e}"))?;
-    let releases: Vec<Release> = serde_json::from_slice(&list).map_err(|e| format!("hidshim releases: {e}"))?;
-    let tag = pick(&releases).ok_or_else(|| format!("hidshim has no release {}.{}.x", PINNED[0], PINNED[1]))?;
+    let tag = latest_patch()?.ok_or_else(|| format!("hidshim has no release {}.{}.x", PINNED[0], PINNED[1]))?;
     let download = |name: &str| {
         crate::sys::download("github.com", &format!("/janeblower/hidshim/releases/download/{tag}/{name}"), DOWNLOAD_LIMIT)
             .map_err(|e| format!("hidshim download: {e}"))
@@ -382,6 +420,24 @@ mod tests {
         assert!(!supported(parse_version(&next).unwrap()), "a newer minor may speak another protocol");
         assert_eq!(pick(&[release(&next, false)]), None);
         assert_eq!(pick(&[release(&format!("{}.{}.11", PINNED[0], PINNED[1]), true)]), None, "pre-releases are skipped");
+    }
+
+    #[test]
+    fn only_a_later_patch_of_the_installed_minor_is_an_update() {
+        let [major, minor] = PINNED;
+        let at = |patch| [major, minor, patch];
+        let tag = |patch: u32| format!("{major}.{minor}.{patch}");
+        let latest = |releases: &[Release]| newer(Some(at(0)), pick(releases));
+        assert_eq!(latest(&[release(&tag(0), false), release(&tag(1), false)]), Some(tag(1)));
+        assert_eq!(latest(&[release(&tag(0), false)]), None);
+        assert_eq!(latest(&[release(&format!("{major}.{}.0", minor + 1), false)]), None, "a later minor needs a new EasyRazer");
+        assert_eq!(latest(&[release(&tag(2), true)]), None, "pre-releases are skipped");
+        assert_eq!(latest(&[Release { tag_name: tag(2), draft: true, prerelease: false }]), None, "drafts are skipped");
+        assert_eq!(newer(Some(at(1)), Some(tag(0))), None);
+        assert_eq!(newer(None, Some(tag(1))), None, "a hand-installed driver has no version to compare");
+        assert_eq!(newer(Some([0, 1, 0]), Some(tag(1))), None, "an unsupported one is updated as outdated instead");
+        assert_eq!(newer(Some(at(0)), Some("latest".into())), None);
+        assert_eq!(newer(Some(at(0)), None), None);
     }
 
     #[test]

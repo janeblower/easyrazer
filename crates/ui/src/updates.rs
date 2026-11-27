@@ -1,9 +1,10 @@
 //! The update check: at start and once a day while it is on, or on request from Settings.
+//! hidshim is checked with it, in development builds too: its version is not the app's.
 
 use std::time::{Duration, Instant};
 
 use easyrazer_backend::api::{self, Link};
-use easyrazer_backend::updates;
+use easyrazer_backend::{gamepad, updates};
 use egui::{RichText, Stroke, Ui};
 
 use crate::app::App;
@@ -47,27 +48,39 @@ fn auto(app: &App) -> bool {
 
 /// Runs from the window's logic, in the tray too.
 pub fn tick(app: &mut App) {
-    if !auto(app) || !updates::is_release(VERSION) || app.updates.checking {
+    let release = updates::is_release(VERSION);
+    if !auto(app) || !(release || gamepad::AVAILABLE) || app.updates.checking {
         return;
     }
     match app.updates.next.map(|t| t.saturating_duration_since(Instant::now())) {
         Some(left) if !left.is_zero() => app.jobs.wake_after(left),
-        _ => check(app),
+        _ => run(app, release),
     }
 }
 
 pub fn check(app: &mut App) {
+    run(app, true);
+}
+
+/// `release` also asks for the app's latest release; a failed hidshim check stays quiet.
+fn run(app: &mut App, release: bool) {
     if app.updates.checking {
         return;
     }
     app.updates.checking = true;
     app.jobs.run(
-        |_| api::latest_release(),
-        |app, r| {
+        move |_| (release.then(api::latest_release), gamepad::AVAILABLE.then(api::gamepad_driver_update)),
+        |app, (release, driver)| {
             let u = &mut app.updates;
             u.checking = false;
-            u.next = Some(Instant::now() + if r.is_ok() { EVERY } else { RETRY });
-            u.outcome = Some(outcome(r, VERSION));
+            let ok = release.as_ref().map_or_else(|| driver.as_ref().is_some_and(Result::is_ok), Result::is_ok);
+            u.next = Some(Instant::now() + if ok { EVERY } else { RETRY });
+            if let Some(r) = release {
+                u.outcome = Some(outcome(r, VERSION));
+            }
+            if let Some(Ok(v)) = driver {
+                app.gamepad.driver_update = v;
+            }
         },
     );
 }

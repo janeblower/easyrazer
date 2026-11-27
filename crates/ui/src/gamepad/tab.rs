@@ -77,6 +77,7 @@ fn notice(app: &mut App, ui: &mut Ui, driver: bool, installed: Option<bool>) {
     let text = match (op, installed, app.gamepad.outdated()) {
         (Some(DriverOp::Uninstall), _, _) => app.t("gamepad.uninstalling"),
         (Some(DriverOp::Install), _, _) => app.t("gamepad.installing"),
+        (Some(DriverOp::Update), _, _) => app.t("gamepad.updating"),
         (None, None, _) => app.t("gamepad.checkingDriver"),
         (None, _, Some(v)) => app.tf("gamepad.driverOutdated", &[("version", v)]),
         (None, Some(true), None) => app.t("gamepad.driverRequired"),

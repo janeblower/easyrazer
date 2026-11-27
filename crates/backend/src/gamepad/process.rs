@@ -32,6 +32,7 @@ pub fn driver_helper(action: &str, args: &[String]) -> Result<(), String> {
     let result = match action {
         "--gamepad-install" => super::drivers::deploy(false),
         "--gamepad-replace" => super::drivers::deploy(true),
+        "--gamepad-update" => super::drivers::upgrade(),
         "--gamepad-uninstall" => super::drivers::remove(),
         "--gamepad-boot-on" => super::drivers::boot(true),
         "--gamepad-boot-off" => super::drivers::boot(false),
