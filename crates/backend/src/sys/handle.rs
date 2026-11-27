@@ -79,6 +79,22 @@ pub fn create_mutex(name: &str) -> io::Result<(OwnedHandle, bool)> {
     Ok((handle, already_exists()))
 }
 
+/// Creates or opens a named auto-reset event; true when it already existed.
+pub fn create_event(name: &str) -> io::Result<(OwnedHandle, bool)> {
+    let name = wide(name);
+    // SAFETY: `name` is NUL-terminated and alive for the call; null means default security.
+    let handle = owned(unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) })?;
+    Ok((handle, already_exists()))
+}
+
+pub fn set_event(event: BorrowedHandle<'_>) -> io::Result<()> {
+    // SAFETY: the borrow keeps the handle open for the call.
+    if unsafe { SetEvent(event.as_raw_handle()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Whether a process with this executable name runs.
 pub fn process_running(exe: &str) -> io::Result<bool> {
     // SAFETY: takes values only; the snapshot is closed below.
