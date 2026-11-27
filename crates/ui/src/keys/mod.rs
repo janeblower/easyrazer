@@ -1,10 +1,13 @@
 //! The Keys tab: press points and Rapid Trigger, bindings, macros and the gamepad.
 
+mod actuation;
+mod binding;
 mod labels;
 pub mod macros;
 pub mod map;
 pub mod model;
 mod nav;
+mod slider;
 pub mod snap;
 
 use easyrazer_backend::api::KeyView;
@@ -13,6 +16,14 @@ use razer_core::binding::System;
 
 use crate::app::{App, Section};
 use crate::widgets;
+
+/// What the Keys tab remembers between frames besides the edits.
+#[derive(Default)]
+pub struct View {
+    pub snap_picked: Option<usize>,
+    /// Text typed into the binding's key search.
+    pub query: String,
+}
 
 const SECTIONS: [(Section, &str); 4] =
     [(Section::Actuation, "keys.actuation"), (Section::Bindings, "keys.bindings"), (Section::Macros, "keys.macros"), (Section::Gamepad, "keys.gamepad")];
@@ -53,6 +64,51 @@ fn key_map(app: &mut App, ui: &mut Ui) {
     map::show(app, ui, &props, &mut selection, &mut state);
     app.keys.selection = selection;
     app.map = state;
+    let bind_key = (app.keys.selection.len() == 1).then(|| app.keys.selection.first().copied()).flatten();
+    if app.section == Section::Bindings && bind_key.is_none() {
+        widgets::card(ui, |ui| widgets::empty_state(ui, crate::icons::Icon::keyboard, &app.t("bindings.pickTitle"), &app.t("bindings.pickText")));
+        return;
+    }
+    let online = app.online();
+    ui.add_enabled_ui(online, |ui| {
+        if !online {
+            ui.multiply_opacity(0.6);
+        }
+        ui.columns(2, |cols| {
+            let [left, right] = cols else { return };
+            widgets::card(left, |ui| match app.section {
+                Section::Actuation => actuation::card(app, ui),
+                _ => {
+                    let a = bind_key.and_then(|k| app.keys.binding_of(k));
+                    let title = app.t("bindings.main");
+                    if let Some(next) = binding::card(app, ui, &title, bind_key, a, bind_key.map(model::factory), false)
+                        && let Some(k) = bind_key
+                    {
+                        app.keys.set_binding(k, next);
+                    }
+                }
+            });
+            widgets::card(right, |ui| match app.section {
+                Section::Actuation => snap::card(app, ui),
+                _ => {
+                    let a = bind_key.and_then(|k| app.keys.hs_binding_of(k));
+                    let title = match combo(app, bind_key) {
+                        Some(c) => format!("Hypershift · {c}"),
+                        None => "Hypershift".into(),
+                    };
+                    if let Some(next) = binding::card(app, ui, &title, bind_key, a, bind_key.map(model::hs_factory), true)
+                        && let Some(k) = bind_key
+                    {
+                        let keys: Vec<u8> = app.layout.iter().map(|v| v.key.key).collect();
+                        if let Some(m) = app.keys.set_hs_binding(keys, k, next) {
+                            app.dialogs.push(crate::dialogs::Dialog::Move { key: k, m });
+                        }
+                    }
+                }
+            });
+        });
+    });
+    crate::dev::keys(app, ui);
 }
 
 /// What the key caps show in the open section.
@@ -111,7 +167,7 @@ fn map_props(app: &App) -> map::Props {
         p.unsaved = k.bind_unsaved.clone();
     }
     let editable = app.layout.iter().filter(|v| v.key.editable).count();
-    p.loaded = app.progress.map(|(done, total)| if total == 0 { 0 } else { done * editable / total });
+    p.loaded = app.progress.map(|(done, total)| (done * editable).checked_div(total).unwrap_or(0));
     p
 }
 

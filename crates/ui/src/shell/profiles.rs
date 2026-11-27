@@ -88,7 +88,7 @@ pub fn menu(app: &mut App, ui: &mut Ui) {
                         }
                     }
                 } else {
-                    let label = RichText::new(truncate(&p.name, 22)).color(if on { theme::TEXT } else { theme::TEXT });
+                    let label = RichText::new(truncate(&p.name, 22));
                     picked = ui.add(egui::Label::new(label).sense(egui::Sense::click())).clicked();
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

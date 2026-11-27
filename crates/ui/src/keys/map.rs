@@ -142,7 +142,7 @@ pub fn show(app: &App, ui: &mut Ui, props: &Props, selection: &mut BTreeSet<u8>,
     {
         response.clone().on_hover_text_at_pointer(tip);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ListBox, true, app.t("common.keyMap")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, true, app.t("common.keyMap")));
     response
 }
 

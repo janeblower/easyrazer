@@ -62,7 +62,7 @@ fn can_write(app: &App, id: Id) -> bool {
     match id {
         Id::Keys => app.can_save_keys(),
         Id::Lighting => crate::lighting::can_write(app),
-        Id::Macros => false,
+        Id::Macros => crate::keys::macros::can_write(app),
     }
 }
 
@@ -86,7 +86,7 @@ fn write(app: &mut App, id: Id, then: Done) {
     match id {
         Id::Keys => app.write_keys(true, then),
         Id::Lighting => crate::lighting::write(app, then),
-        Id::Macros => then(app),
+        Id::Macros => crate::keys::macros::write(app, then),
     }
 }
 

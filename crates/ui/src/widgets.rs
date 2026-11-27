@@ -12,6 +12,8 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // The page spaces its blocks apart; inside a card things sit closer.
+            ui.spacing_mut().item_spacing.y = 6.0;
             add(ui)
         })
         .inner
@@ -108,9 +110,9 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str, enabled: bool) -> Respons
 pub fn empty_state(ui: &mut Ui, icon: Icon, title: &str, text: &str) {
     ui.vertical_centered(|ui| {
         ui.add_space(12.0);
-        egui::Frame::new().fill(theme::KEY).corner_radius(10).inner_margin(12).show(ui, |ui| {
-            ui.add(icons::image(icon, 20.0, theme::MUTED));
-        });
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
+        ui.painter().rect_filled(rect, 10.0, theme::KEY);
+        icons::paint(ui.painter(), icon, egui::Rect::from_center_size(rect.center(), Vec2::splat(20.0)), theme::MUTED);
         ui.label(title);
         ui.set_max_width(400.0);
         hint(ui, text);

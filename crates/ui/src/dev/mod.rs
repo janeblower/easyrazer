@@ -21,3 +21,9 @@ pub fn panel_open(app: &App) -> bool {
 }
 
 pub fn toggle_panel(_app: &mut App) {}
+
+/// The raw slot data of the selected keys, under the map.
+pub fn keys(_app: &mut App, _ui: &mut egui::Ui) {}
+
+/// The selected macro's body as the keyboard stores it.
+pub fn macro_bytes(_app: &mut App, _ui: &mut egui::Ui) {}

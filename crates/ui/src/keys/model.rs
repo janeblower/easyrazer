@@ -436,8 +436,7 @@ mod tests {
 
     #[test]
     fn a_unique_action_moves_after_asking() {
-        let mut e = KeyEdits::default();
-        e.hs_bind_base = [(129, Some(Action::System { action: System::NextProfile })), (130, Some(factory(130)))].into();
+        let mut e = KeyEdits { hs_bind_base: [(129, Some(Action::System { action: System::NextProfile })), (130, Some(factory(130)))].into(), ..Default::default() };
         let ask = e.set_hs_binding([129, 130], 130, Action::System { action: System::NextProfile });
         let m = ask.expect("asks first");
         assert_eq!(m.from, 129);
@@ -448,8 +447,7 @@ mod tests {
 
     #[test]
     fn a_failed_key_keeps_its_edit() {
-        let mut e = KeyEdits::default();
-        e.edits = [(1, 2.0), (2, 3.0)].into();
+        let mut e = KeyEdits { edits: [(1, 2.0), (2, 3.0)].into(), ..Default::default() };
         let w = WriteResult {
             results: vec![ApplyResult::Ok { key: 1, mm: 2.0 }, ApplyResult::Error { key: 2, message: "no".into() }],
             unsaved: vec![1],
