@@ -27,3 +27,6 @@ pub fn keys(_app: &mut App, _ui: &mut egui::Ui) {}
 
 /// The selected macro's body as the keyboard stores it.
 pub fn macro_bytes(_app: &mut App, _ui: &mut egui::Ui) {}
+
+/// The last lighting commands and the keyboard's answers.
+pub fn lighting_log(_app: &mut App, _ui: &mut egui::Ui) {}

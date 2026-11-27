@@ -61,7 +61,9 @@ fn key_map(app: &mut App, ui: &mut Ui) {
     let props = map_props(app);
     let mut selection = std::mem::take(&mut app.keys.selection);
     let mut state = std::mem::take(&mut app.map);
-    map::show(app, ui, &props, &mut selection, &mut state);
+    let layout = std::mem::take(&mut app.layout);
+    map::show(app, ui, &layout, &props, &mut selection, &mut state);
+    app.layout = layout;
     app.keys.selection = selection;
     app.map = state;
     let bind_key = (app.keys.selection.len() == 1).then(|| app.keys.selection.first().copied()).flatten();
