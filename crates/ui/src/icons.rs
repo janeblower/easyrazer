@@ -10,7 +10,7 @@ macro_rules! icons {
 
         const ALL: &[(Icon, &str, &[u8])] = &[
             $((Icon::$name, concat!("bytes://icon/", $file, ".svg"),
-               include_bytes!(concat!("../../../app/src/assets/icons/", $file, ".svg")))),*
+               include_bytes!(concat!("../assets/icons/", $file, ".svg")))),*
         ];
     };
 }

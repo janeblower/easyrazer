@@ -129,19 +129,20 @@ EasyRazer отдаёт ввод прошивке. У линейки V2 Analog а
 
 ## Сборка
 
-Нужны Rust (MSVC), Bun, MSVC Build Tools и cargo-about
-(`cargo install cargo-about --locked --features cli`): он собирает лицензии
-крейтов для окна «О программе».
+Нужны Rust (MSVC) и MSVC Build Tools с Windows SDK.
 
 ```
-cd app
-bun install
-bun tauri dev      # запуск с пересборкой при изменениях
-bun tauri build    # ..\target\release\easyrazer.exe
+cargo run -p easyrazer-ui              # отладочная сборка
+cargo build --release -p easyrazer-ui  # target\release\easyrazer.exe
 ```
 
-Тесты (из корня репозитория): `cargo test`, фронтенд: `bun run lint` (в `app`).
-Тест на реальной клавиатуре (Synapse закрыт): `cargo test -p easyrazer -- --ignored`.
+Сторонние лицензии в окне «О программе» показывает только сборка, сделанная с ними:
+установите cargo-about (`cargo install cargo-about --locked --features cli`), выполните
+`cargo run -p easyrazer-licenses -- LICENSES.txt` и соберите с переменной
+`EASYRAZER_LICENSES`, указывающей на этот файл.
+
+Тесты: `cargo test --workspace`.
+Тест на реальной клавиатуре (Synapse закрыт): `cargo test -p easyrazer-backend -- --ignored`.
 
 ## Документация
 

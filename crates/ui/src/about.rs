@@ -20,6 +20,7 @@ pub fn show(app: &App, ctx: &egui::Context, a: &mut About) -> bool {
     // The links sit inside the sentences, where the locale files put `{gpl}` and `{github}`.
     let license = t("about.license");
     let source = t("about.source");
+    let third = t("about.thirdParty");
     let r = widgets::modal(
         ctx,
         "about",
@@ -30,6 +31,7 @@ pub fn show(app: &App, ctx: &egui::Context, a: &mut About) -> bool {
             ui.label(RichText::new(&unofficial).color(theme::MUTED));
             sentence(ui, &license, "{gpl}", "GNU GPL", Link::License, &mut a.error);
             sentence(ui, &source, "{github}", "GitHub", Link::Repo, &mut a.error);
+            third_party(ui, &third);
             if !a.error.is_empty() {
                 ui.label(RichText::new(&a.error).small().color(theme::ERROR));
             }
@@ -37,6 +39,20 @@ pub fn show(app: &App, ctx: &egui::Context, a: &mut About) -> bool {
         |ui| widgets::primary(ui, &close, true).clicked().then_some(()),
     );
     matches!(r, Answer::Open)
+}
+
+/// Written by the release build; a local build has none to show.
+const LICENSES: &str = include_str!(concat!(env!("OUT_DIR"), "/LICENSES.txt"));
+
+fn third_party(ui: &mut egui::Ui, title: &str) {
+    if LICENSES.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new(RichText::new(title).color(theme::MUTED)).id_salt("about-licenses").show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(LICENSES).monospace().size(10.0).color(theme::MUTED)).selectable(true));
+        });
+    });
 }
 
 fn sentence(ui: &mut egui::Ui, text: &str, slot: &str, name: &str, link: Link, error: &mut String) {
