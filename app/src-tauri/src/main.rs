@@ -1,36 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// Win32 calls live behind safe wrappers in sys, the only exception.
-#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
-#![deny(clippy::undocumented_unsafe_blocks, clippy::multiple_unsafe_ops_per_block)]
+#![deny(unsafe_code)]
 
-mod autostart;
-mod boards;
 mod commands;
-mod dev;
-mod device;
-mod dynamic_lighting;
-mod engine;
-mod focus;
-mod gamepad;
-mod i18n;
-mod profiles;
-mod settings;
-mod stored;
-#[allow(unsafe_code)]
-mod sys;
-mod transfer;
 mod tray;
-mod wake;
-mod wheel;
 
-use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
-use std::time::Duration;
+use std::sync::{Arc, mpsc};
 
-use razer_core::control::{LED_GAME, LED_MACRO};
-use razer_core::rapid::Output;
-use settings::CloseAction;
-use engine::Sink;
+use easyrazer_backend::api::Event;
+use easyrazer_backend::settings::CloseAction;
+use easyrazer_backend::{Backend, autostart, device, gamepad};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 fn main() {
@@ -50,100 +29,19 @@ fn main() {
         }
         default_hook(info);
     }));
-    let shared: settings::Shared = Arc::new(Mutex::new(settings::load()));
-    let (window_ready, ready) = mpsc::channel();
+    let (backend, events) = Backend::new().expect("hidapi init");
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
         .plugin(tauri_plugin_dialog::init())
-        .manage(commands::AppState {
-            settings: shared,
-            boards: boards::Boards::new().expect("hidapi init"),
-            hooks: OnceLock::new(),
-            window_ready: Mutex::new(Some(window_ready)),
-        })
+        .manage(backend.clone())
         .setup(move |app| {
             tray::build(app)?;
             let shown = !std::env::args().any(|a| a == autostart::TRAY_ARG);
             if shown {
                 tray::show(app.handle());
             }
-            let handle = app.handle().clone();
-            let sink_handle = handle.clone();
-            let progress_handle = handle.clone();
-            // A connect reads the slots before the window asks for them.
-            let _ = app.state::<commands::AppState>().hooks.set(boards::Hooks {
-                sink: Arc::new(move |id: &str| sink(sink_handle.clone(), id.to_string())),
-                progress: Arc::new(move |id: &str| {
-                    let (h, id) = (progress_handle.clone(), id.to_string());
-                    Arc::new(move |done, total, a| commands::emit_progress(&h, &id, done, total, a))
-                }),
-            });
-            let blocked = focus::watch();
-            let focus_handle = handle.clone();
-            std::thread::spawn(move || {
-                while let Ok(b) = blocked.recv() {
-                    // A switch waits for the device lock; by then only the latest state matters.
-                    let b = blocked.try_iter().last().unwrap_or(b);
-                    let state = focus_handle.state::<commands::AppState>();
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                        for (_, d) in state.boards.all() {
-                            commands::lock(&d).set_input_blocked(b);
-                        }
-                    }));
-                }
-            });
-            let events = wake::listen();
-            std::thread::spawn(move || {
-                // The first connect reads the keyboard; a shown window should see it. The timeout keeps
-                // the keyboard restored if the page never loads.
-                if shown {
-                    let _ = ready.recv_timeout(Duration::from_secs(10));
-                }
-                // A board busy when the list changed gets its listener on a later step.
-                let mut unsynced = std::collections::BTreeSet::new();
-                let (mut woke, mut synapse_was) = (true, None);
-                loop {
-                    // One failed step must not end the watching for the rest of the session.
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                        let state = handle.state::<commands::AppState>();
-                        let synapse = state.settings().watch_synapse && device::synapse_running();
-                        let retry = wake::take_retry();
-                        if !woke && !retry && unsynced.is_empty() && synapse_was == Some(synapse) {
-                            return;
-                        }
-                        synapse_was = Some(synapse);
-                        let (statuses, changed) = commands::poll(&state, synapse);
-                        if changed {
-                            unsynced.extend(state.boards.all().into_iter().map(|(id, _)| id));
-                        }
-                        if !unsynced.is_empty() {
-                            let (mode, size) = { let s = state.settings(); (s.dev_mode, s.dev_log_size) };
-                            unsynced.retain(|id| {
-                                let Some(d) = state.boards.get(id) else { return false };
-                                let Some(dev) = boards::try_guard(&d) else { return true };
-                                dev::sync_listener(&handle, mode, size, id, &dev);
-                                false
-                            });
-                        }
-                        if changed {
-                            let _ = handle.emit("devices", ());
-                        }
-                        if state.boards.is_empty() {
-                            let _ = handle.emit("status", commands::idle_status(&state, None, synapse));
-                        }
-                        for status in statuses {
-                            let _ = handle.emit("status", &status);
-                        }
-                    }));
-                    // Synapse has no start event to wait for; the rest wakes the loop.
-                    woke = events.recv_timeout(Duration::from_secs(2)).is_ok();
-                    if woke {
-                        // A keyboard plugs in as a burst of interfaces; one step after them sees it whole.
-                        std::thread::sleep(Duration::from_millis(500));
-                        while events.try_recv().is_ok() {}
-                    }
-                }
-            });
+            forward(app.handle().clone(), events);
+            backend.start(shown);
             Ok(())
         })
         .on_window_event(|w, e| {
@@ -152,7 +50,7 @@ fn main() {
                 return;
             }
             if let WindowEvent::CloseRequested { api, .. } = e {
-                let action = w.state::<commands::AppState>().settings().close_action;
+                let action = w.state::<Arc<Backend>>().close_action();
                 match action {
                     CloseAction::Ask => {
                         api.prevent_close();
@@ -215,94 +113,72 @@ fn main() {
             commands::hide_window,
             commands::quit,
             commands::open_link,
-            dev::set_dev_mode,
-            dev::set_dev_panel,
-            dev::set_dev_window,
-            dev::dev_log,
-            dev::set_dev_log_size,
-            dev::dev_commands,
-            dev::dev_device,
-            dev::dev_exchange,
-            dev::dev_keys,
-            dev::dev_macro,
-            dev::dev_diagnostics
+            commands::set_dev_mode,
+            commands::set_dev_panel,
+            commands::set_dev_window,
+            commands::dev_log,
+            commands::set_dev_log_size,
+            commands::dev_commands,
+            commands::dev_device,
+            commands::dev_exchange,
+            commands::dev_keys,
+            commands::dev_macro,
+            commands::dev_diagnostics
         ])
         .build(tauri::generate_context!())
         .expect("tauri build")
         .run(move |app, e| match e {
             // The last window closing leaves the app in the tray; only an explicit exit carries a code.
             tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
-            tauri::RunEvent::Exit => {
-                for (_, d) in app.state::<commands::AppState>().boards.all() {
-                    commands::lock(&d).shutdown();
-                }
-            }
+            tauri::RunEvent::Exit => app.state::<Arc<Backend>>().shutdown(),
             _ => {}
         });
 }
 
-fn sink(h: AppHandle, id: String) -> Sink {
-    // Up to 1 kHz while a key moves, and an emit can take a millisecond: the reader must not wait for it.
-    let (depth_tx, depth_rx) = mpsc::channel::<(u8, u8, u8, bool)>();
-    let (dh, did) = (h.clone(), id.clone());
+#[derive(Clone, Serialize)]
+struct LogEvent<'a> {
+    id: &'a str,
+    entry: &'a razer_core::logged::Entry,
+}
+
+/// Passes backend events to the WebView under the names and shapes it listens for.
+fn forward(h: AppHandle, events: mpsc::Receiver<Event>) {
+    // Up to 1 kHz while a key moves, and an emit can take a millisecond: the rest must not queue behind it.
+    let (depth_tx, depth_rx) = mpsc::channel::<Event>();
+    let dh = h.clone();
     std::thread::spawn(move || {
-        while let Ok((key, depth, travel, down)) = depth_rx.recv() {
+        while let Ok(Event::KeyDepth { id, key, depth, travel, down }) = depth_rx.recv() {
             // Skipped while nobody sees the window, but not the release.
             if let Some(w) = dh.get_webview_window("main")
                 && (depth == 0 || w.is_visible().unwrap_or(false))
             {
-                let _ = w.emit("key-depth", (&did, depth, travel, down, key));
+                let _ = w.emit("key-depth", (&id, depth, travel, down, key));
             }
         }
     });
-    Arc::new(move |o| {
-        if let Output::Depth { key, depth, travel, down } = o {
-            let _ = depth_tx.send((key, depth, travel, down));
-            return;
+    std::thread::spawn(move || {
+        for e in events {
+            let _ = match &e {
+                Event::KeyDepth { .. } => {
+                    let _ = depth_tx.send(e);
+                    Ok(())
+                }
+                Event::Status(s) => h.emit("status", s),
+                Event::Devices => h.emit("devices", ()),
+                Event::ReadProgress { id, done, total, key } => h.emit("read-progress", (id, done, total, key.map(|k| k.0), key.map(|k| k.1))),
+                Event::HidLog { id, entry } => h.emit("hid-log", LogEvent { id, entry }),
+                Event::SettingsChanged => {
+                    tray::sync_autostart(&h);
+                    h.emit("settings-changed", ())
+                }
+                Event::LanguageChanged => {
+                    tray::retitle(&h);
+                    Ok(())
+                }
+                Event::SnapTap { id, on } => h.emit("snap-tap", (id, on)),
+                Event::GamepadEnabled { id, profile, enabled } => h.emit("gamepad-enabled", (id, profile, enabled)),
+                Event::Error(message) => h.emit("app-error", message),
+            };
         }
-        let (h, id) = (h.clone(), id.clone());
-        // Off the reader thread: the device lock can be held for seconds by a full read.
-        std::thread::spawn(move || {
-            let state = h.state::<commands::AppState>();
-            let Ok(d) = state.device(&id) else { return };
-            match o {
-                Output::Brightness(step) => commands::lock(&d).step_brightness(step > 0),
-                Output::Sleep => engine::sleep(),
-                Output::NextProfile => {
-                    commands::lock(&d).next_profile();
-                    let watch = state.settings().watch_synapse;
-                    let synapse = watch && device::synapse_running();
-                    let status = commands::lock(&d).status(synapse);
-                    let _ = h.emit("status", &status);
-                }
-                Output::MacroLed => {
-                    commands::lock(&d).set_led(LED_MACRO, true, true);
-                    std::thread::sleep(Duration::from_secs(1));
-                    commands::lock(&d).set_led(LED_MACRO, false, false);
-                }
-                Output::GameMode(on) => {
-                    commands::lock(&d).set_led(LED_GAME, on, false);
-                }
-                Output::ToggleGamepad => {
-                    let result = commands::lock(&d).toggle_gamepad();
-                    match result {
-                        Ok((profile, enabled)) => { let _ = h.emit("gamepad-enabled", (&id, profile, enabled)); }
-                        Err(e) => {
-                            let model = commands::lock(&d).name();
-                            let _ = h.emit("app-error", format!("{model}: {e}"));
-                        }
-                    }
-                }
-                Output::SnapTap(on) => {
-                    let r = commands::lock(&d).set_snap_tap(on);
-                    if let Err(e) = r {
-                        let model = commands::lock(&d).name();
-                        let _ = h.emit("app-error", format!("{model}: {e}"));
-                    }
-                    let _ = h.emit("snap-tap", (&id, on));
-                }
-                _ => {}
-            }
-        });
-    })
+    });
 }

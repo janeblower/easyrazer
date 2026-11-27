@@ -32,8 +32,9 @@ actuation, effect and `0F:03` commands. A new command in the core goes into the 
 | `crates/core/src/rapid.rs` | RT engine: depth stream parsing, thresholds, key repeat, Fn layer |
 | `crates/core/src/lighting.rs` | Effect encoding from protocol templates |
 | `crates/probe` | `razer-probe` — CLI for protocol research |
-| `app/src-tauri` | Tauri 2: device, background thread, tray, autostart, engine on Windows (`engine.rs`) |
-| `app/src-tauri/src/profiles.rs` | App profiles on top of slots: import, loading into profile 0, management |
+| `crates/backend` | Everything but the window: device, background thread, autostart, engine on Windows (`engine.rs`); `api.rs` is the only surface a window reaches |
+| `crates/backend/src/profiles.rs` | App profiles on top of slots: import, loading into profile 0, management |
+| `app/src-tauri` | Tauri 2: window, tray, commands and events over `api.rs` |
 | `app/src` | Vue: tabs, keyboard map, locales `locales/*.json` (shared with Rust) |
 
 Protocol and firmware per model — [devices/](devices/README.md).

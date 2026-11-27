@@ -4,8 +4,9 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Emitter, Manager, WebviewWindowBuilder, Wry};
 
-use crate::commands::AppState;
-use crate::{autostart, i18n};
+use std::sync::Arc;
+
+use easyrazer_backend::{Backend, autostart, i18n};
 
 pub struct Items {
     open: MenuItem<Wry>,
@@ -14,7 +15,7 @@ pub struct Items {
 }
 
 fn lang(app: &AppHandle) -> String {
-    app.state::<AppState>().settings().language.clone().unwrap_or_else(|| "en".into())
+    app.state::<Arc<Backend>>().lang()
 }
 
 /// Brings the menu to the current interface language.
@@ -34,7 +35,7 @@ pub fn show(app: &AppHandle) {
             let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == "main") else { return };
             let Ok(w) = WebviewWindowBuilder::from_config(app, cfg).and_then(|b| b.build()) else { return };
             if let Ok(hwnd) = w.hwnd() {
-                crate::sys::no_alt_menu(hwnd.0);
+                easyrazer_backend::sys::no_alt_menu(hwnd.0 as isize);
             }
             w
         }
@@ -46,7 +47,6 @@ pub fn show(app: &AppHandle) {
 
 pub fn sync_autostart(app: &AppHandle) {
     let _ = app.state::<Items>().autostart.set_checked(autostart::enabled());
-    let _ = app.emit("settings-changed", ());
 }
 
 pub fn build(app: &App) -> tauri::Result<()> {
@@ -68,10 +68,9 @@ pub fn build(app: &App) -> tauri::Result<()> {
             "autostart" => {
                 // The item has already flipped itself; the registry decides what it finally shows.
                 let on = app.state::<Items>().autostart.is_checked().unwrap_or(false);
-                if let Err(e) = autostart::set(on) {
+                if let Err(e) = app.state::<Arc<Backend>>().set_autostart(on) {
                     let _ = app.emit("app-error", i18n::tf(&lang(app), "backend.autostart", &[("error", &e)]));
                 }
-                sync_autostart(app);
             }
             "quit" => app.exit(0),
             _ => {}

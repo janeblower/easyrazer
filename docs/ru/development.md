@@ -32,8 +32,9 @@ cd app && bun run lint              # фронтенд
 | `crates/core/src/rapid.rs` | Движок RT: разбор потока глубины, пороги, автоповтор, Fn-слой |
 | `crates/core/src/lighting.rs` | Кодирование эффектов из шаблонов протокола |
 | `crates/probe` | `razer-probe` — CLI для исследования протокола |
-| `app/src-tauri` | Tauri 2: устройство, фоновый поток, трей, автозапуск, движок на Windows (`engine.rs`) |
-| `app/src-tauri/src/profiles.rs` | Профили программы над слотами: импорт, загрузка в профиль 0, управление |
+| `crates/backend` | Всё, кроме окна: устройство, фоновый поток, автозапуск, движок на Windows (`engine.rs`); `api.rs` — единственное, что видит окно |
+| `crates/backend/src/profiles.rs` | Профили программы над слотами: импорт, загрузка в профиль 0, управление |
+| `app/src-tauri` | Tauri 2: окно, трей, команды и события поверх `api.rs` |
 | `app/src` | Vue: вкладки, карта клавиатуры, локали `locales/*.json` (общие с Rust) |
 
 Протокол и прошивка по моделям — [devices/](devices/README.md).

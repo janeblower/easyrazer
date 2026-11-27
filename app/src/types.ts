@@ -1,4 +1,4 @@
-// Payloads of the Rust commands and events (app/src-tauri/src/commands.rs, device.rs).
+// Payloads of the Rust commands and events (crates/backend/src/api.rs, device.rs).
 
 export type Rgb = [number, number, number];
 
