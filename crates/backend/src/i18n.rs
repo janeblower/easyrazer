@@ -1,11 +1,11 @@
-//! Interface texts, shared with the window: `app/src/locales/*.json`.
+//! Interface texts, shared with the window: `crates/backend/locales/*.json`.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use serde_json::Value;
 
-const LOCALES: &[(&str, &str)] = &[("ru", include_str!("../../../app/src/locales/ru.json")), ("en", include_str!("../../../app/src/locales/en.json"))];
+const LOCALES: &[(&str, &str)] = &[("ru", include_str!("../locales/ru.json")), ("en", include_str!("../locales/en.json"))];
 const FALLBACK: &str = "en";
 
 fn tables() -> &'static BTreeMap<&'static str, Value> {

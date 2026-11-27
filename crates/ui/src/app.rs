@@ -369,6 +369,11 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // egui takes a hidden window's widgets as visible, so the animations would keep it at
+        // 30 frames a second in the tray.
+        if !self.is_visible() || ui.input(|i| i.viewport().minimized == Some(true)) {
+            return;
+        }
         crate::dev::panel(self, ui);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(16)).show(ui, |ui| {
             egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {

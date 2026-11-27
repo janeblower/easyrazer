@@ -128,19 +128,20 @@ driver mode. The V3 line has no such limit: 0.1–4.0 mm in both modes.
 
 ## Building from source
 
-Requires Rust (MSVC), Bun, MSVC Build Tools and cargo-about
-(`cargo install cargo-about --locked --features cli`), which lists the
-crates' licenses for the About window.
+Requires Rust (MSVC) and MSVC Build Tools with the Windows SDK.
 
 ```
-cd app
-bun install
-bun tauri dev      # run with rebuild on changes
-bun tauri build    # ..\target\release\easyrazer.exe
+cargo run -p easyrazer-ui              # debug build
+cargo build --release -p easyrazer-ui  # target\release\easyrazer.exe
 ```
 
-Tests (from the repository root): `cargo test`; frontend: `bun run lint` (in `app`).
-Test on a real keyboard (Synapse closed): `cargo test -p easyrazer -- --ignored`.
+The About window lists third-party licenses only in a build made with them: install
+cargo-about (`cargo install cargo-about --locked --features cli`), run
+`cargo run -p easyrazer-licenses -- LICENSES.txt` and build with `EASYRAZER_LICENSES`
+set to that file.
+
+Tests: `cargo test --workspace`.
+Test on a real keyboard (Synapse closed): `cargo test -p easyrazer-backend -- --ignored`.
 
 ## Documentation
 

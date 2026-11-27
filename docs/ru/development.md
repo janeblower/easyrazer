@@ -4,15 +4,14 @@
 
 ## Окружение
 
-Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools, Bun.
+Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools с Windows SDK.
 Сборка и запуск — в [README](README.md#сборка).
 
 Тесты:
 
 ```
-cargo test                          # ядро и приложение, из корня
-cargo test -p easyrazer -- --ignored  # на живой клавиатуре, Synapse закрыт
-cd app && bun run lint              # фронтенд
+cargo test --workspace                        # из корня
+cargo test -p easyrazer-backend -- --ignored  # на живой клавиатуре, Synapse закрыт
 ```
 
 Ядро тестируется на фейке клавиатуры `crates/core/src/fake.rs`: он понимает
@@ -34,8 +33,9 @@ cd app && bun run lint              # фронтенд
 | `crates/probe` | `razer-probe` — CLI для исследования протокола |
 | `crates/backend` | Всё, кроме окна: устройство, фоновый поток, автозапуск, движок на Windows (`engine.rs`); `api.rs` — единственное, что видит окно |
 | `crates/backend/src/profiles.rs` | Профили программы над слотами: импорт, загрузка в профиль 0, управление |
-| `app/src-tauri` | Tauri 2: окно, трей, команды и события поверх `api.rs` |
-| `app/src` | Vue: вкладки, карта клавиатуры, локали `locales/*.json` (общие с Rust) |
+| `crates/backend/locales` | Тексты интерфейса `ru.json`, `en.json` |
+| `crates/ui` | Окно на egui: вкладки, карта клавиатуры, трей, панель разработчика; бинарник `easyrazer` |
+| `crates/licenses` | Собирает LICENSES.txt для релиза из `cargo about` |
 
 Протокол и прошивка по моделям — [devices/](devices/README.md).
 
@@ -53,7 +53,7 @@ cd app && bun run lint              # фронтенд
 ## Pull request'ы
 
 - Одна ветка на изменение, от свежего `master`.
-- `cargo test` и `bun run lint` проходят; изменения протокола проверены на живой
+- `cargo test --workspace` проходит; изменения протокола проверены на живой
   клавиатуре (тесты `--ignored`) или в описании сказано, что нет.
 - Сообщения коммитов: `<область>: <что делает>` в повелительном наклонении, на
   английском, например `settings: save profiles compactly`. Заголовок до 50 символов;

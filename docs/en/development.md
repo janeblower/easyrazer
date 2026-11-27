@@ -4,15 +4,14 @@
 
 ## Environment
 
-Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools, Bun.
+Windows 11, Rust (`stable-x86_64-pc-windows-msvc`), MSVC Build Tools with the Windows SDK.
 Building and running — see the [README](../../README.md#building-from-source).
 
 Tests:
 
 ```
-cargo test                          # core and app, from the root
-cargo test -p easyrazer -- --ignored  # on a live keyboard, Synapse closed
-cd app && bun run lint              # frontend
+cargo test --workspace                        # from the root
+cargo test -p easyrazer-backend -- --ignored  # on a live keyboard, Synapse closed
 ```
 
 The core is tested against the keyboard fake `crates/core/src/fake.rs`: it understands
@@ -34,8 +33,9 @@ actuation, effect and `0F:03` commands. A new command in the core goes into the 
 | `crates/probe` | `razer-probe` — CLI for protocol research |
 | `crates/backend` | Everything but the window: device, background thread, autostart, engine on Windows (`engine.rs`); `api.rs` is the only surface a window reaches |
 | `crates/backend/src/profiles.rs` | App profiles on top of slots: import, loading into profile 0, management |
-| `app/src-tauri` | Tauri 2: window, tray, commands and events over `api.rs` |
-| `app/src` | Vue: tabs, keyboard map, locales `locales/*.json` (shared with Rust) |
+| `crates/backend/locales` | Interface texts `ru.json`, `en.json` |
+| `crates/ui` | egui window: tabs, keyboard map, tray, developer panel; binary `easyrazer` |
+| `crates/licenses` | Writes LICENSES.txt for a release from `cargo about` |
 
 Protocol and firmware per model — [devices/](devices/README.md).
 
@@ -53,7 +53,7 @@ Protocol and firmware per model — [devices/](devices/README.md).
 ## Pull requests
 
 - One branch per change, from a fresh `master`.
-- `cargo test` and `bun run lint` pass; changes to the protocol are checked on a live
+- `cargo test --workspace` passes; changes to the protocol are checked on a live
   keyboard (`--ignored` tests) or say they were not.
 - Commit messages: `<area>: <what it does>` in the imperative, e.g.
   `settings: save profiles compactly`. Title under 50 characters; a body only when the

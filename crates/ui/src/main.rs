@@ -23,7 +23,7 @@ mod widgets;
 
 use easyrazer_backend::{Backend, autostart, device};
 
-const ICON: &[u8] = include_bytes!("../../../app/src-tauri/icons/128x128.png");
+const ICON: &[u8] = include_bytes!("../assets/icon.png");
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
