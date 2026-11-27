@@ -4,7 +4,7 @@ use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 
 use crate::theme;
 
-const HEIGHT: f32 = 144.0;
+const HEIGHT: f32 = 132.0;
 const TRACK: f32 = 6.0;
 /// Half of the thumb: its centre never reaches the track ends.
 const THUMB: f32 = 8.0;
