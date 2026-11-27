@@ -84,6 +84,7 @@ pub struct App {
     pub gamepad: GamepadState,
     pub dialogs: Vec<Dialog>,
     pub shell: shell::State,
+    pub map: crate::keys::map::MapState,
     quitting: bool,
 }
 
@@ -122,6 +123,7 @@ impl App {
             gamepad: GamepadState::default(),
             dialogs: Vec::new(),
             shell: shell::State::default(),
+            map: Default::default(),
             quitting: false,
         };
         app.start();

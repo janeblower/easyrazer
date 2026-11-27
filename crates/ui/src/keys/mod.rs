@@ -1,7 +1,11 @@
 //! The Keys tab: press points and Rapid Trigger, bindings, macros and the gamepad.
 
+mod labels;
 pub mod macros;
+pub mod map;
 pub mod model;
+mod nav;
+pub mod snap;
 
 use easyrazer_backend::api::KeyView;
 use egui::Ui;
@@ -31,11 +35,84 @@ pub fn ui(app: &mut App, ui: &mut Ui) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| selection_bar(app, ui));
         }
     });
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input() && app.dialogs.is_empty() {
+        app.keys.selection.clear();
+        app.gamepad.selected = None;
+    }
     match app.section {
         Section::Macros => macros::ui(app, ui),
         Section::Gamepad => crate::gamepad::tab::ui(app, ui),
-        Section::Actuation | Section::Bindings => {}
+        Section::Actuation | Section::Bindings => key_map(app, ui),
     }
+}
+
+fn key_map(app: &mut App, ui: &mut Ui) {
+    let props = map_props(app);
+    let mut selection = std::mem::take(&mut app.keys.selection);
+    let mut state = std::mem::take(&mut app.map);
+    map::show(app, ui, &props, &mut selection, &mut state);
+    app.keys.selection = selection;
+    app.map = state;
+}
+
+/// What the key caps show in the open section.
+fn map_props(app: &App) -> map::Props {
+    let k = &app.keys;
+    let actuation = app.section == Section::Actuation;
+    let mut p = map::Props { inline: !actuation, single: !actuation, dim: !app.online(), ..Default::default() };
+    for v in &app.layout {
+        let key = v.key.key;
+        if actuation {
+            if let Some(mm) = k.value_of(key) {
+                p.values.insert(key, format!("{mm:.1}"));
+            }
+            if let Some(hs) = k.hs_of(key).filter(|hs| Some(*hs) != k.value_of(key)) {
+                p.hs_values.insert(key, format!("{hs:.1}"));
+            }
+        } else {
+            if k.bind_base.contains_key(&key) || k.bind_edits.contains_key(&key) {
+                let a = k.binding_of(key);
+                if a != Some(model::factory(key)) {
+                    p.values.insert(key, labels::short_label(app, a.as_ref(), &app.layout));
+                }
+            }
+            if let Some(a) = k.hs_binding_of(key)
+                && Some(a) != Some(k.binding_of(key).unwrap_or(model::factory(key)))
+            {
+                let icon = match a {
+                    razer_core::binding::Action::System { action } => Some(action),
+                    _ => None,
+                };
+                p.hs_binds.insert(key, map::HsBind { text: labels::short_label(app, Some(&a), &app.layout), icon });
+            }
+        }
+    }
+    if actuation {
+        p.edited = k.edits.keys().copied().collect();
+        p.hs_edited = k.hs_edits.keys().copied().collect();
+        p.errors = k.errors.clone();
+        p.unsaved = k.unsaved.clone();
+        if app.rapid_here() {
+            let fw_hw = app.fw_hw();
+            for v in &app.layout {
+                let r = k.rapid_of(v.key.key);
+                if r.enabled {
+                    let crt = model::KeyEdits::mode_of(&r, fw_hw) == model::RapidMode::Crt || (fw_hw && k.crt());
+                    p.rapid.insert(v.key.key, if crt { "CRT" } else { "RT" });
+                }
+            }
+            p.snap = snap::colors(k.snap());
+        }
+        p.rapid_edited = k.rapid_edits.keys().copied().collect();
+    } else {
+        p.edited = k.bind_edits.keys().copied().collect();
+        p.hs_edited = k.hs_bind_edits.keys().copied().collect();
+        p.errors = k.bind_errors.clone();
+        p.unsaved = k.bind_unsaved.clone();
+    }
+    let editable = app.layout.iter().filter(|v| v.key.editable).count();
+    p.loaded = app.progress.map(|(done, total)| if total == 0 { 0 } else { done * editable / total });
+    p
 }
 
 /// The hint goes last in a right-to-left row: its width changes, the buttons stay put.
