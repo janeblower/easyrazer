@@ -109,6 +109,18 @@ pub struct DevWindow {
     pub h: f64,
 }
 
+/// How the developer traffic log is shown; names as the window keys its texts by.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DevTraffic {
+    pub columns: Vec<String>,
+    pub show: String,
+    pub background: bool,
+}
+
+/// Lines the developer console keeps for recall.
+pub const DEV_RECENT_MAX: usize = 20;
+
 pub const DEV_LOG_SIZE: usize = 10_000;
 /// Bounds of `dev_log_size`: entries hold whole reports, and every window keeps a copy.
 pub const DEV_LOG_SIZES: std::ops::RangeInclusive<usize> = 1000..=50_000;
@@ -166,13 +178,36 @@ pub struct Settings {
     pub dev_panel: Option<DevPanel>,
     #[serde(deserialize_with = "lenient")]
     pub dev_window: Option<DevWindow>,
+    /// Lines sent from the developer console, the newest first.
+    #[serde(deserialize_with = "lenient")]
+    pub dev_recent: Vec<String>,
+    /// `None` until the log's view is first changed.
+    #[serde(deserialize_with = "lenient")]
+    pub dev_traffic: Option<DevTraffic>,
     /// The keyboard picked last; the window starts on it.
     pub last_device: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { devices: BTreeMap::new(), legacy: BTreeMap::new(), gamepad_defaults: true, confirm_write: true, close_action: CloseAction::Ask, watch_synapse: true, autostart_offered: false, language: None, dev_mode: false, dev_log_size: DEV_LOG_SIZE, unverified_writes: false, dev_panel: None, dev_window: None, last_device: None }
+        Self {
+            devices: BTreeMap::new(),
+            legacy: BTreeMap::new(),
+            gamepad_defaults: true,
+            confirm_write: true,
+            close_action: CloseAction::Ask,
+            watch_synapse: true,
+            autostart_offered: false,
+            language: None,
+            dev_mode: false,
+            dev_log_size: DEV_LOG_SIZE,
+            unverified_writes: false,
+            dev_panel: None,
+            dev_window: None,
+            dev_recent: Vec::new(),
+            dev_traffic: None,
+            last_device: None,
+        }
     }
 }
 
@@ -619,9 +654,17 @@ mod tests {
             unverified_writes: true,
             dev_panel: Some(DevPanel { open: false, dock: Dock::Bottom, size: 300 }),
             dev_window: Some(DevWindow { x: 10.0, y: 20.0, w: 800.0, h: 600.0 }),
+            dev_recent: vec!["get_mode".into()],
+            dev_traffic: Some(DevTraffic { columns: vec!["time".into(), "name".into()], show: "e".into(), background: true }),
             last_device: Some("PM1".into()),
         };
         assert_eq!(parse(&serde_json::to_string(&s).unwrap()), s);
+    }
+
+    #[test]
+    fn unreadable_console_history_and_traffic_view_are_dropped() {
+        let s = parse("{\"dev_recent\": 5, \"dev_traffic\": [1], \"confirm_write\": false}");
+        assert_eq!((s.dev_recent.is_empty(), s.dev_traffic, s.confirm_write), (true, None, false));
     }
 
     #[test]

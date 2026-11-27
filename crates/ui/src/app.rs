@@ -90,6 +90,7 @@ pub struct App {
     pub lighting: crate::lighting::Lighting,
     pub settings_view: Option<easyrazer_backend::api::AppSettings>,
     pub settings_message: String,
+    pub dev: crate::dev::Dev,
     /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
     pub lead: (u8, u8, bool, u8),
     quitting: bool,
@@ -136,6 +137,7 @@ impl App {
             lighting: Default::default(),
             settings_view: None,
             settings_message: String::new(),
+            dev: Default::default(),
             lead: (0, 0, false, 0),
             quitting: false,
         };

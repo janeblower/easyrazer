@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::boards::{self, Boards, DevicesView, Hooks};
 use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use crate::engine::{self, Sink};
-use crate::settings::{self, CloseAction, DevPanel, DevWindow, Rapid, Settings, Shared, SnapTap};
+use crate::settings::{self, CloseAction, DevPanel, DevTraffic, DevWindow, Rapid, Settings, Shared, SnapTap};
 use crate::{autostart, dev, focus, gamepad, i18n, wake};
 
 /// What the backend tells the window without being asked.
@@ -162,6 +162,8 @@ pub struct AppSettings {
     pub unverified_writes: bool,
     pub dev_panel: Option<DevPanel>,
     pub dev_window: Option<DevWindow>,
+    pub dev_recent: Vec<String>,
+    pub dev_traffic: Option<DevTraffic>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -525,6 +527,8 @@ impl Backend {
             unverified_writes: s.unverified_writes,
             dev_panel: s.dev_panel,
             dev_window: s.dev_window,
+            dev_recent: s.dev_recent,
+            dev_traffic: s.dev_traffic,
         }
     }
 
@@ -760,6 +764,19 @@ impl Backend {
 
     pub fn set_dev_window(&self, geom: DevWindow) -> Result<(), String> {
         self.update_settings(|s| s.dev_window = Some(geom))
+    }
+
+    /// The console line just sent goes first; the oldest fall off past [`settings::DEV_RECENT_MAX`].
+    pub fn add_dev_recent(&self, line: String) -> Result<(), String> {
+        self.update_settings(|s| {
+            s.dev_recent.retain(|r| *r != line);
+            s.dev_recent.insert(0, line);
+            s.dev_recent.truncate(settings::DEV_RECENT_MAX);
+        })
+    }
+
+    pub fn set_dev_traffic(&self, view: DevTraffic) -> Result<(), String> {
+        self.update_settings(|s| s.dev_traffic = Some(view))
     }
 
     pub fn dev_log(&self, id: &str) -> Result<Vec<Entry>, String> {
