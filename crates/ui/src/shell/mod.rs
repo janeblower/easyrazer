@@ -26,6 +26,7 @@ const TABS: [(Tab, &str); 3] = [(Tab::Keys, "tabs.keys"), (Tab::Lighting, "tabs.
 pub fn ui(app: &mut App, ui: &mut Ui) {
     ui.spacing_mut().item_spacing.y = 16.0;
     nav(app, ui);
+    crate::updates::banner(app, ui);
     status_line(app, ui);
     match app.tab {
         Tab::Keys => crate::keys::ui(app, ui),

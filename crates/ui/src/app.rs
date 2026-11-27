@@ -91,6 +91,7 @@ pub struct App {
     pub settings_view: Option<easyrazer_backend::api::AppSettings>,
     pub settings_message: String,
     pub dev: crate::dev::Dev,
+    pub updates: crate::updates::Updates,
     /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
     pub lead: (u8, u8, bool, u8),
     quitting: bool,
@@ -138,6 +139,7 @@ impl App {
             settings_view: None,
             settings_message: String::new(),
             dev: Default::default(),
+            updates: Default::default(),
             lead: (0, 0, false, 0),
             quitting: false,
         };
@@ -366,6 +368,7 @@ impl eframe::App for App {
         self.on_close(ctx);
         crate::gamepad::poll(self);
         crate::lighting::tick(self);
+        crate::updates::tick(self);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

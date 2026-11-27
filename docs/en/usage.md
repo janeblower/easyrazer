@@ -303,6 +303,7 @@ and V3 Pro Low-profile TKL 8KHz do not support Dynamic Lighting.
 | Language | Russian, English |
 | Start with Windows | starts minimized to the tray; also in the tray menu |
 | On window close | ask, minimize to tray, quit the app |
+| Check for updates | on by default: at start and once a day the app looks on GitHub for a newer release and shows a notice with a download button. "Check now" next to the version asks at once |
 | Watch for Synapse | when Synapse exits, the app restores its settings |
 | Ask before saving to keyboard memory | on / off |
 

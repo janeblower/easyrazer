@@ -166,6 +166,8 @@ pub struct Settings {
     pub watch_synapse: bool,
     /// The first-run autostart question has been answered.
     pub autostart_offered: bool,
+    /// Look for a newer release on GitHub at start and once a day.
+    pub check_updates: bool,
     /// Interface language; `None` until the window picks one from the system.
     pub language: Option<String>,
     pub dev_mode: bool,
@@ -198,6 +200,7 @@ impl Default for Settings {
             close_action: CloseAction::Ask,
             watch_synapse: true,
             autostart_offered: false,
+            check_updates: true,
             language: None,
             dev_mode: false,
             dev_log_size: DEV_LOG_SIZE,
@@ -620,7 +623,7 @@ mod tests {
     #[test]
     fn missing_fields_keep_their_defaults() {
         let s = parse("{\"confirm_write\": false}");
-        assert_eq!((s.watch_synapse, s.confirm_write), (true, false));
+        assert_eq!((s.watch_synapse, s.confirm_write, s.check_updates), (true, false, true));
     }
 
     #[test]
@@ -648,6 +651,7 @@ mod tests {
             close_action: CloseAction::Tray,
             watch_synapse: false,
             autostart_offered: true,
+            check_updates: false,
             language: Some("ru".into()),
             dev_mode: true,
             dev_log_size: 2000,
