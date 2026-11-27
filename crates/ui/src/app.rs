@@ -48,6 +48,12 @@ pub enum Place {
 
 /// How long an error not tied to a tab stays on screen.
 const ERROR_SHOWN: Duration = Duration::from_secs(10);
+/// Hidden this long, the window gives its memory back: by then the last frame is drawn,
+/// and a start in the tray has read the keyboard.
+const TRIM_AFTER: Duration = Duration::from_secs(5);
+const TRIM_AFTER_START: Duration = Duration::from_secs(20);
+/// The backend's threads touch pages again in the tray, so the trim repeats.
+const TRIM_EVERY: Duration = Duration::from_secs(10 * 60);
 
 pub struct App {
     pub jobs: Jobs,
@@ -94,6 +100,8 @@ pub struct App {
     pub updates: crate::updates::Updates,
     /// The key last moved in driver mode: its depth and travel 0..255, whether it is down, and the key.
     pub lead: (u8, u8, bool, u8),
+    /// When a hidden window gives its memory back.
+    trim_at: Option<Instant>,
     quitting: bool,
 }
 
@@ -141,6 +149,7 @@ impl App {
             dev: Default::default(),
             updates: Default::default(),
             lead: (0, 0, false, 0),
+            trim_at: (!shown).then(|| Instant::now() + TRIM_AFTER_START),
             quitting: false,
         };
         app.start();
@@ -290,6 +299,7 @@ impl App {
 
     pub fn show(&mut self, ctx: &egui::Context) {
         self.visible.store(true, Ordering::Relaxed);
+        self.trim_at = None;
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
@@ -299,6 +309,7 @@ impl App {
     pub fn hide(&mut self, ctx: &egui::Context) {
         self.visible.store(false, Ordering::Relaxed);
         self.depth = [0; 256];
+        self.trim_at = Some(Instant::now() + TRIM_AFTER);
         crate::changes::revert_all(self);
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
         if let Err(e) = self.jobs.backend().drop_previews() {
@@ -321,6 +332,21 @@ impl App {
             }
             tray::Action::Quit => self.quit(ctx),
         }
+    }
+
+    fn trim(&mut self, ctx: &egui::Context) {
+        let Some(at) = self.trim_at else { return };
+        let left = at.saturating_duration_since(Instant::now());
+        if !left.is_zero() {
+            ctx.request_repaint_after(left);
+            return;
+        }
+        if self.is_visible() {
+            self.trim_at = None;
+            return;
+        }
+        easyrazer_backend::sys::trim_working_set();
+        self.trim_at = Some(Instant::now() + TRIM_EVERY);
     }
 
     fn on_close(&mut self, ctx: &egui::Context) {
@@ -365,6 +391,7 @@ impl eframe::App for App {
                 None => self.app_error = None,
             }
         }
+        self.trim(ctx);
         self.on_close(ctx);
         crate::gamepad::poll(self);
         crate::lighting::tick(self);
