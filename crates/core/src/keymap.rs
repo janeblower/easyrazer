@@ -125,13 +125,6 @@ pub fn name(id: u8) -> Option<&'static str> {
     KEYS.iter().find(|&&(_, i)| i == id).map(|&(n, _)| n)
 }
 
-/// HID usage of a key: Keyboard/Keypad page (0x07) or Consumer page (0x0C).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Usage {
-    Key(u8),
-    Consumer(u16),
-}
-
 /// Keyboard/Keypad page usage of a fwID (modifiers are 0xE0..=0xE7).
 pub fn usage(id: u8) -> Option<u8> {
     Some(match id {
@@ -266,7 +259,9 @@ mod tests {
         let mut seen = std::collections::HashMap::new();
         for &(n, id) in KEYS {
             let u = usage(id).unwrap();
-            assert!(seen.insert(u, n).is_none(), "{n} duplicates {:?}", seen.get(&u));
+            if let Some(prev) = seen.insert(u, n) {
+                panic!("{n} duplicates {prev}");
+            }
         }
     }
 

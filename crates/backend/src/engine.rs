@@ -502,6 +502,9 @@ mod tests {
         }
     }
 
+    /// Pause is sent by VK, the rest are Japanese/Korean keys `scancode()` does not cover.
+    const NO_SCANCODE: [&str; 6] = ["PAUSE", "MUHENKAN", "KATAKANA_HIRAGANA", "HANJA", "HANGEUL", "HENKAN"];
+
     #[test]
     fn usage_agrees_with_scancode() {
         for id in 0..=255u8 {
@@ -509,7 +512,8 @@ mod tests {
                 (Some(sc), Some(u)) => assert_eq!(set1(u), sc, "fwID {id}"),
                 (Some(_), None) => panic!("fwID {id} has a scancode but no usage"),
                 (None, Some(_)) => {
-                    assert!(id == PAUSE || (150..=154).contains(&id), "fwID {id} has a usage but no scancode")
+                    let name = razer_core::keymap::name(id).unwrap_or("?");
+                    assert!(NO_SCANCODE.contains(&name), "fwID {id} {name} has a usage but no scancode");
                 }
                 (None, None) => {}
             }
