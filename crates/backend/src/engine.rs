@@ -213,6 +213,8 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
 }
 
 fn emit(out: &[Output], sink: &Sink) {
+    #[cfg(debug_assertions)]
+    sys::trace_emit(out.len());
     let mut inputs = Vec::new();
     for &o in out {
         match o {

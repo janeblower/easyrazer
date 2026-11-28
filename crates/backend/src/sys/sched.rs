@@ -73,4 +73,20 @@ impl Drop for ThreadBoost {
         }
     }
 }
-
+
+/// With `EASYRAZER_TRACE_TIMING` set, prints the gap since the previous batch of typed events: the
+/// auto-repeat interval, or the step of a macro with 1 ms delays.
+#[cfg(debug_assertions)]
+pub fn trace_emit(events: usize) {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    static ON: OnceLock<bool> = OnceLock::new();
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    if events == 0 || !*ON.get_or_init(|| std::env::var_os("EASYRAZER_TRACE_TIMING").is_some()) {
+        return;
+    }
+    let now = Instant::now();
+    if let Some(prev) = LAST.lock().unwrap_or_else(|e| e.into_inner()).replace(now) {
+        eprintln!("emit gap {} us ({events} events)", now.duration_since(prev).as_micros());
+    }
+}
