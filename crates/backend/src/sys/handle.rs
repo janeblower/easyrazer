@@ -104,9 +104,9 @@ pub fn set_event(event: BorrowedHandle<'_>) -> io::Result<()> {
     Ok(())
 }
 
-fn eq_ignore_ascii_case_utf16(name: &[u16], exe: &str) -> bool {
+fn eq_ignore_ascii_case_utf16(name: &[u16], exe: &[u16]) -> bool {
     let fold = |c: u16| if (u16::from(b'A')..=u16::from(b'Z')).contains(&c) { c + 32 } else { c };
-    name.len() == exe.encode_utf16().count() && name.iter().zip(exe.encode_utf16()).all(|(&a, b)| fold(a) == fold(b))
+    name.len() == exe.len() && name.iter().zip(exe).all(|(&a, &b)| fold(a) == fold(b))
 }
 
 /// Whether a process with this executable name runs.
@@ -117,12 +117,13 @@ pub fn process_running(exe: &str) -> io::Result<bool> {
         return Err(io::Error::last_os_error());
     }
     let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let exe: Vec<u16> = exe.encode_utf16().collect();
     let mut found = false;
     // SAFETY: `snap` is open; `entry` is writable and its dwSize is set.
     let mut ok = unsafe { Process32FirstW(snap, &mut entry) };
     while ok != 0 && !found {
         let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-        found = eq_ignore_ascii_case_utf16(&entry.szExeFile[..len], exe);
+        found = eq_ignore_ascii_case_utf16(&entry.szExeFile[..len], &exe);
         // SAFETY: as for Process32FirstW.
         ok = unsafe { Process32NextW(snap, &mut entry) };
     }
@@ -149,9 +150,9 @@ mod tests {
 
     #[test]
     fn exe_names_match_ignoring_ascii_case_only() {
-        assert!(eq(&wide("Game.EXE"), "game.exe"));
-        assert!(!eq(&wide("game.ex"), "game.exe"));
-        assert!(!eq(&wide("game.exe"), "game.ex"));
-        assert!(!eq(&wide("\u{c9}a.exe"), "\u{e9}a.exe"));
+        assert!(eq(&wide("Game.EXE"), &wide("game.exe")));
+        assert!(!eq(&wide("game.ex"), &wide("game.exe")));
+        assert!(!eq(&wide("game.exe"), &wide("game.ex")));
+        assert!(!eq(&wide("\u{c9}a.exe"), &wide("\u{e9}a.exe")));
     }
 }
