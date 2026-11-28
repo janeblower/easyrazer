@@ -84,6 +84,7 @@ impl Wheel {
                 // A thread has no message queue until it first asks for one; without it a WM_QUIT
                 // posted before `run_wheel` gets there fails and the join in Drop would never return.
                 let _ = tx.send(sys::start_message_queue());
+                let _boost = sys::ThreadBoost::apply();
                 sys::run_wheel(WheelEvents { notch: record, turn });
             });
             *thread = Some((rx.recv().unwrap_or(0), join));

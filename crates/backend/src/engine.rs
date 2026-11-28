@@ -41,6 +41,7 @@ pub struct EngineHandle {
     threads: Vec<JoinHandle<()>>,
     sink: Sink,
     _wheel: Wheel,
+    _timer: sys::TimerResolution,
     gamepad: Arc<Mutex<crate::gamepad::Runtime>>,
 }
 
@@ -109,11 +110,14 @@ impl EngineHandle {
         runtime.configure(profile, gamepad_config, request);
         runtime.config.configure(&mut cfg);
         drop(runtime);
+        sys::opt_out_of_power_throttling();
+        let timer = sys::TimerResolution::acquire();
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
             let (engine, stop, sink, gamepad) = (engine.clone(), stop.clone(), sink.clone(), gamepad.clone());
             std::thread::spawn(move || {
+                let _boost = sys::ThreadBoost::apply();
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
                 // Not stopped by its owner: the watcher replaces the engine.
                 if !stop.swap(true, Ordering::SeqCst) {
@@ -128,7 +132,7 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, Box::new(feed_depth(report.clone(), gamepad.clone()))), spawn(razer, Box::new(feed_razer))];
-        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit), gamepad })
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit), _timer: timer, gamepad })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
@@ -191,7 +195,7 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
     let mut buf = [0u8; 64];
     while !stop.load(Ordering::SeqCst) {
         let wait = lock(engine).deadline().map_or(POLL, |d| d.saturating_duration_since(Instant::now()).min(POLL));
-        // Round up: a zero timeout would spin until the repeat is due.
+        // Round up; zero is an overdue repeat, polled without blocking.
         let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000) as i32) else { return };
         let now = Instant::now();
         let out = {
@@ -209,6 +213,8 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
 }
 
 fn emit(out: &[Output], sink: &Sink) {
+    #[cfg(debug_assertions)]
+    sys::trace_emit(out.len());
     let mut inputs = Vec::new();
     for &o in out {
         match o {
