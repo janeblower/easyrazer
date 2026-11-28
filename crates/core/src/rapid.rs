@@ -270,6 +270,13 @@ fn pressed(o: Output) -> Option<Output> {
     }
 }
 
+/// Which keys of a snap group may type.
+enum Want {
+    Held,
+    One(u8),
+    Nothing,
+}
+
 pub struct Engine {
     cfg: Config,
     keys: [KeyState; 256],
@@ -336,32 +343,41 @@ impl Engine {
     fn snap(&mut self, g: usize, depth: &[u8; 256], now: Instant, out: &mut Vec<Output>) {
         let held = &self.order[g];
         let typing = |k: u8| self.keys[k as usize].sent.is_some();
-        let want: Vec<u8> = if !self.cfg.snap_on || held.len() < 2 {
-            held.clone()
+        let want = if !self.cfg.snap_on || held.len() < 2 {
+            Want::Held
         } else {
             match self.cfg.snap[g].rule {
-                SnapRule::Last => held.last().copied().into_iter().collect(),
-                SnapRule::Neutral => Vec::new(),
+                SnapRule::Last => held.last().map_or(Want::Nothing, |&k| Want::One(k)),
+                SnapRule::Neutral => Want::Nothing,
                 SnapRule::Deeper => {
                     // max_by_key keeps the last of equals: a tie goes to the newest press.
                     let deepest = held.iter().copied().max_by_key(|&k| depth[k as usize]).unwrap_or_default();
                     match held.iter().copied().find(|&k| typing(k)) {
-                        Some(c) if depth[deepest as usize] < depth[c as usize].saturating_add(self.cfg.margin) => vec![c],
-                        _ => vec![deepest],
+                        Some(c) if depth[deepest as usize] < depth[c as usize].saturating_add(self.cfg.margin) => Want::One(c),
+                        _ => Want::One(deepest),
                     }
                 }
             }
         };
-        // A key listed in an earlier group belongs to that one; a key down in the Fn layer to none.
-        let keys: Vec<u8> = self.cfg.snap[g].keys.iter().copied().filter(|&k| self.group(k) == Some(g) && !self.keys[k as usize].fn_layer).collect();
-        let lift: Vec<u8> = keys.iter().copied().filter(|&k| !want.contains(&k) && typing(k)).collect();
-        let press: Vec<u8> = keys.iter().copied().filter(|&k| want.contains(&k) && !typing(k)).collect();
-        // Releases first, so two keys of a group never type at once.
-        for k in lift {
-            self.transition(k, false, now, out);
-        }
-        for k in press {
-            self.transition(k, true, now, out);
+        // Releases first, so two keys of a group never type at once. Applying a release never
+        // changes whether another key of the group is owned, wanted or typing.
+        for press in [false, true] {
+            for i in 0..self.cfg.snap[g].keys.len() {
+                let k = self.cfg.snap[g].keys[i];
+                // A key listed in an earlier group belongs to that one; a key down in the Fn layer to none.
+                if self.group(k) != Some(g) || self.keys[k as usize].fn_layer {
+                    continue;
+                }
+                let wanted = match want {
+                    Want::Held => self.order[g].contains(&k),
+                    Want::One(w) => w == k,
+                    Want::Nothing => false,
+                };
+                let typing = self.keys[k as usize].sent.is_some();
+                if wanted == press && typing != press {
+                    self.transition(k, press, now, out);
+                }
+            }
         }
     }
 
@@ -1178,6 +1194,32 @@ mod tests {
         e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
         assert_eq!(e.release_all(), [key(D, false)]);
         assert_eq!(e.feed_depth(&depth(&[(A, 150)]), t), [key(A, true)]);
+    }
+
+    #[test]
+    fn snap_releases_the_old_key_before_pressing_the_new_one_whatever_the_group_order() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(D, 150)]), t), [key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(D, 150), (A, 150)]), t), [key(D, false), key(A, true)]);
+    }
+
+    #[test]
+    fn snap_off_types_all_held_keys_of_a_group_in_listed_order() {
+        let (mut e, t) = (snapped(&[A, S, D], SnapRule::Last), Instant::now());
+        e.cfg.snap_on = false;
+        assert_eq!(e.feed_depth(&depth(&[(D, 150), (S, 150), (A, 150)]), t), [key(A, true), key(S, true), key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(S, 150)]), t), [key(A, false), key(D, false)]);
+    }
+
+    #[test]
+    fn snap_skips_a_key_that_went_down_in_the_fn_layer() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        e.feed_razer(&[]);
+        let out = e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
+        assert_eq!(out, [key(D, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t).is_empty());
     }
 
     #[test]

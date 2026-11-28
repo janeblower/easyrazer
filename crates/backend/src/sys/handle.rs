@@ -104,6 +104,11 @@ pub fn set_event(event: BorrowedHandle<'_>) -> io::Result<()> {
     Ok(())
 }
 
+fn eq_ignore_ascii_case_utf16(name: &[u16], exe: &[u16]) -> bool {
+    let fold = |c: u16| if (u16::from(b'A')..=u16::from(b'Z')).contains(&c) { c + 32 } else { c };
+    name.len() == exe.len() && name.iter().zip(exe).all(|(&a, &b)| fold(a) == fold(b))
+}
+
 /// Whether a process with this executable name runs.
 pub fn process_running(exe: &str) -> io::Result<bool> {
     // SAFETY: takes values only; the snapshot is closed below.
@@ -112,12 +117,13 @@ pub fn process_running(exe: &str) -> io::Result<bool> {
         return Err(io::Error::last_os_error());
     }
     let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let exe: Vec<u16> = exe.encode_utf16().collect();
     let mut found = false;
     // SAFETY: `snap` is open; `entry` is writable and its dwSize is set.
     let mut ok = unsafe { Process32FirstW(snap, &mut entry) };
     while ok != 0 && !found {
         let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-        found = String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(exe);
+        found = eq_ignore_ascii_case_utf16(&entry.szExeFile[..len], &exe);
         // SAFETY: as for Process32FirstW.
         ok = unsafe { Process32NextW(snap, &mut entry) };
     }
@@ -134,4 +140,19 @@ pub fn uninstall_driver(inf: &std::path::Path) -> io::Result<bool> {
         return Err(io::Error::last_os_error());
     }
     Ok(needed != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eq_ignore_ascii_case_utf16 as eq;
+
+    fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
+
+    #[test]
+    fn exe_names_match_ignoring_ascii_case_only() {
+        assert!(eq(&wide("Game.EXE"), &wide("game.exe")));
+        assert!(!eq(&wide("game.ex"), &wide("game.exe")));
+        assert!(!eq(&wide("game.exe"), &wide("game.ex")));
+        assert!(!eq(&wide("\u{c9}a.exe"), &wide("\u{e9}a.exe")));
+    }
 }
