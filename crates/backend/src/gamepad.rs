@@ -235,8 +235,8 @@ impl Runtime {
     pub fn feed(&mut self, depth: &[u8; 256]) {
         self.depth = *depth;
         self.check();
-        let state = self.config.output(depth);
         if let Some(s) = &mut self.session {
+            let state = self.config.output(depth);
             if state == s.previous { return; }
             match s.pad.submit(&state) {
                 Ok(()) => s.previous = state,
