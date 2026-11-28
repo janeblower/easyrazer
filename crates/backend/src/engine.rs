@@ -195,8 +195,8 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
     let mut buf = [0u8; 64];
     while !stop.load(Ordering::SeqCst) {
         let wait = lock(engine).deadline().map_or(POLL, |d| d.saturating_duration_since(Instant::now()).min(POLL));
-        // Round up, at least 1 ms: a zero timeout would spin, and the boosted reader must always block.
-        let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000).max(1) as i32) else { return };
+        // Round up; zero is an overdue repeat, polled without blocking.
+        let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000) as i32) else { return };
         let now = Instant::now();
         let out = {
             let mut e = lock(engine);

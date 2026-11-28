@@ -1,3 +1,5 @@
+use std::sync::Once;
+
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 use windows_sys::Win32::System::Threading::{
@@ -7,40 +9,48 @@ use windows_sys::Win32::System::Threading::{
 };
 
 /// Holds the system timer at 1 ms, so waits of a few milliseconds are not rounded up to a tick of ~15.6 ms.
-pub struct TimerResolution;
+pub struct TimerResolution(bool);
 
 impl TimerResolution {
     pub fn acquire() -> Self {
-        // SAFETY: takes a value only; every successful call is paired with `timeEndPeriod` in Drop.
-        if unsafe { timeBeginPeriod(1) } != 0 {
+        // SAFETY: takes a value only; a successful call is paired with `timeEndPeriod` in Drop.
+        let ok = unsafe { timeBeginPeriod(1) } == 0;
+        if !ok {
             eprintln!("timeBeginPeriod(1) failed");
         }
-        Self
+        Self(ok)
     }
 }
 
 impl Drop for TimerResolution {
     fn drop(&mut self) {
-        // SAFETY: takes a value only; matches the `timeBeginPeriod` in `acquire`.
-        unsafe { timeEndPeriod(1) };
+        if self.0 {
+            // SAFETY: takes a value only; matches the `timeBeginPeriod` in `acquire`.
+            unsafe { timeEndPeriod(1) };
+        }
     }
 }
 
-/// Keeps Windows from coarsening the timer or throttling this process to efficiency cores.
-/// Win11 otherwise ignores the timer resolution of processes whose windows are hidden.
-pub fn opt_out_of_power_throttling() {
-    let state = PROCESS_POWER_THROTTLING_STATE {
-        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-        ControlMask: PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION | PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
-        StateMask: 0,
-    };
+fn throttling_opt_out(flag: u32) -> bool {
+    let state = PROCESS_POWER_THROTTLING_STATE { Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION, ControlMask: flag, StateMask: 0 };
     // SAFETY: no arguments; the pseudo handle needs no closing.
     let process = unsafe { GetCurrentProcess() };
     // SAFETY: `state` is a valid PROCESS_POWER_THROTTLING_STATE of the size passed.
-    let ok = unsafe { SetProcessInformation(process, ProcessPowerThrottling, (&raw const state).cast(), size_of_val(&state) as u32) };
-    if ok == 0 {
-        eprintln!("opting out of power throttling failed");
-    }
+    unsafe { SetProcessInformation(process, ProcessPowerThrottling, (&raw const state).cast(), size_of_val(&state) as u32) != 0 }
+}
+
+/// Keeps Windows from throttling this process to efficiency cores and from ignoring its timer
+/// resolution (Win11, hidden windows). Process-wide, so it runs once. Two calls: the second flag
+/// is unknown before Win11 and must not take the first down with it.
+pub fn opt_out_of_power_throttling() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if !throttling_opt_out(PROCESS_POWER_THROTTLING_EXECUTION_SPEED) {
+            eprintln!("opting out of EcoQoS failed");
+        }
+        // Fails on Win10, where the timer resolution is already global.
+        throttling_opt_out(PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION);
+    });
 }
 
 /// Raises the calling thread for as long as it lives; only for threads that block between events.
