@@ -117,6 +117,7 @@ impl EngineHandle {
         let spawn = |dev: HidDevice, feed: Feed| {
             let (engine, stop, sink, gamepad) = (engine.clone(), stop.clone(), sink.clone(), gamepad.clone());
             std::thread::spawn(move || {
+                let _boost = sys::ThreadBoost::apply();
                 let _ = std::panic::catch_unwind(AssertUnwindSafe(|| read(&dev, &engine, &stop, &sink, feed)));
                 // Not stopped by its owner: the watcher replaces the engine.
                 if !stop.swap(true, Ordering::SeqCst) {
