@@ -104,6 +104,11 @@ pub fn set_event(event: BorrowedHandle<'_>) -> io::Result<()> {
     Ok(())
 }
 
+fn eq_ignore_ascii_case_utf16(name: &[u16], exe: &str) -> bool {
+    let fold = |c: u16| if (u16::from(b'A')..=u16::from(b'Z')).contains(&c) { c + 32 } else { c };
+    name.len() == exe.encode_utf16().count() && name.iter().zip(exe.encode_utf16()).all(|(&a, b)| fold(a) == fold(b))
+}
+
 /// Whether a process with this executable name runs.
 pub fn process_running(exe: &str) -> io::Result<bool> {
     // SAFETY: takes values only; the snapshot is closed below.
@@ -117,7 +122,7 @@ pub fn process_running(exe: &str) -> io::Result<bool> {
     let mut ok = unsafe { Process32FirstW(snap, &mut entry) };
     while ok != 0 && !found {
         let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-        found = String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(exe);
+        found = eq_ignore_ascii_case_utf16(&entry.szExeFile[..len], exe);
         // SAFETY: as for Process32FirstW.
         ok = unsafe { Process32NextW(snap, &mut entry) };
     }
@@ -134,4 +139,19 @@ pub fn uninstall_driver(inf: &std::path::Path) -> io::Result<bool> {
         return Err(io::Error::last_os_error());
     }
     Ok(needed != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eq_ignore_ascii_case_utf16 as eq;
+
+    fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
+
+    #[test]
+    fn exe_names_match_ignoring_ascii_case_only() {
+        assert!(eq(&wide("Game.EXE"), "game.exe"));
+        assert!(!eq(&wide("game.ex"), "game.exe"));
+        assert!(!eq(&wide("game.exe"), "game.ex"));
+        assert!(!eq(&wide("\u{c9}a.exe"), "\u{e9}a.exe"));
+    }
 }
