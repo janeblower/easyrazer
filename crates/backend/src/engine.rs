@@ -41,6 +41,7 @@ pub struct EngineHandle {
     threads: Vec<JoinHandle<()>>,
     sink: Sink,
     _wheel: Wheel,
+    _timer: sys::TimerResolution,
     gamepad: Arc<Mutex<crate::gamepad::Runtime>>,
 }
 
@@ -109,6 +110,8 @@ impl EngineHandle {
         runtime.configure(profile, gamepad_config, request);
         runtime.config.configure(&mut cfg);
         drop(runtime);
+        sys::opt_out_of_power_throttling();
+        let timer = sys::TimerResolution::acquire();
         let engine = Arc::new(Mutex::new(Engine::new(cfg)));
         let stop = Arc::new(AtomicBool::new(false));
         let spawn = |dev: HidDevice, feed: Feed| {
@@ -128,7 +131,7 @@ impl EngineHandle {
             })
         };
         let threads = vec![spawn(depth, Box::new(feed_depth(report.clone(), gamepad.clone()))), spawn(razer, Box::new(feed_razer))];
-        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit), gamepad })
+        Ok(Self { engine, stop, threads, sink, _wheel: Wheel::start(unit), _timer: timer, gamepad })
     }
 
     /// Stops typing and releases the held keys now; the readers exit only after their current read.
@@ -191,8 +194,8 @@ fn read(dev: &HidDevice, engine: &Mutex<Engine>, stop: &AtomicBool, sink: &Sink,
     let mut buf = [0u8; 64];
     while !stop.load(Ordering::SeqCst) {
         let wait = lock(engine).deadline().map_or(POLL, |d| d.saturating_duration_since(Instant::now()).min(POLL));
-        // Round up: a zero timeout would spin until the repeat is due.
-        let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000) as i32) else { return };
+        // Round up, at least 1 ms: a zero timeout would spin, and the boosted reader must always block.
+        let Ok(n) = dev.read_timeout(&mut buf, wait.as_micros().div_ceil(1000).max(1) as i32) else { return };
         let now = Instant::now();
         let out = {
             let mut e = lock(engine);
