@@ -77,6 +77,13 @@ pub fn set_enabled(on: bool) {
 
 /// Starts or stops the hook thread so that it runs exactly while it is enabled and a unit needs it.
 fn sync(thread: &mut Option<(u32, JoinHandle<()>)>) {
+    // The thread ends by itself when the hook or Raw Input could not be installed.
+    if thread.as_ref().is_some_and(|(_, join)| join.is_finished())
+        && let Some((_, join)) = thread.take()
+    {
+        let _ = join.join();
+        eprintln!("the wheel hook thread exited: could not install the hook or Raw Input");
+    }
     let want = ENABLED.load(Ordering::SeqCst) && !registry().units.is_empty();
     if want && thread.is_none() {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -203,6 +210,13 @@ mod tests {
     #[test]
     fn disabling_stops_the_thread_and_enabling_restarts_it() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                ENABLED.store(true, Ordering::SeqCst);
+            }
+        }
+        let _restore = Restore;
         let wheel = Wheel::start(&unit("A"));
         assert!(THREAD.lock().unwrap().is_some());
         set_enabled(false);

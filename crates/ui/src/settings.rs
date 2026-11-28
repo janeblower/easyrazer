@@ -157,7 +157,11 @@ fn keyboard_group(app: &mut App, ui: &mut Ui, s: &AppSettings) {
     });
     row(ui, &app.t("settings.wheelVolume"), Some(&app.t("settings.hints.wheelVolume")), SWITCH, |ui| {
         if let Some(on) = switch(ui, s.wheel_volume, true) {
-            set(app, move |b| b.set_wheel_volume(on));
+            // Turning it off joins the hook thread, which must not stall the window.
+            app.jobs.run(move |b| b.set_wheel_volume(on), |app, r| {
+                app.settings_message = r.err().unwrap_or_default();
+                reload(app);
+            });
         }
     });
 }

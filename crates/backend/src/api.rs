@@ -589,9 +589,10 @@ impl Backend {
     }
 
     pub fn set_wheel_volume(&self, on: bool) -> Result<(), String> {
-        self.update_settings(|s| s.wheel_volume = on)?;
+        let saved = self.update_settings(|s| s.wheel_volume = on);
+        // The value in memory has changed whether or not the file was written.
         wheel::set_enabled(on);
-        Ok(())
+        saved
     }
 
     pub fn set_unverified_writes(&self, on: bool) -> Result<(), String> {
