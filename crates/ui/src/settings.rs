@@ -155,6 +155,11 @@ fn keyboard_group(app: &mut App, ui: &mut Ui, s: &AppSettings) {
             set(app, move |b| b.set_confirm_write(on));
         }
     });
+    row(ui, &app.t("settings.wheelVolume"), Some(&app.t("settings.hints.wheelVolume")), SWITCH, |ui| {
+        if let Some(on) = switch(ui, s.wheel_volume, true) {
+            set(app, move |b| b.set_wheel_volume(on));
+        }
+    });
 }
 
 fn driver_group(app: &mut App, ui: &mut Ui) {
