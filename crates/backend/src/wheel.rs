@@ -5,6 +5,7 @@
 //! `WM_INPUT` of a wheel notch before it calls the hook for it (checked on hardware).
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -32,20 +33,16 @@ struct Registry {
 }
 
 impl Registry {
-    /// Returns the unit's id and whether it is the first, which starts Raw Input.
-    fn add(&mut self, unit: Unit) -> (u64, bool) {
-        let first = self.units.is_empty();
+    fn add(&mut self, unit: Unit) -> u64 {
         self.next += 1;
         self.units.push((self.next, unit));
         self.owners.clear();
-        (self.next, first)
+        self.next
     }
 
-    /// Returns whether no unit is left, which stops Raw Input.
-    fn remove(&mut self, id: u64) -> bool {
+    fn remove(&mut self, id: u64) {
         self.units.retain(|(i, _)| *i != id);
         self.owners.clear();
-        self.units.is_empty()
     }
 
     fn owner(&self, pid: u16, container: Option<&str>) -> Option<u64> {
@@ -64,9 +61,47 @@ impl Registry {
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Mutex::default);
 /// Held across a unit joining or leaving, so a new thread never starts while the old one still owns Raw Input.
 static THREAD: Mutex<Option<(u32, JoinHandle<()>)>> = Mutex::new(None);
+/// Off: the hook and Raw Input stay uninstalled, so Windows does not call us for every mouse event.
+static ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Turns the wheel handling on or off, also while keyboards are running.
+pub fn set_enabled(on: bool) {
+    let mut thread = THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    ENABLED.store(on, Ordering::SeqCst);
+    sync(&mut thread);
+}
+
+/// Starts or stops the hook thread so that it runs exactly while it is enabled and a unit needs it.
+fn sync(thread: &mut Option<(u32, JoinHandle<()>)>) {
+    // The thread ends by itself when the hook or Raw Input could not be installed.
+    if thread.as_ref().is_some_and(|(_, join)| join.is_finished())
+        && let Some((_, join)) = thread.take()
+    {
+        let _ = join.join();
+        eprintln!("the wheel hook thread exited: could not install the hook or Raw Input");
+    }
+    let want = ENABLED.load(Ordering::SeqCst) && !registry().units.is_empty();
+    if want && thread.is_none() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let join = std::thread::spawn(move || {
+            // A thread has no message queue until it first asks for one; without it a WM_QUIT
+            // posted before `run_wheel` gets there fails and the join in `sync` would never return.
+            let _ = tx.send(sys::start_message_queue());
+            let _boost = sys::ThreadBoost::apply();
+            sys::run_wheel(WheelEvents { notch: record, turn });
+        });
+        *thread = Some((rx.recv().unwrap_or(0), join));
+    } else if !want && let Some((tid, join)) = thread.take() {
+        // Posted before the loop starts it stays queued, so the loop still sees it. It can only
+        // fail once the thread has exited, which the join below then returns from at once.
+        sys::quit_thread(tid);
+        let _ = join.join();
+        registry().seen.clear();
+    }
 }
 
 /// One keyboard's share of the wheel handling; the last one dropped stops it.
@@ -77,18 +112,8 @@ pub struct Wheel {
 impl Wheel {
     pub fn start(unit: &Unit) -> Self {
         let mut thread = THREAD.lock().unwrap_or_else(|e| e.into_inner());
-        let (id, first) = registry().add(unit.clone());
-        if first {
-            let (tx, rx) = std::sync::mpsc::channel();
-            let join = std::thread::spawn(move || {
-                // A thread has no message queue until it first asks for one; without it a WM_QUIT
-                // posted before `run_wheel` gets there fails and the join in Drop would never return.
-                let _ = tx.send(sys::start_message_queue());
-                let _boost = sys::ThreadBoost::apply();
-                sys::run_wheel(WheelEvents { notch: record, turn });
-            });
-            *thread = Some((rx.recv().unwrap_or(0), join));
-        }
+        let id = registry().add(unit.clone());
+        sync(&mut thread);
         Self { id }
     }
 }
@@ -96,13 +121,8 @@ impl Wheel {
 impl Drop for Wheel {
     fn drop(&mut self) {
         let mut thread = THREAD.lock().unwrap_or_else(|e| e.into_inner());
-        let last = registry().remove(self.id);
-        if last && let Some((tid, join)) = thread.take() {
-            // Posted before the loop starts it stays queued, so the loop still sees it. It can only
-            // fail once the thread has exited, which the join below then returns from at once.
-            sys::quit_thread(tid);
-            let _ = join.join();
-        }
+        registry().remove(self.id);
+        sync(&mut thread);
     }
 }
 
@@ -188,21 +208,32 @@ mod tests {
     }
 
     #[test]
-    fn raw_input_runs_while_any_unit_remains() {
-        let mut r = Registry::default();
-        let (a, first_a) = r.add(unit("A"));
-        let (b, first_b) = r.add(unit("B"));
-        assert!(first_a && !first_b);
-        assert!(!r.remove(a), "B still needs the registration");
-        assert!(r.remove(b));
-        assert!(r.add(unit("C")).1, "a later unit registers again");
+    fn disabling_stops_the_thread_and_enabling_restarts_it() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                ENABLED.store(true, Ordering::SeqCst);
+            }
+        }
+        let _restore = Restore;
+        let wheel = Wheel::start(&unit("A"));
+        assert!(THREAD.lock().unwrap().is_some());
+        set_enabled(false);
+        assert!(THREAD.lock().unwrap().is_none(), "the hook must go when the setting is off");
+        drop(Wheel::start(&unit("B")));
+        assert!(THREAD.lock().unwrap().is_none(), "a unit starting while off must not install it");
+        set_enabled(true);
+        assert!(THREAD.lock().unwrap().is_some());
+        drop(wheel);
+        assert!(THREAD.lock().unwrap().is_none());
     }
 
     #[test]
     fn a_record_goes_to_the_unit_that_owns_the_device() {
         let mut r = Registry::default();
-        let (a, _) = r.add(unit("A"));
-        let (b, _) = r.add(unit("B"));
+        let a = r.add(unit("A"));
+        let b = r.add(unit("B"));
         assert_eq!(r.owner(0x0266, Some("A")), Some(a));
         assert_eq!(r.owner(0x0266, Some("B")), Some(b));
         assert_eq!(r.owner(0x0266, Some("Z")), None);

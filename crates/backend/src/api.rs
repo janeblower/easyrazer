@@ -23,7 +23,7 @@ use crate::boards::{self, Boards, DevicesView, Hooks};
 use crate::device::{self, Device, Hypershift, HypershiftEdits, LightingState, MacroState, ProfilesView, Status, Written, mm};
 use crate::engine::{self, Sink};
 use crate::settings::{self, CloseAction, DevPanel, DevTraffic, DevWindow, Rapid, Settings, Shared, SnapTap};
-use crate::{autostart, dev, focus, gamepad, i18n, wake};
+use crate::{autostart, dev, focus, gamepad, i18n, wake, wheel};
 
 /// What the backend tells the window without being asked.
 #[derive(Clone, Debug, Serialize)]
@@ -161,6 +161,7 @@ pub struct AppSettings {
     pub dev_mode: bool,
     pub dev_log_size: usize,
     pub unverified_writes: bool,
+    pub wheel_volume: bool,
     pub dev_panel: Option<DevPanel>,
     pub dev_window: Option<DevWindow>,
     pub dev_recent: Vec<String>,
@@ -245,8 +246,10 @@ impl Backend {
     pub fn new() -> Result<(Arc<Self>, Receiver<Event>), String> {
         let (events, rx) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
+        let settings = settings::load();
+        wheel::set_enabled(settings.wheel_volume);
         let backend = Self {
-            settings: Arc::new(Mutex::new(settings::load())),
+            settings: Arc::new(Mutex::new(settings)),
             boards: Boards::new().map_err(|e| e.to_string())?,
             hooks: OnceLock::new(),
             window_ready: Mutex::new(Some(ready_tx)),
@@ -542,6 +545,7 @@ impl Backend {
             dev_mode: s.dev_mode,
             dev_log_size: s.dev_log_size,
             unverified_writes: s.unverified_writes,
+            wheel_volume: s.wheel_volume,
             dev_panel: s.dev_panel,
             dev_window: s.dev_window,
             dev_recent: s.dev_recent,
@@ -582,6 +586,13 @@ impl Backend {
         self.update_settings(|s| s.watch_synapse = on)?;
         wake::wake();
         Ok(())
+    }
+
+    pub fn set_wheel_volume(&self, on: bool) -> Result<(), String> {
+        let saved = self.update_settings(|s| s.wheel_volume = on);
+        // The value in memory has changed whether or not the file was written.
+        wheel::set_enabled(on);
+        saved
     }
 
     pub fn set_unverified_writes(&self, on: bool) -> Result<(), String> {

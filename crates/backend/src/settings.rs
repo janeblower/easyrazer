@@ -175,6 +175,8 @@ pub struct Settings {
     pub dev_log_size: usize,
     /// RAM writes to keyboard models nobody has checked on hardware yet.
     pub unverified_writes: bool,
+    /// In driver mode the keyboard's volume wheel is turned into volume keys; off, no mouse hook is installed.
+    pub wheel_volume: bool,
     /// `None` until the mode is first switched on.
     #[serde(deserialize_with = "lenient")]
     pub dev_panel: Option<DevPanel>,
@@ -205,6 +207,7 @@ impl Default for Settings {
             dev_mode: false,
             dev_log_size: DEV_LOG_SIZE,
             unverified_writes: false,
+            wheel_volume: true,
             dev_panel: None,
             dev_window: None,
             dev_recent: Vec::new(),
@@ -627,6 +630,12 @@ mod tests {
     }
 
     #[test]
+    fn wheel_volume_defaults_to_on_for_old_files() {
+        assert!(parse("{\"confirm_write\": false}").wheel_volume);
+        assert!(!parse("{\"wheel_volume\": false}").wheel_volume);
+    }
+
+    #[test]
     fn round_trips() {
         let s = Settings {
             devices: [(
@@ -655,6 +664,7 @@ mod tests {
             language: Some("ru".into()),
             dev_mode: true,
             dev_log_size: 2000,
+            wheel_volume: false,
             unverified_writes: true,
             dev_panel: Some(DevPanel { open: false, dock: Dock::Bottom, size: 300 }),
             dev_window: Some(DevWindow { x: 10.0, y: 20.0, w: 800.0, h: 600.0 }),
