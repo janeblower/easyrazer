@@ -1197,6 +1197,32 @@ mod tests {
     }
 
     #[test]
+    fn snap_releases_the_old_key_before_pressing_the_new_one_whatever_the_group_order() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        assert_eq!(e.feed_depth(&depth(&[(D, 150)]), t), [key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(D, 150), (A, 150)]), t), [key(D, false), key(A, true)]);
+    }
+
+    #[test]
+    fn snap_off_types_all_held_keys_of_a_group_in_listed_order() {
+        let (mut e, t) = (snapped(&[A, S, D], SnapRule::Last), Instant::now());
+        e.cfg.snap_on = false;
+        assert_eq!(e.feed_depth(&depth(&[(D, 150), (S, 150), (A, 150)]), t), [key(A, true), key(S, true), key(D, true)]);
+        assert_eq!(e.feed_depth(&depth(&[(S, 150)]), t), [key(A, false), key(D, false)]);
+    }
+
+    #[test]
+    fn snap_skips_a_key_that_went_down_in_the_fn_layer() {
+        let (mut e, t) = (snapped(&[A, D], SnapRule::Last), Instant::now());
+        e.feed_razer(&[RAZER_FN]);
+        e.feed_depth(&depth(&[(A, 150)]), t);
+        e.feed_razer(&[]);
+        let out = e.feed_depth(&depth(&[(A, 150), (D, 150)]), t);
+        assert_eq!(out, [key(D, true)]);
+        assert!(e.feed_depth(&depth(&[(A, 150), (D, 150)]), t).is_empty());
+    }
+
+    #[test]
     fn snap_rules_in_json() {
         let g: SnapGroup = serde_json::from_str(r#"{"keys": [31, 33], "rule": "deeper"}"#).unwrap();
         assert_eq!(g, SnapGroup { keys: vec![A, D], rule: SnapRule::Deeper });
